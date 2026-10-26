@@ -10,7 +10,14 @@ Save videos from YouTube, X, TikTok and more.
 `images/Video/Download Video.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Paste-a-link input (`LinkWorkspace`). No processing is implemented and there is no API or network access.
+Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (argument builder + output parser, pure), `YtDlpDownloader` (Process runner, `YtDlpLocator` finds/installs the binary), `DownloadVideoModel` (queue, shared singleton), `DownloadVideoView`. Unit tests in `Tests/ToolboxTests/`.
+
+- yt-dlp is looked up in: `$TOOLBOX_YTDLP`, app bundle, `~/Library/Application Support/Toolbox/bin/yt-dlp`, Homebrew. If missing, the view offers "Install yt-dlp" (downloads the official release from GitHub).
+- ffmpeg is looked up in the bundle and Homebrew; without it only ready-made MP4s can be saved.
+- Each batch saves to `~/Downloads/Toolbox Videos <date time>/`.
+- Integration test (network, opt-in): `TOOLBOX_YTDLP=... TOOLBOX_TEST_URL=<link> swift test --filter Integration`.
+- Release app: `scripts/fetch-tools.sh` (downloads yt-dlp with checksum, builds LGPL static ffmpeg + ffprobe into `build/tools/`), then `scripts/make-app.sh` (assembles, signs and zips `dist/Toolbox.app`). Set `SIGN_IDENTITY` and notarize for distribution. Licenses: `THIRD_PARTY_NOTICES.md`.
+- The bundled yt-dlp goes stale; "Update yt-dlp" (in the YouTube failure alert) saves a newer copy to Application Support, and the newer of the two files wins.
 
 ## Sub-features / options to build
 - Paste one or more links (Paste button reads clipboard)

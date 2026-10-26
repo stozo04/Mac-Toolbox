@@ -45,29 +45,6 @@ struct DropZone: View {
     }
 }
 
-struct LinkWorkspace: View {
-    @State private var link = ""
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 12) {
-                HStack {
-                    Image(systemName: "link").foregroundStyle(Theme.accent)
-                    TextField("Paste a video link", text: $link).textFieldStyle(.plain)
-                    Button("Paste") {
-                        link = NSPasteboard.general.string(forType: .string) ?? link
-                    }
-                    Button("Download") {}.disabled(link.isEmpty)
-                }
-                .padding(12).cardBackground(corner: 16)
-                placeholder("Paste a Link", "Works with YouTube, X, TikTok, Instagram, Vimeo and more.", "link")
-            }
-            OptionsPanel(note: "Applies to every download.")
-                .frame(width: 240)
-        }
-    }
-}
-
 struct LiveWorkspace: View {
     let symbol: String
     let idle: String
@@ -122,15 +99,4 @@ struct OptionsPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(16).cardBackground(corner: 24)
     }
-}
-
-@ViewBuilder
-private func placeholder(_ title: String, _ hint: String, _ symbol: String) -> some View {
-    VStack(spacing: 8) {
-        Image(systemName: symbol).font(.system(size: 30)).foregroundStyle(.secondary)
-        Text(title).font(.headline)
-        Text(hint).font(.caption).foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .cardBackground(corner: 24)
 }
