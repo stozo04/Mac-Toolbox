@@ -10,15 +10,13 @@ Measure download, upload and responsiveness with Apple's own network test.
 `images/Mac/Network Speed Test.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Live tool with options panel on the left and status/action on the right (`LiveWorkspace`). No processing is implemented and there is no API or network access.
-
-## Sub-features / options to build
-- Download/upload Mbps, responsiveness (RPM), idle latency
-- Gauge UI
+Built. Code is in `Sources/Toolbox/Tools/Mac/NetworkSpeedTest/`:
+- `NetworkSpeedTestView` / `NetworkSpeedTestModel` - log-scale gauge (1 Mbps to 1 Gbps), Upload / Responsiveness / Latency tiles, a plain-language verdict, history (last 20 tests, kept in UserDefaults) and a mode choice (download and upload together, or one after the other).
+- `SpeedResult` / `NetworkQuality` - runs `/usr/bin/networkQuality -c [-s]` through `Shell` and parses its JSON (throughput is bits per second; responsiveness in RPM: under 200 Low, under 1000 Medium, above High). Uses the network, as this tool's README allows.
+- Tests: `MacNetworkTests.swift` (parser on a real result; an opt-in live run with `TOOLBOX_LIVE_NET=1`).
 
 ## Implementation notes for an agent
 - `/usr/bin/networkQuality` via Process.
-- Put the tool's logic in `Sources/Toolbox/Tools/Mac/NetworkSpeedTest/` and swap `ToolWorkspace` for a dedicated view when the tool needs more than the generic empty state.
 - Everything runs on device; never modify the original file (write a new output next to it or to a chosen folder).
 - Match the screenshot: dark cards, `Theme` colors, options panel width 240, rounded `cardBackground`.
 - Keep UI state in a per-tool `@Observable` model; keep processing in a separate service type so it is testable without UI.

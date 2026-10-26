@@ -5,7 +5,7 @@ Quick orientation for any coding agent working in this repo.
 ## What this is
 Toolbox: a native macOS app (SwiftUI, macOS 14+, Swift Package Manager) that bundles many small utilities (video, audio, images, docs, text & speech, files, Mac, developer) in one window. Everything is meant to run on device. The designs are screenshots in `images/` (`images/All.png` is the home screen).
 
-**Current state:** navigation, catalog, theme (dark/light toggle), logging and generic empty-state workspaces exist. Five tools are built: Download Video, Record Screen, Trim Video, Video to GIF and Resize Video (code in `Sources/Toolbox/Tools/Video/`; each routes from `ToolWorkspace` through its own `ToolInput` case). Every other tool still shows the generic empty state and does not process anything. Building a dedicated, design-accurate view per tool is the main remaining work. Network code exists only for Download Video and the `Log` sink.
+**Current state:** navigation, catalog, theme (dark/light toggle), logging and generic empty-state workspaces exist. Nineteen tools are built: five in Video (Download Video, Record Screen, Trim Video, Video to GIF, Resize Video; code in `Sources/Toolbox/Tools/Video/`, each routed from `ToolWorkspace` through its own `ToolInput` case) and all fourteen in Mac (code in `Sources/Toolbox/Tools/Mac/<Tool>/`, routed through the single `ToolInput.mac(MacTool)` case and `MacToolView`; shared pieces are `Tools/Mac/MacUI.swift`, `Support/Shell.swift`, `Support/SystemDefaults.swift`, `Support/CodeSignInfo.swift`, `Support/DirectorySize.swift`). Every other tool still shows the generic empty state and does not process anything. Building a dedicated, design-accurate view per tool is the main remaining work. Network code exists only for Download Video, Network Speed Test (Apple's `networkQuality`) and the `Log` sink.
 
 ## Run / build
 ```
@@ -29,9 +29,9 @@ swift run Toolbox
 
 ## Rules
 - On device only; no network/API calls unless a tool's README says otherwise (Download Video, Network Speed Test). The one app-wide exception is `Log` (see `Support/Logging/`), which may send warning+ events to Supabase (all Supabase SQL objects are prefixed `macToolKit_`, see supabase/migrations/). Never put links, file names or file contents in a log message or metadata.
-- Never modify original user files; write new output.
+- Never modify original user files; write new output. The Mac tools are the deliberate exception: they change system state (Hidden Settings, Presentation Mode, Login Items, Fix "App Is Damaged", Reset Permissions, Uninstall App, Storage Explorer). They never use `sudo`, send removals to the Trash (only the Trash itself is deleted for good, after a confirmation), and ask before anything that weakens a macOS safety check.
 - Match the screenshots: dark cards, rounded corners, options panel ~240pt.
-- Known gaps: Docs has 13 of 22 tools identified, Developer 4 of 8 (the design shows 87 total; the catalog has 74). 17 tools lack a screenshot; their README says so.
+- Known gaps: Docs has 13 of 22 tools identified, Developer 4 of 8 (the design shows 87 total; the catalog has 73: Battery Health was dropped on purpose). 17 tools lack a screenshot; their README says so.
 - `features/Video/*.md` are the original one-line specs, kept for reference.
 
 ## Tool index
@@ -112,7 +112,6 @@ swift run Toolbox
 
 ### Mac ([overview](features/Mac/README.md))
 
-- [Battery Health](features/Mac/Battery%20Health/README.md) - See your Mac's battery capacity, cycle count and charger, plus AirPods and accessory levels.
 - [Clean Keyboard](features/Mac/Clean%20Keyboard/README.md) - Pause the keyboard for a minute so you can wipe the keys without typing gibberish.
 - [Display Control](features/Mac/Display%20Control/README.md) - Change the brightness, contrast and volume of external monitors, right from your Mac.
 - [Eject All Disks](features/Mac/Eject%20All%20Disks/README.md) - Safely eject every external drive, card and disk image at once before you unplug.

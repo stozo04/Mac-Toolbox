@@ -6,7 +6,6 @@ Free up space and fix what is stuck
 - [Network Speed Test](./Network Speed Test/README.md) - Measure download, upload and responsiveness with Apple's own network test.
 - [Storage Explorer](./Storage Explorer/README.md) - See what's filling your disk, find the usual space hogs and clear them out safely.
 - [Wi-Fi Password & QR](./Wi-Fi Password & QR/README.md) - Show the password of a saved Wi-Fi network and make a QR code guests can scan to join.
-- [Battery Health](./Battery Health/README.md) - See your Mac's battery capacity, cycle count and charger, plus AirPods and accessory levels.
 - [Keep Awake](./Keep Awake/README.md) - Stop your Mac from sleeping during downloads, renders or talks, for as long as you choose.
 - [Uninstall App](./Uninstall App/README.md) - Remove an app together with the caches, preferences and data it leaves behind.
 - [Presentation Mode](./Presentation Mode/README.md) - One switch before you share your screen: hide desktop icons, hide the Dock and stay awake.

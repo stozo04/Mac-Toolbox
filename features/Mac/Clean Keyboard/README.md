@@ -10,15 +10,13 @@ Pause the keyboard for a minute so you can wipe the keys without typing gibberis
 `images/Mac/Clean Keyboard.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Live tool with options panel on the left and status/action on the right (`LiveWorkspace`). No processing is implemented and there is no API or network access.
-
-## Sub-features / options to build
-- Countdown (e.g. 0:42)
-- Unlock early
+Built. Code is in `Sources/Toolbox/Tools/Mac/CleanKeyboard/`:
+- `CleanKeyboardView` / `CleanKeyboardModel` - pause for 30 seconds, 1 or 2 minutes. The screens dim and the main one shows a countdown and a Done button; the countdown ends on its own.
+- `EventTapKeyboardBlocker` - a `CGEventTap` that swallows key down/up, modifier and media-key events. It needs the **Accessibility** permission; without it the screen is never dimmed and the tool shows how to grant it. The mouse, trackpad, power button and Touch ID are not affected.
+- Tests: `MacInputTests.swift` (with a fake blocker; a real tap is created and removed in one synchronous step).
 
 ## Implementation notes for an agent
 - CGEventTap swallowing key events (needs Accessibility/Input Monitoring).
-- Put the tool's logic in `Sources/Toolbox/Tools/Mac/CleanKeyboard/` and swap `ToolWorkspace` for a dedicated view when the tool needs more than the generic empty state.
 - Everything runs on device; never modify the original file (write a new output next to it or to a chosen folder).
 - Match the screenshot: dark cards, `Theme` colors, options panel width 240, rounded `cardBackground`.
 - Keep UI state in a per-tool `@Observable` model; keep processing in a separate service type so it is testable without UI.

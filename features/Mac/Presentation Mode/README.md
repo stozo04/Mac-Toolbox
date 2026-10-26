@@ -10,15 +10,13 @@ One switch before you share your screen: hide desktop icons, hide the Dock and s
 No screenshot yet (check `images/` and add one).
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Live tool with options panel on the left and status/action on the right (`LiveWorkspace`). No processing is implemented and there is no API or network access.
-
-## Sub-features / options to build
-- One switch toggles all
-- Restores previous state
+Built. Code is in `Sources/Toolbox/Tools/Mac/PresentationMode/`:
+- `PresentationModeView` / `PresentationModeModel` - one switch: hides desktop icons (`com.apple.finder CreateDesktop`), hides the Dock (`com.apple.dock autohide`), restarts Finder and the Dock, and holds a Keep Awake assertion. The previous values are saved first (and survive quitting Toolbox), so turning it off restores them exactly, including "was never set".
+- Uses the shared `SystemDefaults` / `ProcessRestarter` (`Support/SystemDefaults.swift`).
+- Tests: `MacPowerTests.swift` (`PresentationModeTests`, with fakes; not run against a real Finder and Dock).
 
 ## Implementation notes for an agent
 - `defaults write com.apple.finder CreateDesktop`, Dock autohide, plus Keep Awake assertion.
-- Put the tool's logic in `Sources/Toolbox/Tools/Mac/PresentationMode/` and swap `ToolWorkspace` for a dedicated view when the tool needs more than the generic empty state.
 - Everything runs on device; never modify the original file (write a new output next to it or to a chosen folder).
 - Match the screenshot: dark cards, `Theme` colors, options panel width 240, rounded `cardBackground`.
 - Keep UI state in a per-tool `@Observable` model; keep processing in a separate service type so it is testable without UI.

@@ -14,7 +14,9 @@ enum ToolInput: Hashable {
     case videoToGif
     /// Queue of videos with size, fit and format options (Resize Video).
     case resizeVideo
-    /// No input file; the tool acts live (Keep Awake, Battery Health...).
+    /// One of the Mac category's native tools (Keep Awake, Hidden Settings...).
+    case mac(MacTool)
+    /// No input file; the tool acts live (Keep Awake...).
     case live(symbol: String, idle: String, action: String)
     /// Free text in, result out (Base64, JSON Formatter...).
     case text

@@ -18,6 +18,7 @@ struct ToolboxApp: App {
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(state.isDark ? .dark : .light)
                 .onAppear {
+                    MacLaunchHooks.run()
                     NSApplication.shared.setActivationPolicy(.regular)
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
