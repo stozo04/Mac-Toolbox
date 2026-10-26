@@ -8,6 +8,8 @@ enum ToolInput: Hashable {
     case link
     /// Display, window or area picker with a record button (Record Screen).
     case recordScreen
+    /// Video preview with a timeline and in/out handles (Trim Video).
+    case trimVideo
     /// No input file; the tool acts live (Keep Awake, Battery Health...).
     case live(symbol: String, idle: String, action: String)
     /// Free text in, result out (Base64, JSON Formatter...).

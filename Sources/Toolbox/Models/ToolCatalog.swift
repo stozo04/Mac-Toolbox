@@ -49,7 +49,7 @@ enum ToolCatalog {
              input: drop("a File", "Drop a video or audio file to inspect.", "doc.badge.gearshape")),
         Tool(name: "Trim Video", category: .video, symbol: "scissors",
              tagline: "Cut the start and end of a clip without re-encoding.",
-             input: drop("a Video", "Drop a video to choose the part you want to keep.", "film")),
+             input: .trimVideo),
         Tool(name: "Merge Videos", category: .video, symbol: "rectangle.stack.badge.plus",
              tagline: "Join several clips into one video, in the order you choose.",
              input: drop("Videos", "Drop several clips to join.", "film")),
