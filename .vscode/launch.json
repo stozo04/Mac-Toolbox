@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Toolbox}",
+            "name": "Debug Toolbox",
+            "target": "Toolbox",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Toolbox"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Toolbox}",
+            "name": "Release Toolbox",
+            "target": "Toolbox",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Toolbox"
+        }
+    ]
+}

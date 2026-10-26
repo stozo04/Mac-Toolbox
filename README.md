@@ -4,7 +4,7 @@
 
 Toolbox puts the small utilities you reach for every day into one app: convert a video, trim a recording, compress photos, sign a PDF, rename a pile of files, keep your Mac awake. Everything runs on your Mac, and your original files are never changed.
 
-> **Status: early preview.** The app's layout, navigation and look are in place, but the tools themselves don't do their jobs yet. You can browse every tool and open its page; processing is being built tool by tool. See [What works today](#what-works-today).
+> **Status: early preview.** The app's layout, navigation and look are in place, and four tools are fully working: **Download Video**, **Record Screen**, **Trim Video** and **Video to GIF**. The rest can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
 
 ## What's inside
 
@@ -36,12 +36,23 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 
 ## What works today
 
+### Working tools
+
+| Tool | What it does |
+|---|---|
+| **Download Video** | Paste one or more links (YouTube, X, TikTok, Instagram, Vimeo and more) and save them to a dated folder in Downloads. Choose best quality, 1080p, 720p or audio only, and prefer H.264 so the files play everywhere. Needs the internet. |
+| **Record Screen** | Record a whole display, a single window, or an area you drag out, with system audio, your microphone (mixed into one track), the pointer, and highlighted clicks. Saves H.264 MOV or MP4 at Native, 1440p, 1080p or 720p and 30 or 60 fps. A floating timer and Stop bar stays out of the recording. Files are saved to Downloads. |
+| **Trim Video** | Drop a video, drag the start and end handles on a filmstrip timeline (or set them to the playhead, or type a time), preview the selection, and save a `(Trimmed)` copy to a dated folder in Downloads. The video is copied without re-encoding whenever the format allows, so quality doesn't change. |
+| **Video to GIF** | Drop one or more videos (or a whole folder), choose 10, 15 or 24 fps and a width of 320, 480, 640 pixels or the original size, and decide whether the GIF loops forever. Optionally convert only a part of each video by setting a start time and duration. GIFs are saved to a dated folder in Downloads; videos are never enlarged. |
+
+### The app itself
+
 | Works now | Not built yet |
 |---|---|
-| Browsing all categories and tools | Actually processing files (converting, trimming, compressing...) |
-| Search, favorites, recent tools | Most tool-specific controls and previews |
-| Light / dark mode switch | Saving your favorites and settings between launches |
-| Opening a tool page, choosing or dropping a file | The remaining Docs and Developer tools |
+| Browsing all categories and tools | The other 70 or so tools: they open to an empty page and don't process files yet |
+| Search, favorites, recent tools | Saving your favorites and settings between launches |
+| Light / dark mode switch | The remaining Docs and Developer tools |
+| Download Video, Record Screen, Trim Video, Video to GIF | A global hotkey for Record Screen |
 
 ## Requirements
 
@@ -56,11 +67,13 @@ Open Terminal in the project folder and run:
 swift run Toolbox
 ```
 
-The first run takes a minute to build. To quit, press **⌘Q**.
+The first run takes a minute to build. To quit, press **⌘Q**. To open a tool straight away, add `--page`, for example `swift run Toolbox --page "Video/Trim Video"`.
+
+To build the packaged app (a universal `Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`.
 
 ## Permissions you may be asked for
 
-Once tools are working, macOS will ask for permission the first time a tool needs it, such as Screen Recording (Record Screen), Microphone (Record Audio), or Accessibility (Clean Keyboard). You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
+macOS asks for permission the first time a tool needs it. Today that means **Screen Recording** for Record Screen, and **Microphone** only if you turn on the microphone there. Later tools will ask for more, such as Microphone (Record Audio) or Accessibility (Clean Keyboard). When you run with `swift run`, macOS lists your terminal app in these prompts rather than Toolbox. You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
 
 ## Feedback
 

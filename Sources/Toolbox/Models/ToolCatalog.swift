@@ -61,7 +61,7 @@ enum ToolCatalog {
              input: drop("a Video", "Drop a video, then choose the new audio.", "film")),
         Tool(name: "Video to GIF", category: .video, symbol: "livephoto",
              tagline: "Turn a clip into an animated GIF.",
-             input: drop("a Video", "Drop a video to turn into a GIF.", "film")),
+             input: .videoToGif),
     ]
 
     // MARK: Audio

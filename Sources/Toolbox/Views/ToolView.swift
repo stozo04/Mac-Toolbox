@@ -43,6 +43,8 @@ struct ToolWorkspace: View {
             RecordScreenView()
         case .trimVideo:
             TrimVideoView()
+        case .videoToGif:
+            VideoToGifView()
         case .live(let symbol, let idle, let action):
             LiveWorkspace(symbol: symbol, idle: idle, action: action)
         case .text:

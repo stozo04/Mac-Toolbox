@@ -10,13 +10,12 @@ Cut the start and end of a clip without re-encoding.
 `images/Video/Trim Video.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. Code is in `Sources/Toolbox/Tools/Video/TrimVideo/`:
+- `TrimVideoView` / `TrimVideoModel` - UI and state (shared model, so an open clip survives switching tools): preview player, filmstrip timeline with two handles and a playhead, Start/End fields, Play Selection.
+- `VideoTrimmer` - `AVAssetExportSession` with the passthrough preset and `timeRange`; falls back to a highest-quality re-encode when the format can't be copied. Output is `<name> (Trimmed).<ext>` in a dated `Toolbox Videos ...` folder in Downloads.
+- `TrimSelection` - start/end clamping (handles never cross); `TrimTime` - time formatting and parsing.
 
-## Sub-features / options to build
-- Filmstrip timeline with two draggable handles
-- In/out time fields
-- Playback preview of selection
-- Re-encode fallback if keyframes do not align
+The screenshot only shows the empty state, so the loaded layout is designed in the same style as Record Screen.
 
 ## Implementation notes for an agent
 - AVAssetExportSession with `timeRange` and `AVAssetExportPresetPassthrough` (no re-encode).

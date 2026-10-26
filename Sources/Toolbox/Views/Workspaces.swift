@@ -7,6 +7,7 @@ struct DropZone: View {
     let symbol: String
     /// Called with the chosen or dropped files. Tools that handle input themselves use this.
     var allowsMultiple = true
+    var allowsFolders = false
     var onFiles: (([URL]) -> Void)?
     @State private var targeted = false
     @State private var files: [URL] = []
@@ -44,6 +45,7 @@ struct DropZone: View {
     private func chooseFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = allowsMultiple
+        panel.canChooseDirectories = allowsFolders
         if panel.runModal() == .OK { files = panel.urls; onFiles?(panel.urls) }
     }
 }

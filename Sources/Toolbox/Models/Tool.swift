@@ -10,6 +10,8 @@ enum ToolInput: Hashable {
     case recordScreen
     /// Video preview with a timeline and in/out handles (Trim Video).
     case trimVideo
+    /// Queue of videos with frame rate and width options (Video to GIF).
+    case videoToGif
     /// No input file; the tool acts live (Keep Awake, Battery Health...).
     case live(symbol: String, idle: String, action: String)
     /// Free text in, result out (Base64, JSON Formatter...).

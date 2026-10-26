@@ -5,7 +5,7 @@ Quick orientation for any coding agent working in this repo.
 ## What this is
 Toolbox: a native macOS app (SwiftUI, macOS 14+, Swift Package Manager) that bundles many small utilities (video, audio, images, docs, text & speech, files, Mac, developer) in one window. Everything is meant to run on device. The designs are screenshots in `images/` (`images/All.png` is the home screen).
 
-**Current state: skeleton only.** Navigation, catalog, theme (dark/light toggle) and generic empty-state workspaces exist. No tool actually processes anything, and there is no API or network code. Most tool pages do not yet match their screenshot; building a dedicated, design-accurate view per tool is the main remaining work.
+**Current state:** navigation, catalog, theme (dark/light toggle), logging and generic empty-state workspaces exist. Four tools are built: Download Video, Record Screen, Trim Video and Video to GIF (code in `Sources/Toolbox/Tools/Video/`; each routes from `ToolWorkspace` through its own `ToolInput` case). Every other tool still shows the generic empty state and does not process anything. Building a dedicated, design-accurate view per tool is the main remaining work. Network code exists only for Download Video and the `Log` sink.
 
 ## Run / build
 ```
