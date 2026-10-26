@@ -34,7 +34,7 @@ enum ToolCatalog {
              input: drop("Videos", "Drop videos to convert.", "film")),
         Tool(name: "Record Screen", category: .video, symbol: "record.circle",
              tagline: "Record a display, a window or an area, with sound.",
-             input: .live(symbol: "record.circle", idle: "Choose what to record.", action: "Start Recording")),
+             input: .recordScreen),
         Tool(name: "Compress Video", category: .video, symbol: "arrow.down.right.and.arrow.up.left",
              tagline: "Shrink video files while keeping them looking great.",
              input: drop("Videos", "Drop videos to shrink.", "film")),

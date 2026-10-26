@@ -48,6 +48,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Toolbox records your voice with a screen recording when you turn on Microphone.</string>
 </dict>
 </plist>
 PLIST
@@ -58,7 +59,7 @@ sign() { codesign --force --sign "$IDENTITY" --options runtime ${TIMESTAMP:+--ti
 sign --entitlements "$ROOT/scripts/helpers.entitlements" "$APP/Contents/Resources/yt-dlp"
 sign "$APP/Contents/Resources/ffmpeg"
 sign "$APP/Contents/Resources/ffprobe"
-sign "$APP"
+sign --entitlements "$ROOT/scripts/app.entitlements" "$APP"
 codesign --verify --deep --strict "$APP"
 
 ( cd "$ROOT/dist" && rm -f Toolbox.zip && ditto -c -k --keepParent Toolbox.app Toolbox.zip )

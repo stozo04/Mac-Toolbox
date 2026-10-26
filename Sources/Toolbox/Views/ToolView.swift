@@ -39,6 +39,8 @@ struct ToolWorkspace: View {
             DropZone(title: title, hint: hint, symbol: symbol)
         case .link:
             DownloadVideoView()
+        case .recordScreen:
+            RecordScreenView()
         case .live(let symbol, let idle, let action):
             LiveWorkspace(symbol: symbol, idle: idle, action: action)
         case .text:

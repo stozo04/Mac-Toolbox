@@ -10,14 +10,16 @@ Record a display, a window or an area, with sound.
 `images/Video/Record Screen.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Live tool with options panel on the left and status/action on the right (`LiveWorkspace`). No processing is implemented and there is no API or network access.
+Built. Code is in `Sources/Toolbox/Tools/Video/RecordScreen/`:
+- `RecordScreenView` / `RecordScreenModel` - UI and state (shared model, so a recording survives switching tools).
+- `ScreenRecorder` - SCStream + AVAssetWriter (H.264, AAC), system audio from SCStream, microphone from AVCaptureSession, one serial queue.
+- `AudioMixer` - mixes system audio and microphone into one stereo track. `RecordingOptions` - settings, output size and bitrate maths.
+- `ClickHighlighter` - paints click rings into frames, so it also works for window capture.
+- `AreaSelector` (drag overlay), `RecordingControlPanel` (floating timer + Stop, hidden from capture), `CaptureSources` (displays, windows, thumbnails).
 
-## Sub-features / options to build
-- Capture a display, a window or an area
-- System audio and microphone toggles
-- Resolution and fps (e.g. 4K 60 fps)
-- Floating control with timer and stop
-- Countdown, hotkey
+Saved to Downloads as `Toolbox Screen Recording <date>.mov|mp4`. Needs Screen Recording permission; Microphone permission only when that toggle is on. The packaged app needs `NSMicrophoneUsageDescription` and the audio-input entitlement (`scripts/app.entitlements`).
+
+Not built: global hotkey.
 
 ## Implementation notes for an agent
 - ScreenCaptureKit (SCStream) + AVAssetWriter; needs Screen Recording and optionally Microphone permission.
