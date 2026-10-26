@@ -4,6 +4,7 @@ import Observation
 enum Page: Hashable {
     case home
     case category(ToolCategory)
+    case models
     case tool(Tool)
 }
 
@@ -21,6 +22,8 @@ final class AppState {
         let target = arguments[i + 1]
         if let tool = ToolCatalog.tool(id: target) {
             page = .tool(tool)
+        } else if target == "AI Models" {
+            page = .models
         } else if let category = ToolCategory(rawValue: target) {
             page = .category(category)
         }

@@ -5,7 +5,7 @@ struct TopBar: View {
 
     private var selectedCategory: ToolCategory? {
         switch state.page {
-        case .home: nil
+        case .home, .models: nil
         case .category(let c): c
         case .tool(let t): t.category
         }
@@ -21,10 +21,11 @@ struct TopBar: View {
             }
             Spacer()
             HStack(spacing: 2) {
-                pill("All", active: state.page == .home && selectedCategory == nil) { state.page = .home }
+                pill("All", active: state.page == .home) { state.page = .home }
                 ForEach(ToolCategory.allCases) { c in
                     pill(c.rawValue, active: selectedCategory == c) { state.page = .category(c) }
                 }
+                pill("AI Models", active: state.page == .models) { state.page = .models }
             }
             .padding(3)
             .background(Capsule().fill(Theme.tint.opacity(0.05)))
