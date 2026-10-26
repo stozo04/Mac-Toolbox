@@ -4,3 +4,5 @@
 !.env.example
 .build/
 .swiftpm/
+build/
+dist/
