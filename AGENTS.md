@@ -28,7 +28,7 @@ swift run Toolbox
 4. Run the app and compare against the screenshot (window-only screenshot: `screencapture -l<windowID>`; do not capture the full screen).
 
 ## Rules
-- On device only; no network/API calls unless a tool's README says otherwise (Download Video, Network Speed Test).
+- On device only; no network/API calls unless a tool's README says otherwise (Download Video, Network Speed Test). The one app-wide exception is `Log` (see `Support/Logging/`), which may send warning+ events to Supabase (all Supabase SQL objects are prefixed `macToolKit_`, see supabase/migrations/). Never put links, file names or file contents in a log message or metadata.
 - Never modify original user files; write new output.
 - Match the screenshots: dark cards, rounded corners, options panel ~240pt.
 - Known gaps: Docs has 13 of 22 tools identified, Developer 4 of 8 (the design shows 87 total; the catalog has 74). 17 tools lack a screenshot; their README says so.

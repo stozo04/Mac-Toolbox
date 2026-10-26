@@ -4,6 +4,13 @@ import SwiftUI
 struct ToolboxApp: App {
     @State private var state = AppState()
 
+    init() {
+        var sinks: [LogSink] = [ConsoleLogSink()]
+        if let config = SupabaseLogConfig.load() { sinks.append(SupabaseLogSink(config: config)) }
+        Log.configure(sinks: sinks)
+        Log.info("App launched", category: "app")
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
