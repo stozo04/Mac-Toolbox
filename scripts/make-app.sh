@@ -29,6 +29,7 @@ echo "==> assembling $APP"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Licenses"
 cp "$BIN" "$APP/Contents/MacOS/Toolbox"
 for t in yt-dlp ffmpeg ffprobe; do cp "$TOOLS/$t" "$APP/Contents/Resources/$t"; done
+cp "$ROOT/scripts/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/Licenses/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -40,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Toolbox</string>
   <key>CFBundleIdentifier</key><string>com.toolbox.app</string>
   <key>CFBundleExecutable</key><string>Toolbox</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
