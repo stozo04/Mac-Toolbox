@@ -40,7 +40,7 @@ enum GifConverter {
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
 
-        let output = uniqueURL(in: folder, name: source.deletingPathExtension().lastPathComponent)
+        let output = BatchFiles.uniqueURL(in: folder, name: source.deletingPathExtension().lastPathComponent, ext: "gif")
         guard let destination = CGImageDestinationCreateWithURL(output as CFURL, UTType.gif.identifier as CFString, times.count, nil)
         else { throw GifError.writeFailed }
         // Loop count 0 repeats forever; leaving the key out makes the GIF play once.
@@ -65,16 +65,5 @@ enum GifConverter {
             throw error
         }
         return output
-    }
-
-    /// "Clip.gif", or "Clip 2.gif" when two videos share a name.
-    static func uniqueURL(in folder: URL, name: String) -> URL {
-        var url = folder.appendingPathComponent(name + ".gif")
-        var n = 2
-        while FileManager.default.fileExists(atPath: url.path) {
-            url = folder.appendingPathComponent("\(name) \(n).gif")
-            n += 1
-        }
-        return url
     }
 }

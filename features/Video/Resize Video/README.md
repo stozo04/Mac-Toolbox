@@ -10,12 +10,16 @@ Change the dimensions of videos to an exact size.
 `images/Video/Resize Video.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. Code is in `Sources/Toolbox/Tools/Video/ResizeVideo/`:
+- `ResizeVideoView` / `ResizeVideoModel` - UI and state (shared model, so the queue survives switching tools): drop zone (files or folders), a queue with per-file progress and size, and the 240pt options panel (size preset or custom width/height with swap, keep aspect ratio with Add black bars / Crop to fill / Fit within size, format H.264 or HEVC). Presets and the width/height fields stay in sync.
+- `VideoResizer` - `AVMutableVideoComposition` (`renderSize` plus a scaling/translation transform that includes the track's `preferredTransform`) exported with `AVAssetExportSession` as MP4. Output is `<name> (WxH).mp4` in a dated `Toolbox Videos ...` folder in Downloads.
+- `ResizeSettings` / `ResizePlan` - pure layout logic: even-size rounding, bars, crop, fit-within, stretch.
 
-## Sub-features / options to build
-- Presets (4K, 1080p, 720p...) or exact width x height
-- Lock aspect ratio
-- Fit / fill / pad
+Shared helpers (folder scanning, dated output folder, unique names) live in `Sources/Toolbox/Support/BatchFiles.swift`, also used by Video to GIF.
+
+Tests: `Tests/ToolboxTests/ResizeVideoTests.swift` (layout maths, preset sync, a real resize in both codecs, and a pixel check of the black bars).
+
+Unlike Video to GIF, videos can be enlarged, since the goal is an exact size.
 
 ## Implementation notes for an agent
 - AVMutableVideoComposition `renderSize` + scaling transform.

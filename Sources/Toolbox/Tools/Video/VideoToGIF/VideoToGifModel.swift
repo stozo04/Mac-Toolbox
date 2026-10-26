@@ -56,7 +56,7 @@ final class VideoToGifModel {
         var skipped = 0
         for url in urls {
             let before = found.count
-            found += Self.videos(in: url)
+            found += BatchFiles.videos(in: url)
             if found.count == before { skipped += 1 }
         }
         let known = Set(items.map(\.url))
@@ -82,23 +82,13 @@ final class VideoToGifModel {
         items.removeAll { if case .done = $0.status { true } else { false } }
     }
 
-    private static func videos(in url: URL) -> [URL] {
-        let isVideo = { (u: URL) in (try? u.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .movie) ?? false }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return [] }
-        if !isDirectory.boolValue { return isVideo(url) ? [url] : [] }
-        let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.contentTypeKey],
-                                                    options: [.skipsHiddenFiles, .skipsPackageDescendants])
-        return (walker?.compactMap { $0 as? URL } ?? []).filter(isVideo).sorted { $0.path < $1.path }
-    }
-
     // MARK: Converting
 
     func convert() {
         guard !isRunning, hasPending, let settings else { return }
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        let folder = self.folder ?? Self.makeFolder()
+        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox GIFs")
         self.folder = folder
         task = Task { [weak self] in
             guard let self else { return }
@@ -135,15 +125,4 @@ final class VideoToGifModel {
     func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
 
     func revealFolder() { if let folder { NSWorkspace.shared.open(folder) } }
-
-    /// A new dated folder in Downloads for each batch, e.g. "Toolbox GIFs 2026-10-26 14.30.05".
-    private static func makeFolder() -> URL {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let dir = downloads.appendingPathComponent("Toolbox GIFs \(f.string(from: Date()))")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 }

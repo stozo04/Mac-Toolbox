@@ -40,7 +40,7 @@ enum ToolCatalog {
              input: drop("Videos", "Drop videos to shrink.", "film")),
         Tool(name: "Resize Video", category: .video, symbol: "arrow.up.left.and.arrow.down.right",
              tagline: "Change the dimensions of videos to an exact size.",
-             input: drop("Videos", "Drop videos to resize.", "film")),
+             input: .resizeVideo),
         Tool(name: "Crop & Rotate Video", category: .video, symbol: "crop.rotate",
              tagline: "Crop, rotate and flip a video.",
              input: drop("a Video", "Drop a video to crop or rotate.", "film")),
