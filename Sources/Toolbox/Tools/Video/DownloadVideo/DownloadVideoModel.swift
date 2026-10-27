@@ -37,6 +37,7 @@ final class DownloadVideoModel {
     static let shared = DownloadVideoModel()
 
     enum ToolStatus: Equatable { case checking, ready, missing, installing, installFailed(String) }
+    enum SendState: Equatable { case idle, sending, sent(copied: Int, skipped: Int), failed(String) }
 
     var linkText = ""
     var options = DownloadOptions()
@@ -44,6 +45,7 @@ final class DownloadVideoModel {
     private(set) var toolStatus: ToolStatus = .checking
     private(set) var hasFFmpeg = false
     private(set) var folder: URL?
+    private(set) var sendState: SendState = .idle
     /// Set when a YouTube link fails; the view shows it as an alert.
     var alert: DownloadAlert?
 
@@ -54,8 +56,17 @@ final class DownloadVideoModel {
     var pendingLinks: [URL] { Self.links(in: linkText) }
     var canStart: Bool { toolStatus == .ready && !pendingLinks.isEmpty && !isRunning }
     var finishedCount: Int { items.filter { if case .done = $0.state { true } else { false } }.count }
+    var finishedFiles: [URL] { items.compactMap { if case .done(let file) = $0.state { file } else { nil } } }
+    var canSend: Bool { !finishedFiles.isEmpty && !isRunning && sendState != .sending }
 
-    init(downloader: Downloader? = nil) {
+    private let saveFolder: URL
+    private let trash: (URL) throws -> Void
+
+    /// `saveFolder` and `trash` are injectable so tests never touch the real Downloads folder.
+    init(downloader: Downloader? = nil, saveFolder: URL = DownloadVideoModel.downloadsFolder,
+         trash: @escaping (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) {
+        self.saveFolder = saveFolder
+        self.trash = trash
         if let downloader {
             self.downloader = downloader
             toolStatus = .ready
@@ -103,8 +114,9 @@ final class DownloadVideoModel {
         guard canStart, let downloader else { return }
         let urls = pendingLinks
         linkText = ""
-        let batchFolder = Self.makeFolder()
-        folder = batchFolder
+        sendState = .idle
+        let destination = saveFolder
+        folder = destination
         let ids = urls.map { url -> UUID in
             let item = DownloadItem(url: url)
             items.append(item)
@@ -114,7 +126,7 @@ final class DownloadVideoModel {
         runTask = Task { [weak self] in
             for id in ids {
                 guard let self else { return }
-                await self.run(id: id, downloader: downloader, options: options, folder: batchFolder)
+                await self.run(id: id, downloader: downloader, options: options, folder: destination)
             }
             self?.runTask = nil
         }
@@ -122,10 +134,32 @@ final class DownloadVideoModel {
 
     func cancel() { runTask?.cancel() }
 
+    /// Clears the list and moves the files this tool downloaded to the Trash (nothing else in the folder).
+    /// A file that can't be trashed, or is already gone, is left alone.
     func clearFinished() {
         guard !isRunning else { return }
+        for file in finishedFiles { try? trash(file) }
         items.removeAll()
         folder = nil
+        sendState = .idle
+    }
+
+    /// Copies every finished download to the Google Drive folder.
+    func sendToGoogle() {
+        guard canSend else { return }
+        let files = finishedFiles
+        sendState = .sending
+        Task {
+            do {
+                let result = try await Task.detached { try DriveSender.send(files) }.value
+                sendState = .sent(copied: result.copied, skipped: result.skipped)
+                Log.info("Sent to Google Drive", category: "download",
+                         ["copied": String(result.copied), "skipped": String(result.skipped)])
+            } catch {
+                sendState = .failed(error.localizedDescription)
+                Log.warning("Send to Google Drive failed", category: "download", ["reason": error.localizedDescription])
+            }
+        }
     }
 
     func reveal(_ item: DownloadItem) {
@@ -174,13 +208,8 @@ final class DownloadVideoModel {
         change(&items[i])
     }
 
-    /// A new dated folder in Downloads for each batch, e.g. "Toolbox Videos 2026-10-26 14.30.05".
-    private static func makeFolder() -> URL {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let dir = downloads.appendingPathComponent("Toolbox Videos \(f.string(from: Date()))")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+    /// Every batch saves straight into the user's Downloads folder.
+    nonisolated static var downloadsFolder: URL {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
     }
 }

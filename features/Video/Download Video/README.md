@@ -14,7 +14,9 @@ Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (arg
 
 - yt-dlp is looked up in: `$TOOLBOX_YTDLP`, app bundle, `~/Library/Application Support/Toolbox/bin/yt-dlp`, Homebrew. If missing, the view offers "Install yt-dlp" (downloads the official release from GitHub).
 - ffmpeg is looked up in the bundle and Homebrew; without it only ready-made MP4s can be saved.
-- Each batch saves to `~/Downloads/Toolbox Videos <date time>/`.
+- Every batch saves straight into `~/Downloads/`, and "Open Folder" opens it.
+- "Clear" (footer) empties the list and moves the files this tool downloaded to the Trash; other files in Downloads are never touched. Tests inject `saveFolder` and `trash` so they never touch the real Downloads folder.
+- "Send to Google" (footer) copies every finished download to the Google Drive folder `~/Library/CloudStorage/GoogleDrive-gates.steven@gmail.com/Other computers/My Laptop/My Stuff/Kayley/rosie/Videos/verified/` (`DriveSender`). It copies, never moves or overwrites; files already there are skipped; it fails if Drive isn't mounted.
 - Integration test (network, opt-in): `TOOLBOX_YTDLP=... TOOLBOX_TEST_URL=<link> swift test --filter Integration`.
 - Release app: `scripts/fetch-tools.sh` (downloads yt-dlp with checksum, builds LGPL static ffmpeg + ffprobe into `build/tools/`), then `scripts/make-app.sh` (assembles, signs and zips `dist/Toolbox.app`). Set `SIGN_IDENTITY` and notarize for distribution. Licenses: `THIRD_PARTY_NOTICES.md`.
 - The bundled yt-dlp goes stale; "Update yt-dlp" (in the YouTube failure alert) saves a newer copy to Application Support, and the newer of the two files wins.

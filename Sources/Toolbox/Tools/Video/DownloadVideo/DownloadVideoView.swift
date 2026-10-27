@@ -113,6 +113,9 @@ struct DownloadVideoView: View {
             Spacer()
             if !model.items.isEmpty && !model.isRunning {
                 Button("Clear") { model.clearFinished() }
+                    .help("Clears the list and moves the downloaded files to the Trash")
+                Button { model.sendToGoogle() } label: { Label("Send to Google", systemImage: "icloud.and.arrow.up") }
+                    .disabled(!model.canSend)
                 if model.folder != nil { Button("Open Folder") { model.openFolder() } }
             }
             if model.isRunning {
@@ -126,6 +129,14 @@ struct DownloadVideoView: View {
 
     private var footerText: String {
         if model.items.isEmpty { return "" }
+        switch model.sendState {
+        case .idle: break
+        case .sending: return "Sending to Google Drive…"
+        case .sent(let copied, let skipped):
+            return skipped == 0 ? "Sent \(copied) to Google Drive"
+                                : "Sent \(copied) to Google Drive, \(skipped) already there"
+        case .failed(let message): return message
+        }
         return "\(model.finishedCount) of \(model.items.count) saved"
     }
 

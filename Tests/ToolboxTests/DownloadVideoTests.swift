@@ -84,7 +84,7 @@ final class DownloadVideoTests: XCTestCase {
                 return folder.appendingPathComponent("ok.mp4")
             }
         }
-        let model = DownloadVideoModel(downloader: Fake())
+        let model = DownloadVideoModel(downloader: Fake(), saveFolder: FileManager.default.temporaryDirectory)
         model.linkText = "https://good.example.com/1 https://bad.example.com/2"
         model.start()
         while model.isRunning { try await Task.sleep(nanoseconds: 20_000_000) }
@@ -92,7 +92,28 @@ final class DownloadVideoTests: XCTestCase {
         guard case .done = model.items[0].state else { return XCTFail("first should be done") }
         XCTAssertEqual(model.items[1].state, .failed("Video unavailable"))
         XCTAssertEqual(model.finishedCount, 1)
-        if let f = model.folder { try? FileManager.default.removeItem(at: f) }
+    }
+
+    @MainActor func testClearTrashesOnlyFinishedDownloads() async throws {
+        struct Fake: Downloader {
+            func download(url: URL, options: DownloadOptions, into folder: URL,
+                          onEvent: @escaping @Sendable (DownloadEvent) -> Void) async throws -> URL {
+                if url.host == "bad.example.com" { throw DownloadError.failed("Video unavailable") }
+                return folder.appendingPathComponent("ok.mp4")
+            }
+        }
+        final class Trashed: @unchecked Sendable { var files: [URL] = [] }
+        let trashed = Trashed()
+        let folder = URL(fileURLWithPath: "/tmp/never-touched")
+        let model = DownloadVideoModel(downloader: Fake(), saveFolder: folder, trash: { trashed.files.append($0) })
+        model.linkText = "https://good.example.com/1 https://bad.example.com/2"
+        model.start()
+        while model.isRunning { try await Task.sleep(nanoseconds: 20_000_000) }
+
+        model.clearFinished()
+
+        XCTAssertEqual(trashed.files, [folder.appendingPathComponent("ok.mp4")])
+        XCTAssertTrue(model.items.isEmpty)
     }
 }
 
