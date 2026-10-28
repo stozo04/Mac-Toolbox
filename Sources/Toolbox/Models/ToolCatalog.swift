@@ -22,7 +22,7 @@ enum ToolCatalog {
              tagline: "Save videos from YouTube, X, TikTok and more.", input: .link),
         Tool(name: "Burn In Subtitles", category: .video, symbol: "captions.bubble",
              tagline: "Add captions to a video from an SRT file or automatic transcription.",
-             input: drop("a Video", "Drop a video to add captions to.", "film")),
+             input: .burnInSubtitles),
         Tool(name: "Change Speed", category: .video, symbol: "speedometer",
              tagline: "Speed up or slow down videos without chipmunk voices.",
              input: drop("a Video", "Drop a video to change its speed.", "film")),

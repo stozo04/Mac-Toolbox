@@ -14,6 +14,8 @@ enum ToolInput: Hashable {
     case videoToGif
     /// Queue of videos with size, fit and format options (Resize Video).
     case resizeVideo
+    /// Queue of videos that get captions drawn in (Burn In Subtitles).
+    case burnInSubtitles
     /// Queue of videos whose soundtrack is removed (Mute Video).
     case muteVideo
     /// List of files with codec, track and metadata details (Media Info).

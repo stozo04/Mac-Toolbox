@@ -10,7 +10,11 @@ Add captions to a video from an SRT file or automatic transcription.
 `images/Video/Burn In Subtitles.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built (`Sources/Toolbox/Tools/Video/BurnInSubtitles/`, routed through `ToolInput.burnInSubtitles`). Queue of videos with batch options: Subtitles = Subtitle File (SRT or WebVTT; a file named like the video next to it is picked up automatically, otherwise the one chosen with "Choose...") or Transcribe Automatically (language picker limited to on-device languages, "Also save SRT"). Style: Size (Small/Medium/Large, a share of the video height), Position (Bottom/Top), Look (White with Shadow / White on Black Box), with a live sample drawn by the same `CaptionRenderer` as the export. "Burn In" saves `<name> (Subtitled).<ext>` into a new "Toolbox Subtitled Videos" folder in Downloads.
+
+How it works: `SubtitleFile` parses SRT/VTT (BOM, CRLF, UTF-16/Latin-1, markup stripped); `CaptionRenderer` draws each caption to an image at the video's resolution; `SubtitleBurner` puts one layer per caption in an `AVVideoCompositionCoreAnimationTool` (opacity switched on/off with a discrete keyframe animation) and exports with the highest-quality preset, so the picture is re-encoded (audio, turn and metadata are kept). Auto mode uses `Support/SpeechTranscriber.swift` (`SFSpeechRecognizer`, on-device only) and `CueBuilder` to group words into captions; the engine is meant to be reused by Transcribe.
+
+Needs `NSSpeechRecognitionUsageDescription`, which `scripts/make-app.sh` now writes: automatic mode only works in the packaged app (from `swift run` it says so instead of crashing). Not verified end to end: the permission prompt and a real transcription have not been run. Memory: every caption is a bitmap held until the export ends, so a very long video with thousands of captions needs a lot of RAM.
 
 ## Sub-features / options to build
 - Source: SRT file or automatic transcription

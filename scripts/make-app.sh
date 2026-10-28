@@ -49,6 +49,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Toolbox records your voice with a screen recording when you turn on Microphone.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Toolbox turns the speech in your videos into captions on this Mac. Nothing is uploaded.</string>
 </dict>
 </plist>
 PLIST
