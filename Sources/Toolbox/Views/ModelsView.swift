@@ -17,7 +17,6 @@ struct ModelsView: View {
     }
 
     private var movable: [InstalledModel] { library.models.filter { $0.movability == .movable } }
-    private var totalBytes: Int64 { library.models.reduce(0) { $0 + $1.bytes } }
 
     var body: some View {
         ScrollView {
@@ -82,7 +81,7 @@ struct ModelsView: View {
     private var summaryLine: String {
         guard library.hasScanned else { return "Looking for models on this Mac…" }
         let count = library.models.count
-        return "\(count) model\(count == 1 ? "" : "s") · \(MediaFormat.bytes(totalBytes)) on this Mac · nothing leaves your Mac"
+        return "\(count) model\(count == 1 ? "" : "s") on this Mac · nothing leaves your Mac"
     }
 
     // MARK: Central folder
@@ -113,14 +112,16 @@ struct ModelsView: View {
                 Image(systemName: model.kind.symbol).font(.title2).foregroundStyle(Theme.accent)
                     .frame(width: 48, height: 48).background(Theme.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.name).font(.headline).lineLimit(2)
-                    Text(model.kind.rawValue + (model.owner.map { " · \($0)" } ?? "")).font(.caption).foregroundStyle(.secondary)
+                    Text(model.name).font(.headline).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                    Text(model.kind.rawValue + (model.owner.map { " · \($0)" } ?? "")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+                .layoutPriority(1)
                 Spacer(minLength: 8)
-                Text(MediaFormat.bytes(model.bytes)).font(.callout.weight(.semibold)).monospacedDigit()
+                versionBadge(model)
             }
             Text(model.summary).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             tags(model)
+            versionDetail(model)
             apps(model)
             Divider()
             location(model)
@@ -129,6 +130,29 @@ struct ModelsView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
         .padding(16).cardBackground()
+    }
+
+    /// The version where the size used to be: big and plain, or a dash when nothing records one.
+    private func versionBadge(_ model: InstalledModel) -> some View {
+        let value = model.version?.value ?? ""
+        return VStack(alignment: .trailing, spacing: 1) {
+            Text(value.isEmpty ? "—" : value)
+                .font(.callout.weight(.semibold)).monospacedDigit().foregroundStyle(value.isEmpty ? .secondary : .primary)
+                .lineLimit(2).multilineTextAlignment(.trailing)
+            Text(value.isEmpty ? "no version" : "version").font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: 90, alignment: .trailing)
+    }
+
+    /// Where the version number comes from, so a guess from a name is not mistaken for one the model states.
+    private func versionDetail(_ model: InstalledModel) -> some View {
+        Label(versionExplanation(model), systemImage: "number").font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+    }
+
+    private func versionExplanation(_ model: InstalledModel) -> String {
+        guard let version = model.version else { return "No version is recorded in this model's files." }
+        let source = version.value.isEmpty ? "Version not recorded" : version.source.prefix(1).uppercased() + version.source.dropFirst()
+        return [source, version.format].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func tags(_ model: InstalledModel) -> some View {

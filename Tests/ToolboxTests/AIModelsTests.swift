@@ -21,15 +21,18 @@ final class AIModelsTests: XCTestCase {
 
     /// A GGUF file: a real header (architecture, name, tensor count) padded to `megabytes`.
     @discardableResult
-    private func makeGGUF(_ url: URL, arch: String = "llama", name: String? = nil, tensors: UInt64 = 10, megabytes: Int = 2) throws -> URL {
+    private func makeGGUF(_ url: URL, arch: String = "llama", name: String? = nil, version: String? = nil, quantizationVersion: UInt32? = nil,
+                          tensors: UInt64 = 10, megabytes: Int = 2) throws -> URL {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         func u32(_ v: UInt32) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }
         func u64(_ v: UInt64) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }
         func string(_ s: String) -> Data { u64(UInt64(s.utf8.count)) + Data(s.utf8) }
         var pairs = [("general.architecture", arch)]
         if let name { pairs.append(("general.name", name)) }
-        var data = Data("GGUF".utf8) + u32(3) + u64(tensors) + u64(UInt64(pairs.count))
+        if let version { pairs.append(("general.version", version)) }
+        var data = Data("GGUF".utf8) + u32(3) + u64(tensors) + u64(UInt64(pairs.count + (quantizationVersion == nil ? 0 : 1)))
         for (key, value) in pairs { data += string(key) + u32(8) + string(value) }
+        if let quantizationVersion { data += string("general.quantization_version") + u32(4) + u32(quantizationVersion) }
         try data.write(to: url)
         let handle = try FileHandle(forWritingTo: url)
         try handle.truncate(atOffset: UInt64(megabytes) << 20)
@@ -45,7 +48,10 @@ final class AIModelsTests: XCTestCase {
         try handle.close()
     }
 
-    private func makeBundle(_ url: URL, megabytes: Int = 2) throws { try makeFile(url.appendingPathComponent("weights.bin"), megabytes: megabytes) }
+    private func makeBundle(_ url: URL, megabytes: Int = 2, metadata: [String: Any]? = nil) throws {
+        try makeFile(url.appendingPathComponent("weights.bin"), megabytes: megabytes)
+        if let metadata { try JSONSerialization.data(withJSONObject: [metadata]).write(to: url.appendingPathComponent("metadata.json")) }
+    }
 
     private var digUpModels: URL { support.appendingPathComponent("DigUp/Models") }
 
@@ -311,6 +317,83 @@ final class AIModelsTests: XCTestCase {
         let withApps = await ModelAssociations.apply(to: scan(), index: AppIndex.build(home: home, folders: [apps]))
         XCTAssertEqual(withApps.count, 2)
         for model in withApps { XCTAssertEqual(model.apps.map(\.name), ["DigUp"]) }
+    }
+
+    // MARK: Versions
+
+    func testDigUpsModelsShowTheirGenerationAndFormatVersion() throws {
+        try makeDigUp()
+        let text = try XCTUnwrap(scan().first { $0.name == "EmbeddingGemma 2 (text)" }?.version)
+        XCTAssertEqual(text.value, "2", "the 2 in embeddinggemma-2")
+        XCTAssertEqual(text.source, "read from its name", "a guess from the name says so")
+        XCTAssertEqual(text.format, "GGUF v3")
+    }
+
+    func testAVersionTheModelRecordsBeatsOneGuessedFromItsName() throws {
+        try makeGGUF(support.appendingPathComponent("App/Models/thing-v9.gguf"), name: "Thing v9", version: "1.4.2", quantizationVersion: 2)
+        let version = try XCTUnwrap(scan().first?.version)
+        XCTAssertEqual(version.value, "1.4.2")
+        XCTAssertEqual(version.source, "recorded in the model")
+        XCTAssertEqual(version.format, "GGUF v3 · quantization v2")
+    }
+
+    func testCoreMLBundlesReportTheirRecordedVersionAndSpec() throws {
+        try makeBundle(support.appendingPathComponent("FluidAudio/Models/silero-vad/silero-vad-unified-256ms-v6.2.1.mlmodelc"),
+                       metadata: ["version": "6.2.1", "specificationVersion": 6, "availability": ["macOS": "12.0"],
+                                  "userDefinedMetadata": ["com.github.apple.coremltools.version": "9.0b1"]])
+        let model = try XCTUnwrap(scan().first)
+        XCTAssertEqual(model.version, ModelVersion(value: "6.2.1", source: "recorded in the models", format: "Core ML spec 6 · macOS 12.0 or later"))
+        let info = try XCTUnwrap(CoreMLInfo.read(bundle: support.appendingPathComponent("FluidAudio/Models/silero-vad/silero-vad-unified-256ms-v6.2.1.mlmodelc")))
+        XCTAssertEqual(info.coreMLToolsVersion, "9.0b1")
+    }
+
+    func testAPipelineReadsItsVersionsFromFolderNamesWhenNothingIsRecorded() throws {
+        let base = support.appendingPathComponent("superwhisper/models/argmaxinc/speakerkit-coreml")
+        try makeBundle(base.appendingPathComponent("speaker_segmenter/pyannote-v3/W8A16/SpeakerSegmenter.mlmodelc"), metadata: ["specificationVersion": 8, "availability": ["macOS": "14.0"]])
+        try makeBundle(base.appendingPathComponent("speaker_clusterer/pyannote-v4/W32A32/PldaProjector.mlmodelc"))
+        let version = try XCTUnwrap(scan().first?.version)
+        XCTAssertEqual(version.value, "v3, v4")
+        XCTAssertEqual(version.source, "read from the folder names")
+        XCTAssertEqual(version.format, "Core ML spec 8 · macOS 14.0 or later")
+    }
+
+    func testModelsWithNothingToReadHaveNoVersion() throws {
+        try makeFile(support.appendingPathComponent("Tool/models/zzz-custom.onnx"), megabytes: 2)
+        XCTAssertNil(try XCTUnwrap(scan().first).version)
+    }
+
+    func testHuggingFaceAndOllamaVersions() throws {
+        let plain = home.appendingPathComponent(".cache/huggingface/hub/models--acme--thing")
+        try makeFile(plain.appendingPathComponent("blobs/b1"), megabytes: 2)
+        try FileManager.default.createDirectory(at: plain.appendingPathComponent("snapshots/914f7f8e0cd1a2b3c4d5e6f708192a3b4c5d6e7f"), withIntermediateDirectories: true)
+        let named = home.appendingPathComponent(".cache/huggingface/hub/models--BAAI--bge-small-en-v1.5")
+        try makeFile(named.appendingPathComponent("blobs/b2"), megabytes: 2)
+        let ollama = home.appendingPathComponent(".ollama/models")
+        try makeGGUF(ollama.appendingPathComponent("blobs/sha256-feed"), name: "Llama", megabytes: 2)
+        let manifest = ollama.appendingPathComponent("manifests/registry.ollama.ai/library/llama3.2/3b-instruct")
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"layers":[{"mediaType":"application/vnd.ollama.image.model","digest":"sha256:feed","size":2097152}]}"#.write(to: manifest, atomically: true, encoding: .utf8)
+
+        let models = scan()
+        XCTAssertEqual(models.first { $0.name == "acme/thing" }?.version, ModelVersion(value: "914f7f8", source: "Hugging Face revision", format: nil))
+        XCTAssertEqual(models.first { $0.name == "BAAI/bge-small-en-v1.5" }?.version?.value, "v1.5")
+        let llama = try XCTUnwrap(models.first { $0.owner == "Ollama" }?.version)
+        XCTAssertEqual([llama.value, llama.source], ["3b-instruct", "Ollama tag"])
+    }
+
+    func testGenerationAndVersionTokensInNames() {
+        XCTAssertEqual(ModelVersions.versionTokens(in: "silero-vad-unified-256ms-v6.2.1"), ["v6.2.1"])
+        XCTAssertEqual(ModelVersions.versionTokens(in: "pyannote-v3 pyannote-v4"), ["v3", "v4"])
+        XCTAssertEqual(ModelVersions.versionTokens(in: "ggml-large-v3-turbo"), ["v3"])
+        XCTAssertEqual(ModelVersions.versionTokens(in: "bge-small-en-v1.5"), ["v1.5"])
+        XCTAssertEqual(ModelVersions.versionTokens(in: "avenue"), [], "a v inside a word is not a version")
+        XCTAssertEqual(ModelVersions.generation(inName: "embeddinggemma-2"), "2")
+        XCTAssertEqual(ModelVersions.generation(inName: "Qwen2.5-7B-Instruct-Q4_K_M"), "2.5")
+        XCTAssertEqual(ModelVersions.generation(inName: "gemma3-4b"), "3")
+        XCTAssertEqual(ModelVersions.generation(inName: "Meta-Llama-3.1-8B-Instruct"), "3.1")
+        XCTAssertNil(ModelVersions.generation(inName: "e5-base"), "family letters are not a version")
+        XCTAssertNil(ModelVersions.generation(inName: "model-Q8_0"))
+        XCTAssertNil(ModelVersions.generation(inName: "mistral-7b-instruct"), "7b is a size")
     }
 
     // MARK: Words

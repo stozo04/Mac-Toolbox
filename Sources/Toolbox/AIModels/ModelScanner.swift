@@ -109,7 +109,8 @@ struct ModelScanner {
             }
         }
         for model in looseModels(outside: roots) { add(model) }
-        return byID.values.map(settled).sorted { ($0.bytes, $0.name) > ($1.bytes, $1.name) }
+        // An app's models together, in alphabetical order; loose files last.
+        return byID.values.map(settled).sorted { ($0.owner ?? "\u{FFFF}", $0.name) < ($1.owner ?? "\u{FFFF}", $1.name) }
     }
 
     /// Decides the last things that need to see the whole result: where it sits relative to the central folder.
@@ -191,7 +192,7 @@ struct ModelScanner {
             let name = key.isEmpty || ruleChoseName ? description.name : key.replacingOccurrences(of: "/", with: " / ")
             out.append(InstalledModel(name: name, summary: description.summary,
                                       owner: root.owner, kind: description.kind, format: members[0].format,
-                                      tags: description.tags + (members.count > 1 ? ["\(members.count) parts"] : []),
+                                      tags: description.tags + (members.count > 1 ? ["\(members.count) parts"] : []), version: version(ofGroup: members),
                                       bytes: bytes, url: folder, location: folder, linkedFrom: [],
                                       movability: .managed("Several files that belong together; \(root.owner ?? "the app") expects them where they are."),
                                       parts: members.count))
@@ -206,8 +207,35 @@ struct ModelScanner {
         let description = ModelKnowledge.describe(label: label, path: file.relative.joined(separator: " "), format: file.format, owner: owner, gguf: gguf)
         let isLink = file.real != file.url
         return InstalledModel(name: description.name, summary: description.summary, owner: owner, kind: description.kind, format: file.format,
-                              tags: description.tags, bytes: file.bytes, url: file.real, location: file.real.deletingLastPathComponent(),
+                              tags: description.tags, version: version(of: file, label: label, gguf: gguf), bytes: file.bytes, url: file.real, location: file.real.deletingLastPathComponent(),
                               linkedFrom: isLink ? [file.url] : [], movability: movability(of: file.real, owner: owner, single: !file.isBundle))
+    }
+
+    /// A model's version from what it records about itself, else from its name.
+    private func version(of file: Found, label: String, gguf: GGUFInfo?) -> ModelVersion? {
+        var recorded: String?
+        var format: String?
+        if let gguf {
+            recorded = gguf.version
+            format = "GGUF v\(gguf.formatVersion)" + (gguf.quantizationVersion.map { " · quantization v\($0)" } ?? "")
+        } else if file.isBundle, let info = CoreMLInfo.read(bundle: file.real) {
+            recorded = info.version
+            format = info.formatDescription
+        }
+        return ModelVersions.version(recorded: recorded, names: [label], generationFrom: gguf?.name ?? label, format: format)
+    }
+
+    /// One version for the several files of a pipeline: what they record, else the "v3" and "v4" in their folder names.
+    private func version(ofGroup members: [Found]) -> ModelVersion? {
+        let infos = members.filter(\.isBundle).compactMap { CoreMLInfo.read(bundle: $0.real) }
+        let recorded = Array(Set(infos.compactMap(\.version))).sorted()
+        let formats = Array(Set(infos.compactMap(\.formatDescription))).sorted()
+        let format = formats.isEmpty ? nil : formats.joined(separator: " / ")
+        if !recorded.isEmpty { return ModelVersion(value: recorded.joined(separator: ", "), source: "recorded in the models", format: format) }
+        let names = members.flatMap { $0.relative }
+        let tokens = Set(names.flatMap(ModelVersions.versionTokens(in:))).sorted { $0.compare($1, options: .numeric) == .orderedAscending }
+        if !tokens.isEmpty { return ModelVersion(value: tokens.joined(separator: ", "), source: "read from the folder names", format: format) }
+        return format.map { ModelVersion(value: "", source: "", format: $0) }
     }
 
     private func movability(of real: URL, owner: String?, single: Bool) -> Movability {
@@ -231,9 +259,21 @@ struct ModelScanner {
             let format = Self.huggingFaceFormat(folder)
             let description = ModelKnowledge.describe(label: parts.last ?? name, path: name, format: format, owner: "Hugging Face", gguf: nil)
             return InstalledModel(name: name, summary: description.summary, owner: "Hugging Face", kind: description.kind, format: format,
-                                  tags: description.tags, bytes: bytes, url: folder, location: root.url, linkedFrom: [],
+                                  tags: description.tags, version: Self.huggingFaceVersion(folder, name: name), bytes: bytes, url: folder, location: root.url, linkedFrom: [],
                                   movability: .managed("The Hugging Face cache is organized by its own tools; moving files out would break them."))
         }
+    }
+
+    /// "v1.5" if the name says, else the short id of the newest downloaded revision.
+    private static func huggingFaceVersion(_ folder: URL, name: String) -> ModelVersion? {
+        let tokens = ModelVersions.versionTokens(in: name)
+        if !tokens.isEmpty { return ModelVersion(value: tokens.joined(separator: ", "), source: "read from its name", format: nil) }
+        let snapshots = folder.appendingPathComponent("snapshots")
+        let revisions = (try? FileManager.default.contentsOfDirectory(at: snapshots, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let newest = revisions.max { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) <
+                                     ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+        guard let revision = newest?.lastPathComponent, revision.count >= 7 else { return nil }
+        return ModelVersion(value: String(revision.prefix(7)), source: "Hugging Face revision", format: nil)
     }
 
     private static func huggingFaceFormat(_ folder: URL) -> String {
@@ -271,8 +311,11 @@ struct ModelScanner {
                 gguf = GGUFInfo.read(root.url.appendingPathComponent("blobs/" + digest.replacingOccurrences(of: ":", with: "-")))
             }
             let description = ModelKnowledge.describe(label: model, path: name, format: "GGUF", owner: "Ollama", gguf: gguf)
+            let format = gguf.map { "GGUF v\($0.formatVersion)" }
+            let version = gguf?.version.map { ModelVersion(value: $0, source: "recorded in the model", format: format) }
+                ?? ModelVersion(value: tag, source: "Ollama tag", format: format)
             out.append(InstalledModel(name: name, summary: description.summary, owner: "Ollama", kind: description.kind, format: "GGUF",
-                                      tags: description.tags + [tag], bytes: bytes, url: url, location: root.url, linkedFrom: [],
+                                      tags: description.tags + [tag], version: version, bytes: bytes, url: url, location: root.url, linkedFrom: [],
                                       movability: .managed("Ollama keeps its models in its own library; it would lose track of them if they were moved.")))
         }
         return out

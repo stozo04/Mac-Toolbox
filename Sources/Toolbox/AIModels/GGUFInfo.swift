@@ -7,6 +7,12 @@ struct GGUFInfo: Equatable {
     var sizeLabel: String?
     /// "model", "adapter", "imatrix"...
     var type: String?
+    /// The version the model's maker gave it (`general.version`), when it says.
+    var version: String?
+    /// Version of the GGUF format the file is written in (2 or 3).
+    var formatVersion: UInt32 = 0
+    /// Version of the quantization scheme (`general.quantization_version`).
+    var quantizationVersion: UInt32?
     var tensorCount: UInt64 = 0
 
     /// Only a tokenizer: a test file, not a model.
@@ -25,22 +31,26 @@ struct GGUFInfo: Equatable {
         guard reader.bytes(4) == Data("GGUF".utf8), let version = reader.u32(), (2...3).contains(version),
               let tensors = reader.u64(), let count = reader.u64() else { return nil }
         var info = GGUFInfo(tensorCount: tensors)
-        var found = 0
+        info.formatVersion = version
         for _ in 0..<min(count, 400) {
             guard let key = reader.string(), let type = reader.u32() else { break }
             if key.hasPrefix("tokenizer.") { break }  // big lists follow; the facts we want come before
-            if type == 8, let value = reader.string() {
+            if type == 8 {
+                guard let value = reader.string() else { break }
                 switch key {
-                case "general.architecture": info.architecture = value; found += 1
-                case "general.name": info.name = value; found += 1
-                case "general.size_label": info.sizeLabel = value; found += 1
-                case "general.type": info.type = value; found += 1
+                case "general.architecture": info.architecture = value
+                case "general.name": info.name = value
+                case "general.size_label": info.sizeLabel = value
+                case "general.type": info.type = value
+                case "general.version": info.version = value
                 default: break
                 }
+            } else if type == 4 {
+                guard let value = reader.u32() else { break }
+                if key == "general.quantization_version" { info.quantizationVersion = value }
             } else if !reader.skipValue(type) {
                 break
             }
-            if found >= 4 { break }
         }
         return info
     }

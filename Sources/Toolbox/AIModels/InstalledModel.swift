@@ -57,6 +57,8 @@ struct InstalledModel: Identifiable, Equatable {
     var tags: [String] = []
     /// The apps that use it: the app whose folder it sits in, an app that carries it inside, or one that has it open right now.
     var apps: [AssociatedApp] = []
+    /// Which version of the model this is, and where that number comes from; nil when nothing says.
+    var version: ModelVersion?
     var bytes: Int64
     /// The file or folder itself.
     var url: URL
