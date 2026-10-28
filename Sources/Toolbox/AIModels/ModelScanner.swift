@@ -1,0 +1,347 @@
+import Foundation
+
+/// Finds the AI models on this Mac: in the folders apps and tools keep them, plus loose files found elsewhere.
+struct ModelScanner {
+    var home: URL
+    /// Where models are gathered (see `ModelMover`).
+    var central: URL
+    /// Model files found outside the known folders (from Spotlight).
+    var extraPaths: [URL] = []
+
+    enum Layout { case generic, huggingFace, ollama }
+
+    struct Root: Equatable {
+        var url: URL
+        var owner: String?
+        var layout = Layout.generic
+        var isCentral = false
+    }
+
+    static let modelExtensions: Set<String> = ["gguf", "safetensors", "onnx", "mlmodel", "tflite", "ckpt", "pth", "pt", "llamafile"]
+    static let bundleExtensions: Set<String> = ["mlmodelc", "mlpackage"]
+    static let skippedSuffixes = [".partial", ".part", ".download", ".crdownload", ".tmp"]
+    /// Places whose models belong to something else (an app, a build, a repository).
+    static let excludedForLooseFiles = [".app/", "/node_modules/", "/.build/", "/DerivedData/", "/Library/Developer/", "/.Trash/", "/.git/",
+                                        "/Library/Caches/", "/Library/Application Support/", "/Vendor/", "/Pods/", "/site-packages/"]
+    static let looseMinimumBytes: Int64 = 5_000_000
+    static let rootMinimumBytes: Int64 = 1_000_000
+
+    // MARK: Where to look
+
+    func roots() -> [Root] {
+        let fm = FileManager.default
+        var found: [Root] = [Root(url: central, owner: nil, isCentral: true)]
+        let known: [(String, String, Layout)] = [
+            (".cache/huggingface/hub", "Hugging Face", .huggingFace), (".ollama/models", "Ollama", .ollama),
+            (".lmstudio/models", "LM Studio", .generic), (".cache/lm-studio/models", "LM Studio", .generic),
+            (".cache/whisper", "Whisper", .generic), (".cache/torch/hub/checkpoints", "PyTorch", .generic),
+            ("Library/Application Support/nomic.ai/GPT4All", "GPT4All", .generic), ("jan/models", "Jan", .generic),
+        ]
+        for (path, owner, layout) in known {
+            let url = home.appendingPathComponent(path)
+            if fm.fileExists(atPath: url.path) { found.append(Root(url: url, owner: owner, layout: layout)) }
+        }
+        // Apps that keep models in a folder with "model" in its name, up to two levels inside their own folder.
+        for base in ["Library/Application Support", "Library/Caches"] {
+            for app in subfolders(of: home.appendingPathComponent(base)) {
+                for child in subfolders(of: app) {
+                    if Self.isModelFolderName(child.lastPathComponent) {
+                        found.append(Root(url: child, owner: Self.ownerName(app: app.lastPathComponent, folder: nil)))
+                    } else {
+                        for grandchild in subfolders(of: child) where Self.isModelFolderName(grandchild.lastPathComponent) {
+                            found.append(Root(url: grandchild, owner: Self.ownerName(app: app.lastPathComponent, folder: child.lastPathComponent)))
+                        }
+                    }
+                }
+            }
+        }
+        // The central folder is scanned once, as itself; a folder inside another one is part of it.
+        var kept: [Root] = []
+        for root in found.sorted(by: { $0.url.pathComponents.count < $1.url.pathComponents.count }) {
+            if kept.contains(where: { Self.isInside(root.url, $0.url) }) { continue }
+            kept.append(root)
+        }
+        return kept
+    }
+
+    static func isModelFolderName(_ name: String) -> Bool { name.lowercased().contains("model") }
+
+    /// "com.apple.VisualIntelligenceCore" → "Apple Visual Intelligence Core"; "Google"/"Chrome" → "Google Chrome".
+    static func ownerName(app: String, folder: String?) -> String {
+        if app == "Google", let folder { return "Google " + folder }
+        if app.hasPrefix("com.apple.") {
+            let rest = String(app.dropFirst("com.apple.".count))
+            let spaced = rest.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
+            return "Apple " + spaced
+        }
+        return app
+    }
+
+    private func subfolders(of url: URL) -> [URL] {
+        let items = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        return items.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+    }
+
+    // MARK: Scan
+
+    func scan() -> [InstalledModel] {
+        var byID: [String: InstalledModel] = [:]
+        func add(_ original: InstalledModel) {
+            // One identity per model, however it was reached: /var and /private/var, or through a link, are the same place.
+            var model = original
+            model.url = Self.canonical(model.url)
+            model.location = Self.canonical(model.location)
+            model.linkedFrom = model.linkedFrom.map(Self.canonicalLink)
+            if var existing = byID[model.id] {
+                existing.linkedFrom = Array(Set(existing.linkedFrom + model.linkedFrom)).sorted { $0.path < $1.path }
+                existing.owner = existing.owner ?? model.owner
+                byID[model.id] = existing
+            } else {
+                byID[model.id] = model
+            }
+        }
+        let roots = roots()
+        for root in roots {
+            switch root.layout {
+            case .huggingFace: huggingFaceModels(root).forEach(add)
+            case .ollama: ollamaModels(root).forEach(add)
+            case .generic: genericModels(root).forEach(add)
+            }
+        }
+        for model in looseModels(outside: roots) { add(model) }
+        return byID.values.map(settled).sorted { ($0.bytes, $0.name) > ($1.bytes, $1.name) }
+    }
+
+    /// Decides the last things that need to see the whole result: where it sits relative to the central folder.
+    private func settled(_ model: InstalledModel) -> InstalledModel {
+        var m = model
+        if Self.isInside(m.url, central) {
+            m.movability = .central
+            if m.owner == nil {
+                let first = m.url.standardizedFileURL.path.dropFirst(central.standardizedFileURL.path.count + 1).split(separator: "/").first.map(String.init)
+                if let first, first != Self.looseFolderName { m.owner = first }
+            }
+        }
+        return m
+    }
+
+    static let looseFolderName = "Other"
+
+    // MARK: Generic folders (GGUF, Core ML, ONNX ... files)
+
+    private struct Found {
+        var url: URL        // as found, possibly a link
+        var real: URL
+        var relative: [String]
+        var format: String
+        var bytes: Int64
+        var isBundle: Bool
+    }
+
+    private func genericModels(_ root: Root) -> [InstalledModel] {
+        var files: [Found] = []
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
+        guard let walker = FileManager.default.enumerator(at: root.url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return [] }
+        let base = root.url.standardizedFileURL.pathComponents.count
+        for case let url as URL in walker {
+            if walker.level > 8 { walker.skipDescendants(); continue }
+            let name = url.lastPathComponent.lowercased()
+            if Self.skippedSuffixes.contains(where: name.hasSuffix) { continue }
+            let relative = Array(url.standardizedFileURL.pathComponents.dropFirst(base))
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            let ext = url.pathExtension.lowercased()
+            if values?.isDirectory == true {
+                if Self.bundleExtensions.contains(ext) {
+                    walker.skipDescendants()
+                    files.append(Found(url: url, real: url, relative: relative, format: "Core ML", bytes: Self.size(ofFolder: url), isBundle: true))
+                }
+                continue
+            }
+            let real = values?.isSymbolicLink == true ? url.resolvingSymlinksInPath() : url
+            if values?.isSymbolicLink == true, (try? real.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != false { continue }
+            guard let format = Self.format(of: real) ?? Self.format(of: url) else { continue }
+            let bytes = Int64((try? real.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            guard bytes >= Self.rootMinimumBytes else { continue }
+            files.append(Found(url: url, real: real, relative: relative, format: format, bytes: bytes, isBundle: false))
+        }
+        return models(from: files, root: root)
+    }
+
+    private func models(from files: [Found], root: Root) -> [InstalledModel] {
+        var out: [InstalledModel] = []
+        var groups: [String: [Found]] = [:]
+        for file in files {
+            if file.isBundle || file.format == "TensorFlow Lite" {
+                // The pieces of one pipeline (a speaker detector made of three Core ML models, Chrome's small models) read as one.
+                let folders = Array(file.relative.dropLast())
+                let key = file.format == "TensorFlow Lite" ? "" : folders.prefix(2).joined(separator: "/")
+                if key.isEmpty && file.format != "TensorFlow Lite" { out.append(single(file, root: root)) } else { groups[key, default: []].append(file) }
+            } else {
+                if file.format == "GGUF", let gguf = GGUFInfo.read(file.real), gguf.isVocabularyOnly { continue }
+                out.append(single(file, root: root))
+            }
+        }
+        for (key, members) in groups {
+            let folder = key.isEmpty ? root.url : root.url.appendingPathComponent(key)
+            let bytes = members.reduce(Int64(0)) { $0 + $1.bytes }
+            let label = key.isEmpty ? root.url.lastPathComponent : (key as NSString).lastPathComponent
+            let description = ModelKnowledge.describe(label: label, path: key + " " + root.url.lastPathComponent, format: members[0].format, owner: root.owner, gguf: nil)
+            // A name the rules chose ("Silero VAD") beats the folder path ("argmaxinc / speakerkit-coreml").
+            let ruleChoseName = description.name != ModelKnowledge.displayName(label, nil)
+            let name = key.isEmpty || ruleChoseName ? description.name : key.replacingOccurrences(of: "/", with: " / ")
+            out.append(InstalledModel(name: name, summary: description.summary,
+                                      owner: root.owner, kind: description.kind, format: members[0].format,
+                                      tags: description.tags + (members.count > 1 ? ["\(members.count) parts"] : []),
+                                      bytes: bytes, url: folder, location: folder, linkedFrom: [],
+                                      movability: .managed("Several files that belong together; \(root.owner ?? "the app") expects them where they are."),
+                                      parts: members.count))
+        }
+        return out
+    }
+
+    private func single(_ file: Found, root: Root) -> InstalledModel {
+        let label = file.real.deletingPathExtension().lastPathComponent
+        let gguf = file.format == "GGUF" ? GGUFInfo.read(file.real) : nil
+        let owner = root.owner
+        let description = ModelKnowledge.describe(label: label, path: file.relative.joined(separator: " "), format: file.format, owner: owner, gguf: gguf)
+        let isLink = file.real != file.url
+        return InstalledModel(name: description.name, summary: description.summary, owner: owner, kind: description.kind, format: file.format,
+                              tags: description.tags, bytes: file.bytes, url: file.real, location: file.real.deletingLastPathComponent(),
+                              linkedFrom: isLink ? [file.url] : [], movability: movability(of: file.real, owner: owner, single: !file.isBundle))
+    }
+
+    private func movability(of real: URL, owner: String?, single: Bool) -> Movability {
+        if Self.isInside(real, central) { return .central }
+        if let owner, owner.hasPrefix("Apple ") { return .managed("macOS manages this model and may update or remove it.") }
+        if !single { return .managed("A folder of files; folders are not moved automatically.") }
+        guard let owner else { return .movable }
+        return owner == "DigUp" ? .movable : .managed("\(owner) manages this model and may not find it if it is moved.")
+    }
+
+    // MARK: Hugging Face cache
+
+    private func huggingFaceModels(_ root: Root) -> [InstalledModel] {
+        subfolders(of: root.url).compactMap { folder in
+            let parts = folder.lastPathComponent.components(separatedBy: "--")
+            guard parts.first == "models", parts.count >= 3 else { return nil }
+            let name = parts.dropFirst().joined(separator: "/")
+            let blobs = folder.appendingPathComponent("blobs")
+            let bytes = Self.size(ofFolder: FileManager.default.fileExists(atPath: blobs.path) ? blobs : folder)
+            guard bytes >= Self.rootMinimumBytes else { return nil }
+            let format = Self.huggingFaceFormat(folder)
+            let description = ModelKnowledge.describe(label: parts.last ?? name, path: name, format: format, owner: "Hugging Face", gguf: nil)
+            return InstalledModel(name: name, summary: description.summary, owner: "Hugging Face", kind: description.kind, format: format,
+                                  tags: description.tags, bytes: bytes, url: folder, location: root.url, linkedFrom: [],
+                                  movability: .managed("The Hugging Face cache is organized by its own tools; moving files out would break them."))
+        }
+    }
+
+    private static func huggingFaceFormat(_ folder: URL) -> String {
+        var seen: Set<String> = []
+        if let walker = FileManager.default.enumerator(at: folder.appendingPathComponent("snapshots"), includingPropertiesForKeys: nil) {
+            for case let url as URL in walker { seen.insert(url.pathExtension.lowercased()) }
+        }
+        if seen.contains("gguf") { return "GGUF" }
+        if seen.contains("safetensors") { return "Safetensors" }
+        if seen.contains("onnx") { return "ONNX" }
+        if seen.contains("mlpackage") || seen.contains("mlmodelc") { return "Core ML" }
+        return "Hugging Face"
+    }
+
+    // MARK: Ollama
+
+    private func ollamaModels(_ root: Root) -> [InstalledModel] {
+        let manifests = root.url.appendingPathComponent("manifests")
+        guard let walker = FileManager.default.enumerator(at: manifests, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
+        var out: [InstalledModel] = []
+        let base = manifests.standardizedFileURL.pathComponents.count
+        for case let url as URL in walker {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  let data = try? Data(contentsOf: url),
+                  let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let layers = manifest["layers"] as? [[String: Any]] else { continue }
+            let parts = Array(url.standardizedFileURL.pathComponents.dropFirst(base))  // registry, namespace, model, tag
+            guard parts.count >= 4 else { continue }
+            let (namespace, model, tag) = (parts[parts.count - 3], parts[parts.count - 2], parts[parts.count - 1])
+            let name = (namespace == "library" ? model : "\(namespace)/\(model)") + ":" + tag
+            let bytes = layers.reduce(Int64(0)) { $0 + ((($1["size"] as? NSNumber)?.int64Value) ?? 0) }
+            var gguf: GGUFInfo?
+            if let weights = layers.first(where: { ($0["mediaType"] as? String)?.hasSuffix("image.model") == true }),
+               let digest = weights["digest"] as? String {
+                gguf = GGUFInfo.read(root.url.appendingPathComponent("blobs/" + digest.replacingOccurrences(of: ":", with: "-")))
+            }
+            let description = ModelKnowledge.describe(label: model, path: name, format: "GGUF", owner: "Ollama", gguf: gguf)
+            out.append(InstalledModel(name: name, summary: description.summary, owner: "Ollama", kind: description.kind, format: "GGUF",
+                                      tags: description.tags + [tag], bytes: bytes, url: url, location: root.url, linkedFrom: [],
+                                      movability: .managed("Ollama keeps its models in its own library; it would lose track of them if they were moved.")))
+        }
+        return out
+    }
+
+    // MARK: Loose files found elsewhere
+
+    private func looseModels(outside roots: [Root]) -> [InstalledModel] {
+        var out: [InstalledModel] = []
+        for path in extraPaths {
+            let url = path.standardizedFileURL
+            let text = url.path + (url.hasDirectoryPath ? "/" : "")
+            if roots.contains(where: { Self.isInside(url, $0.url) }) || Self.excludedForLooseFiles.contains(where: text.contains) { continue }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+            let ext = url.pathExtension.lowercased()
+            let found: Found
+            if isDirectory.boolValue {
+                guard Self.bundleExtensions.contains(ext) else { continue }
+                found = Found(url: url, real: url, relative: [url.lastPathComponent], format: "Core ML", bytes: Self.size(ofFolder: url), isBundle: true)
+            } else {
+                let real = url.resolvingSymlinksInPath()
+                guard let format = Self.format(of: real) else { continue }
+                let bytes = Int64((try? real.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+                guard bytes >= Self.looseMinimumBytes else { continue }
+                if format == "GGUF", let info = GGUFInfo.read(real), info.isVocabularyOnly { continue }
+                found = Found(url: url, real: real, relative: [url.lastPathComponent], format: format, bytes: bytes, isBundle: false)
+            }
+            guard found.bytes >= Self.looseMinimumBytes else { continue }
+            out.append(single(found, root: Root(url: url.deletingLastPathComponent(), owner: nil)))
+        }
+        return out
+    }
+
+    // MARK: Helpers
+
+    /// "GGUF", "ONNX"... for a model file, nil for anything else.
+    static func format(of url: URL) -> String? {
+        let ext = url.pathExtension.lowercased()
+        let name = url.lastPathComponent.lowercased()
+        switch ext {
+        case "gguf", "llamafile": return "GGUF"
+        case "safetensors": return "Safetensors"
+        case "onnx": return "ONNX"
+        case "mlmodel": return "Core ML"
+        case "tflite": return "TensorFlow Lite"
+        case "ckpt", "pth", "pt": return "PyTorch"
+        case "bin": return name.hasPrefix("ggml-") ? "GGML" : (name == "model.bin" || name.hasPrefix("pytorch_model") ? "PyTorch" : nil)
+        default: return nil
+        }
+    }
+
+    static func canonical(_ url: URL) -> URL { url.standardizedFileURL.resolvingSymlinksInPath() }
+
+    /// A link's own place: its folder made canonical, the link itself not followed.
+    static func canonicalLink(_ url: URL) -> URL { canonical(url.deletingLastPathComponent()).appendingPathComponent(url.lastPathComponent) }
+
+    static func isInside(_ url: URL, _ folder: URL) -> Bool {
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path, root = folder.standardizedFileURL.resolvingSymlinksInPath().path
+        return path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+    }
+
+    static func size(ofFolder url: URL) -> Int64 {
+        guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey], options: []) else { return 0 }
+        var total: Int64 = 0
+        for case let file as URL in walker {
+            let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true { total += Int64(values?.fileSize ?? 0) }
+        }
+        return total
+    }
+}
