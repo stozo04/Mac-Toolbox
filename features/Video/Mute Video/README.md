@@ -10,7 +10,7 @@ Remove the soundtrack from videos without re-encoding.
 `images/Video/Mute Video.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built (`Sources/Toolbox/Tools/Video/MuteVideo/`, routed through `ToolInput.muteVideo`). Queue of videos (files or folders), "Mute" saves `<name> (Muted).<ext>` into a new "Toolbox Muted Videos" folder in Downloads. `VideoMuter` copies only the video tracks (turn and metadata kept) with the passthrough preset in the original container (MP4, M4V, otherwise MOV); if passthrough is refused it re-encodes at highest quality and the row says "re-encoded". Each finished row shows duration, new size and size saved; the footer totals the savings. Videos with no sound are reported and nothing is written. The shared export runner is `Support/AssetExporter.swift`.
 
 ## Sub-features / options to build
 - Batch

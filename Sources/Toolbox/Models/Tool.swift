@@ -14,6 +14,8 @@ enum ToolInput: Hashable {
     case videoToGif
     /// Queue of videos with size, fit and format options (Resize Video).
     case resizeVideo
+    /// Queue of videos whose soundtrack is removed (Mute Video).
+    case muteVideo
     /// List of files with codec, track and metadata details (Media Info).
     case mediaInfo
     /// One of the Mac category's native tools (Keep Awake, Hidden Settings...).

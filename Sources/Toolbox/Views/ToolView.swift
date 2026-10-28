@@ -45,6 +45,8 @@ struct ToolWorkspace: View {
             TrimVideoView()
         case .resizeVideo:
             ResizeVideoView()
+        case .muteVideo:
+            MuteVideoView()
         case .mediaInfo:
             MediaInfoView()
         case .mac(let tool):

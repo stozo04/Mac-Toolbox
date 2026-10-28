@@ -55,7 +55,7 @@ enum ToolCatalog {
              input: drop("Videos", "Drop several clips to join.", "film")),
         Tool(name: "Mute Video", category: .video, symbol: "speaker.slash",
              tagline: "Remove the soundtrack from videos without re-encoding.",
-             input: drop("Videos", "Drop videos to mute.", "film")),
+             input: .muteVideo),
         Tool(name: "Video to GIF", category: .video, symbol: "livephoto",
              tagline: "Turn a clip into an animated GIF.",
              input: .videoToGif),
