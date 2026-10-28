@@ -16,5 +16,4 @@ Record, trim, convert and shrink video
 - [Trim Video](./Trim Video/README.md) - Cut the start and end of a clip without re-encoding.
 - [Merge Videos](./Merge Videos/README.md) - Join several clips into one video, in the order you choose.
 - [Mute Video](./Mute Video/README.md) - Remove the soundtrack from videos without re-encoding.
-- [Replace Audio](./Replace Audio/README.md) - Swap or add the soundtrack of a video with another audio file.
 - [Video to GIF](./Video to GIF/README.md) - Turn a clip into an animated GIF.

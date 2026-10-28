@@ -31,7 +31,7 @@ swift run Toolbox
 - On device only; no network/API calls unless a tool's README says otherwise (Download Video, Network Speed Test). The one app-wide exception is `Log` (see `Support/Logging/`), which may send warning+ events to Supabase (all Supabase SQL objects are prefixed `macToolKit_`, see supabase/migrations/). Never put links, file names or file contents in a log message or metadata.
 - Never modify original user files; write new output. The Mac tools are the deliberate exception: they change system state (Hidden Settings, Presentation Mode, Login Items, Fix "App Is Damaged", Reset Permissions, Uninstall App, Storage Explorer). They never use `sudo`, send removals to the Trash (only the Trash itself is deleted for good, after a confirmation), and ask before anything that weakens a macOS safety check.
 - Match the screenshots: dark cards, rounded corners, options panel ~240pt.
-- Known gaps: Docs has 13 of 22 tools identified, Developer 4 of 8 (the design shows 87 total; the catalog has 73: Battery Health was dropped on purpose). 17 tools lack a screenshot; their README says so.
+- Known gaps: Docs has 13 of 22 tools identified, Developer 4 of 8 (the design shows 87 total; the catalog has 72: Battery Health and Replace Audio were dropped on purpose). 17 tools lack a screenshot; their README says so.
 - `features/Video/*.md` are the original one-line specs, kept for reference.
 
 ## Tool index
@@ -50,7 +50,6 @@ swift run Toolbox
 - [Merge Videos](features/Video/Merge%20Videos/README.md) - Join several clips into one video, in the order you choose.
 - [Mute Video](features/Video/Mute%20Video/README.md) - Remove the soundtrack from videos without re-encoding.
 - [Record Screen](features/Video/Record%20Screen/README.md) - Record a display, a window or an area, with sound.
-- [Replace Audio](features/Video/Replace%20Audio/README.md) - Swap or add the soundtrack of a video with another audio file.
 - [Resize Video](features/Video/Resize%20Video/README.md) - Change the dimensions of videos to an exact size.
 - [Trim Video](features/Video/Trim%20Video/README.md) - Cut the start and end of a clip without re-encoding.
 - [Video to GIF](features/Video/Video%20to%20GIF/README.md) - Turn a clip into an animated GIF.

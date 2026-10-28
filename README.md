@@ -10,7 +10,7 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 
 | Category | What it's for | Tools |
 |---|---|---|
-| **Video** | Record, trim, convert and shrink video | Download Video, Burn In Subtitles, Change Speed, Extract Frames, Convert Video, Record Screen, Compress Video, Resize Video, Crop & Rotate Video, Media Info, Trim Video, Merge Videos, Mute Video, Replace Audio, Video to GIF |
+| **Video** | Record, trim, convert and shrink video | Download Video, Burn In Subtitles, Change Speed, Extract Frames, Convert Video, Record Screen, Compress Video, Resize Video, Crop & Rotate Video, Media Info, Trim Video, Merge Videos, Mute Video, Video to GIF |
 | **Audio** | Record, clean up and convert audio | Clean Up Audio, Record Audio, Trim Audio, Extract Audio, Convert Audio |
 | **Images** | Edit, convert and protect photos | Blur Faces, Beautify Screenshot, Remove Background, Convert Images, Compress Images, Resize Images, Rotate Images, Remove Metadata, Color Picker, Redact Image, Annotate Screenshot |
 | **Docs** | Scan, sign, convert and protect documents | Scan Document, Redact PDF, Fill & Flatten Forms, Make PDF Searchable, PDF to Word, Sign PDF, Merge PDFs, Split PDF, Organize PDF, Delete Pages, Extract Pages, Images to PDF, Compress PDF, and more on the way |
