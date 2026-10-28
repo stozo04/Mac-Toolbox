@@ -28,6 +28,8 @@ enum ToolInput: Hashable {
     case redactImage
     /// Queue of screenshots framed on a background with padding and a shadow (Beautify Screenshot).
     case beautifyScreenshot
+    /// One screenshot with arrows, boxes, text, numbered steps, blur and crop drawn on it (Annotate Screenshot).
+    case annotateScreenshot
     /// Queue of photos with the subject cut out onto a transparent or solid background (Remove Background).
     case removeBackground
     /// Queue of videos that get captions drawn in (Burn In Subtitles).

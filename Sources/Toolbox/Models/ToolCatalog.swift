@@ -116,7 +116,7 @@ enum ToolCatalog {
              input: .redactImage),
         Tool(name: "Annotate Screenshot", category: .images, symbol: "pencil.and.outline",
              tagline: "Add arrows, boxes, numbers and text to a screenshot.",
-             input: drop("a Screenshot", "Drop a screenshot to annotate.", "photo")),
+             input: .annotateScreenshot),
     ]
 
     // MARK: Docs (13 of 22 tools are visible in the design so far)
