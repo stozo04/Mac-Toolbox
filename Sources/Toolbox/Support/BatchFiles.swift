@@ -17,6 +17,17 @@ enum BatchFiles {
         return (walker?.compactMap { $0 as? URL } ?? []).filter(isVideo).sorted { $0.path < $1.path }
     }
 
+    /// The images at `url`: the file itself, or every image inside a folder (hidden files skipped).
+    static func images(in url: URL) -> [URL] {
+        let isImage = { (u: URL) in (try? u.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .image) ?? false }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return [] }
+        if !isDirectory.boolValue { return isImage(url) ? [url] : [] }
+        let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.contentTypeKey],
+                                                    options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        return (walker?.compactMap { $0 as? URL } ?? []).filter(isImage).sorted { $0.path < $1.path }
+    }
+
     /// A new dated folder in Downloads, e.g. "Toolbox GIFs 2026-10-26 14.30.05".
     static func makeOutputFolder(named prefix: String) -> URL {
         let f = DateFormatter()

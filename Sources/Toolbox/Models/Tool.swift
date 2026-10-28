@@ -16,6 +16,12 @@ enum ToolInput: Hashable {
     case resizeVideo
     /// Queue of images saved in another format (Convert Images).
     case convertImages
+    /// Queue of photos with faces found and hidden on device (Blur Faces).
+    case blurFaces
+    /// Queue of screenshots framed on a background with padding and a shadow (Beautify Screenshot).
+    case beautifyScreenshot
+    /// Queue of photos with the subject cut out onto a transparent or solid background (Remove Background).
+    case removeBackground
     /// Queue of videos that get captions drawn in (Burn In Subtitles).
     case burnInSubtitles
     /// Queue of videos whose soundtrack is removed (Mute Video).

@@ -45,7 +45,7 @@ final class ConvertImagesModel {
         var skipped = 0
         for url in urls {
             let before = found.count
-            found += Self.images(in: url)
+            found += BatchFiles.images(in: url)
             if found.count == before { skipped += 1 }
         }
         var known = Set(items.map { BatchFiles.identity($0.url) })
@@ -66,17 +66,6 @@ final class ConvertImagesModel {
         folder = nil
         notice = nil
         isRunning = false
-    }
-
-    /// The image at `url`, or every image inside a folder (hidden files skipped).
-    static func images(in url: URL) -> [URL] {
-        let isImage = { (u: URL) in (try? u.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .image) ?? false }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return [] }
-        if !isDirectory.boolValue { return isImage(url) ? [url] : [] }
-        let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.contentTypeKey],
-                                                    options: [.skipsHiddenFiles, .skipsPackageDescendants])
-        return (walker?.compactMap { $0 as? URL } ?? []).filter(isImage).sorted { $0.path < $1.path }
     }
 
     // MARK: Converting

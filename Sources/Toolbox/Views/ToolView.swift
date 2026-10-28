@@ -47,6 +47,12 @@ struct ToolWorkspace: View {
             ResizeVideoView()
         case .convertImages:
             ConvertImagesView()
+        case .blurFaces:
+            BlurFacesView()
+        case .beautifyScreenshot:
+            BeautifyScreenshotView()
+        case .removeBackground:
+            RemoveBackgroundView()
         case .burnInSubtitles:
             BurnInSubtitlesView()
         case .muteVideo:

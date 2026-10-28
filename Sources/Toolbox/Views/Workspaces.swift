@@ -8,6 +8,7 @@ struct DropZone: View {
     /// Called with the chosen or dropped files. Tools that handle input themselves use this.
     var allowsMultiple = true
     var allowsFolders = false
+    var button = "Choose File..."
     var onFiles: (([URL]) -> Void)?
     @State private var targeted = false
     @State private var files: [URL] = []
@@ -27,7 +28,7 @@ struct DropZone: View {
                     .background(Theme.inset, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 Text(files.isEmpty ? title : "\(files.count) file(s) selected").font(.headline)
                 Text(hint).font(.caption).foregroundStyle(.secondary)
-                Button("Choose File...") { chooseFiles() }
+                Button(button) { chooseFiles() }
                 Label("Processed on this Mac. Originals stay untouched.", systemImage: "lock.fill")
                     .font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
             }

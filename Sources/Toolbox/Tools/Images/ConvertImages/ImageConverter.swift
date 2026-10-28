@@ -75,6 +75,16 @@ enum ImageConverter {
         do { try data.write(to: url, options: .atomic) } catch { throw ConvertError.saveFailed(.webp) }
     }
 
+    /// The photo turned upright and scaled so its longer side is at most `maxSize` pixels (for previews and thumbnails).
+    static func thumbnail(of url: URL, maxSize: CGFloat) -> CGImage? {
+        guard let reader = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(reader, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+        ] as CFDictionary)
+    }
+
     // MARK: Pixels
 
     static func hasAlpha(_ image: CGImage) -> Bool {
