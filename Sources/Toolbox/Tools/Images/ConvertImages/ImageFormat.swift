@@ -56,4 +56,6 @@ struct ConvertSettings: Equatable {
     var keepMetadata = true
     /// WebP only: no quality loss at all, at the cost of a bigger file.
     var losslessWebP = false
+    /// Leave out the see-through channel when nothing in the picture is see-through (a smaller file that looks the same).
+    var dropUnusedAlpha = false
 }

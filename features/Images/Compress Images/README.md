@@ -10,12 +10,12 @@ Make photos smaller without visible loss in quality.
 `images/Images/Compress Images.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. `CompressImagesView` (queue + 240pt options panel) is routed from `ToolWorkspace` via `ToolInput.compressImages`. Drop photos or folders, choose Low / Medium / High, Keep Format / JPEG / HEIC and whether to keep metadata (off by default), click Compress. Smaller copies go to a dated "Toolbox Compressed Images" folder in Downloads; each row shows before -> after size and percent saved, the panel shows the batch total.
 
-## Sub-features / options to build
-- Quality slider
-- Before/after size (e.g. 4.8 MB -> 640 KB)
-- Batch
+- `ImageCompressor.swift` - the service. It maps the level to an encoder quality (HEIC needs a lower number than JPEG for the same look) and reuses `ImageConverter` from Convert Images (upright pixels, ICC profile, metadata handling, WebP). `ConvertSettings.dropUnusedAlpha` drops an alpha channel nothing uses, which is where most PNG savings come from.
+- Keep Format: JPEG, HEIC, PNG (lossless re-save, no quantization) and WebP are re-encoded. GIF (animated), BMP, TIFF, AVIF and the like are copied unchanged and marked as such; picking JPEG or HEIC converts them.
+- If the re-encoded file is not smaller, a copy of the original is saved instead (`alreadySmall`). Exception: with Keep metadata off and a GPS location in the photo, the clean copy is saved even if it is not smaller.
+- Not built: pngquant-style color quantization for PNG, a free quality slider, a before/after preview.
 
 ## Implementation notes for an agent
 - ImageIO re-encode with quality; optional pngquant-style quantization.

@@ -52,7 +52,8 @@ enum ImageConverter {
         let format = settings.format
         guard let type = format.utType,
               let writer = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else { throw ConvertError.saveFailed(format) }
-        let upright = try pixels(of: image, orientation: orientation, flattenAlpha: !format.supportsAlpha)
+        let flatten = !format.supportsAlpha || (settings.dropUnusedAlpha && isOpaque(image))
+        let upright = try pixels(of: image, orientation: orientation, flattenAlpha: flatten)
         var options = properties
         if format.isLossy { options[kCGImageDestinationLossyCompressionQuality] = Double(settings.quality) / 100 }
         CGImageDestinationAddImage(writer, upright.image, options as CFDictionary)
@@ -92,6 +93,22 @@ enum ImageConverter {
         case .none, .noneSkipFirst, .noneSkipLast: false
         default: true
         }
+    }
+
+    /// True when no pixel is see-through (always true for a picture without an alpha channel).
+    static func isOpaque(_ image: CGImage) -> Bool {
+        guard hasAlpha(image) else { return true }
+        // Gray plus alpha: two bytes a pixel, alpha second.
+        let (w, h) = (image.width, image.height)
+        var bytes = [UInt8](repeating: 0, count: w * h * 2)
+        let drawn = bytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 2,
+                                          space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return false }
+        return !stride(from: 1, to: bytes.count, by: 2).contains { bytes[$0] != 255 }
     }
 
     /// The picture turned upright as its orientation tag asks, in the image's own color space.

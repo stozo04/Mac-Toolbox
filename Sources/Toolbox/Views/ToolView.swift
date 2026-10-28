@@ -47,6 +47,8 @@ struct ToolWorkspace: View {
             ResizeVideoView()
         case .convertImages:
             ConvertImagesView()
+        case .compressImages:
+            CompressImagesView()
         case .blurFaces:
             BlurFacesView()
         case .beautifyScreenshot:

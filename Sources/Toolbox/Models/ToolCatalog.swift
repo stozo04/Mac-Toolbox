@@ -98,7 +98,7 @@ enum ToolCatalog {
              input: .convertImages),
         Tool(name: "Compress Images", category: .images, symbol: "arrow.down.right.and.arrow.up.left",
              tagline: "Make photos smaller without visible loss in quality.",
-             input: drop("Images", "Drop images to shrink.", "photo")),
+             input: .compressImages),
         Tool(name: "Resize Images", category: .images, symbol: "arrow.up.left.and.arrow.down.right",
              tagline: "Scale photos by percentage, longest side or exact size.",
              input: drop("Images", "Drop images to resize.", "photo")),
