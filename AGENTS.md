@@ -5,7 +5,7 @@ Quick orientation for any coding agent working in this repo.
 ## What this is
 Toolbox: a native macOS app (SwiftUI, macOS 14+, Swift Package Manager) that bundles many small utilities (video, audio, images, docs, text & speech, files, Mac, developer) in one window. Everything is meant to run on device. The designs are screenshots in `images/` (`images/All.png` is the home screen).
 
-**Current state:** navigation, catalog, theme (dark/light toggle), logging and generic empty-state workspaces exist. Nineteen tools are built: five in Video (Download Video, Record Screen, Trim Video, Video to GIF, Resize Video; code in `Sources/Toolbox/Tools/Video/`, each routed from `ToolWorkspace` through its own `ToolInput` case) and all fourteen in Mac (code in `Sources/Toolbox/Tools/Mac/<Tool>/`, routed through the single `ToolInput.mac(MacTool)` case and `MacToolView`; shared pieces are `Tools/Mac/MacUI.swift`, `Support/Shell.swift`, `Support/SystemDefaults.swift`, `Support/CodeSignInfo.swift`, `Support/DirectorySize.swift`). Every other tool still shows the generic empty state and does not process anything. Building a dedicated, design-accurate view per tool is the main remaining work. Network code exists only for Download Video, Network Speed Test (Apple's `networkQuality`) and the `Log` sink.
+**Current state:** navigation, catalog, theme (dark/light toggle), logging and generic empty-state workspaces exist. Twenty-three tools are built: one in Images (Convert Images; `Sources/Toolbox/Tools/Images/ConvertImages/`, with the vendored WebP encoder in `Sources/CWebP/`), eight in Video (Download Video, Record Screen, Trim Video, Video to GIF, Resize Video, Media Info, Mute Video, Burn In Subtitles; code in `Sources/Toolbox/Tools/Video/`, each routed from `ToolWorkspace` through its own `ToolInput` case) and all fourteen in Mac (code in `Sources/Toolbox/Tools/Mac/<Tool>/`, routed through the single `ToolInput.mac(MacTool)` case and `MacToolView`; shared pieces are `Tools/Mac/MacUI.swift`, `Support/Shell.swift`, `Support/SystemDefaults.swift`, `Support/CodeSignInfo.swift`, `Support/DirectorySize.swift`). Every other tool still shows the generic empty state and does not process anything. Building a dedicated, design-accurate view per tool is the main remaining work. Network code exists only for Download Video, Network Speed Test (Apple's `networkQuality`) and the `Log` sink.
 
 ## Run / build
 ```
@@ -69,7 +69,7 @@ swift run Toolbox
 - [Blur Faces](features/Images/Blur%20Faces/README.md) - Find faces in photos and blur, pixelate or black them out.
 - [Color Picker](features/Images/Color%20Picker/README.md) - Pick any color on screen and copy it as HEX, RGB, HSL or code.
 - [Compress Images](features/Images/Compress%20Images/README.md) - Make photos smaller without visible loss in quality.
-- [Convert Images](features/Images/Convert%20Images/README.md) - Save photos as JPEG, PNG, HEIC, TIFF or WebP.
+- [Convert Images](features/Images/Convert%20Images/README.md) - Save photos as HEIC, WebP, JPG, JPEG or PNG.
 - [Redact Image](features/Images/Redact%20Image/README.md) - Hide names, faces and private details in an image.
 - [Remove Background](features/Images/Remove%20Background/README.md) - Lift the subject out of photos and save it with a transparent or solid background.
 - [Remove Metadata](features/Images/Remove%20Metadata/README.md) - Strip location, camera and date info from photos.

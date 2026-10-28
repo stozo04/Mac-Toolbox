@@ -45,6 +45,8 @@ struct ToolWorkspace: View {
             TrimVideoView()
         case .resizeVideo:
             ResizeVideoView()
+        case .convertImages:
+            ConvertImagesView()
         case .burnInSubtitles:
             BurnInSubtitlesView()
         case .muteVideo:
