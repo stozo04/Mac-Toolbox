@@ -62,8 +62,7 @@ struct MuteVideoView: View {
             }
             Spacer()
             if case .done(let r) = item.status {
-                Button { model.reveal(r.url) } label: { Image(systemName: "magnifyingglass") }
-                    .buttonStyle(.borderless).help("Show in Finder")
+                RevealButton { model.reveal(r.url) }
             } else if !model.isRunning {
                 Button { model.remove(item.id) } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless).help("Remove")

@@ -79,8 +79,7 @@ struct UninstallAppView: View {
             }
             Spacer()
             Text(ByteFormat.string(item.bytes)).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-            Button { NSWorkspace.shared.activateFileViewerSelecting([item.url]) } label: { Image(systemName: "magnifyingglass") }
-                .buttonStyle(.borderless).help("Show in Finder")
+            RevealButton { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }
         }
         .padding(.vertical, 8)
     }

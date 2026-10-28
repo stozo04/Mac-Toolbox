@@ -191,8 +191,7 @@ private struct DownloadRow: View {
             }
             Spacer(minLength: 0)
             if case .done = item.state {
-                Button { model.reveal(item) } label: { Image(systemName: "magnifyingglass.circle") }
-                    .buttonStyle(.plain).help("Show in Finder")
+                RevealButton { model.reveal(item) }
             }
         }
         .padding(12)

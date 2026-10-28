@@ -63,7 +63,7 @@ struct LoginItemsView: View {
                 if let error = model.errors[item.id] { Text(error).font(.caption2).foregroundStyle(.red) }
             }
             Spacer()
-            Button { model.reveal(item) } label: { Image(systemName: "magnifyingglass") }.buttonStyle(.borderless).help("Show the file in Finder")
+            RevealButton(help: "Show the file in Finder") { model.reveal(item) }
             if item.scope.canToggle {
                 Toggle("", isOn: Binding(get: { item.isEnabled }, set: { model.toggle(item, to: $0) })).labelsHidden().toggleStyle(.switch)
             } else {

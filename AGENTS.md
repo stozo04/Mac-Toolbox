@@ -30,6 +30,7 @@ swift run Toolbox
 ## Rules
 - On device only; no network/API calls unless a tool's README says otherwise (Download Video, Network Speed Test). The one app-wide exception is `Log` (see `Support/Logging/`), which may send warning+ events to Supabase (all Supabase SQL objects are prefixed `macToolKit_`, see supabase/migrations/). Never put links, file names or file contents in a log message or metadata.
 - Never modify original user files; write new output. The Mac tools are the deliberate exception: they change system state (Hidden Settings, Presentation Mode, Login Items, Fix "App Is Damaged", Reset Permissions, Uninstall App, Storage Explorer). They never use `sudo`, send removals to the Trash (only the Trash itself is deleted for good, after a confirmation), and ask before anything that weakens a macOS safety check.
+- Icon button that shows a file in Finder: use `RevealButton` (an eye), never a magnifying glass, which reads as search.
 - Match the screenshots: dark cards, rounded corners, options panel ~240pt.
 - Known gaps: Docs has 13 of 22 tools identified, Developer 4 of 8 (the design shows 87 total; the catalog has 72: Battery Health and Replace Audio were dropped on purpose). 17 tools lack a screenshot; their README says so.
 - `features/Video/*.md` are the original one-line specs, kept for reference.
