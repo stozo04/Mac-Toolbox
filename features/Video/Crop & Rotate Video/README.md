@@ -7,7 +7,7 @@
 Crop, rotate and flip a video.
 
 ## Design reference
-No screenshot yet (check `images/` and add one).
+`images/Video/Crop and Rotate.png`
 
 ## Current state
 Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.

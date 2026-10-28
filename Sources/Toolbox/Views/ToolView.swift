@@ -45,6 +45,8 @@ struct ToolWorkspace: View {
             TrimVideoView()
         case .resizeVideo:
             ResizeVideoView()
+        case .mediaInfo:
+            MediaInfoView()
         case .mac(let tool):
             MacToolView(tool: tool)
         case .videoToGif:

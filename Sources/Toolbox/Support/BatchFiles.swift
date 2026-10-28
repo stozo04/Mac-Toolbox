@@ -3,6 +3,9 @@ import UniformTypeIdentifiers
 
 /// Helpers for tools that convert a queue of videos into a dated folder in Downloads.
 enum BatchFiles {
+    /// A file's identity for spotting the same file added twice: /tmp and /private/tmp, or a link and its target, are one file.
+    static func identity(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
+
     /// The videos at `url`: the file itself, or every video inside a folder (hidden files skipped).
     static func videos(in url: URL) -> [URL] {
         let isVideo = { (u: URL) in (try? u.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .movie) ?? false }

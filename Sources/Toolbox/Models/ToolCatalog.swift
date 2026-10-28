@@ -46,7 +46,7 @@ enum ToolCatalog {
              input: drop("a Video", "Drop a video to crop or rotate.", "film")),
         Tool(name: "Media Info", category: .video, symbol: "info.circle",
              tagline: "See the codec, resolution, frame rate, bitrate and metadata of videos and audio.",
-             input: drop("a File", "Drop a video or audio file to inspect.", "doc.badge.gearshape")),
+             input: .mediaInfo),
         Tool(name: "Trim Video", category: .video, symbol: "scissors",
              tagline: "Cut the start and end of a clip without re-encoding.",
              input: .trimVideo),

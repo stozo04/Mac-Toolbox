@@ -10,7 +10,7 @@ See the codec, resolution, frame rate, bitrate and metadata of videos and audio.
 `images/Video/Media Info.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built (`Sources/Toolbox/Tools/Video/MediaInfo/`, routed through `ToolInput.mediaInfo`). Drop or choose files or folders; a list on the left, and per file a summary (size, format, duration, overall bitrate, created), one card per video / audio / other track, and a metadata card with an Open in Maps button when the file stores a location. Copy as Text and Export as JSON work on the selected file or, with several files, on all of them. Reading is pure AVFoundation (`MediaInspector`); files are only read. Not done: `ffprobe` fallback for formats AVFoundation can't open (MKV, WebM, ...), which show "Can't be read".
 
 ## Sub-features / options to build
 - Codec, container, size, resolution, frame rate, bitrate, duration
