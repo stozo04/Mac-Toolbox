@@ -107,7 +107,7 @@ enum ToolCatalog {
              input: drop("Images", "Drop images to rotate or flip.", "photo")),
         Tool(name: "Remove Metadata", category: .images, symbol: "location.slash",
              tagline: "Strip location, camera and date info from photos.",
-             input: drop("Photos", "Drop photos to clean.", "photo")),
+             input: .removeMetadata),
         Tool(name: "Color Picker", category: .images, symbol: "eyedropper",
              tagline: "Pick any color on screen and copy it as HEX, RGB, HSL or code.",
              input: .live(symbol: "eyedropper", idle: "Pick a color from anywhere on screen.", action: "Pick Color")),
