@@ -113,7 +113,7 @@ enum ToolCatalog {
              input: .live(symbol: "eyedropper", idle: "Pick a color from anywhere on screen.", action: "Pick Color")),
         Tool(name: "Redact Image", category: .images, symbol: "eye.slash",
              tagline: "Hide names, faces and private details in an image.",
-             input: drop("an Image", "Drop an image to redact.", "photo")),
+             input: .redactImage),
         Tool(name: "Annotate Screenshot", category: .images, symbol: "pencil.and.outline",
              tagline: "Add arrows, boxes, numbers and text to a screenshot.",
              input: drop("a Screenshot", "Drop a screenshot to annotate.", "photo")),

@@ -55,6 +55,8 @@ struct ToolWorkspace: View {
             RemoveMetadataView()
         case .blurFaces:
             BlurFacesView()
+        case .redactImage:
+            RedactImageView()
         case .beautifyScreenshot:
             BeautifyScreenshotView()
         case .removeBackground:

@@ -24,6 +24,8 @@ enum ToolInput: Hashable {
     case removeMetadata
     /// Queue of photos with faces found and hidden on device (Blur Faces).
     case blurFaces
+    /// Queue of images with parts covered by a blur, a pixel mosaic or a black box, drawn by hand or found on device (Redact Image).
+    case redactImage
     /// Queue of screenshots framed on a background with padding and a shadow (Beautify Screenshot).
     case beautifyScreenshot
     /// Queue of photos with the subject cut out onto a transparent or solid background (Remove Background).
