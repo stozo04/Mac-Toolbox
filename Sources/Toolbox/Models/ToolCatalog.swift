@@ -101,7 +101,7 @@ enum ToolCatalog {
              input: .compressImages),
         Tool(name: "Resize Images", category: .images, symbol: "arrow.up.left.and.arrow.down.right",
              tagline: "Scale photos by percentage, longest side or exact size.",
-             input: drop("Images", "Drop images to resize.", "photo")),
+             input: .resizeImages),
         Tool(name: "Rotate Images", category: .images, symbol: "rotate.right",
              tagline: "Rotate or flip many photos at once.",
              input: drop("Images", "Drop images to rotate or flip.", "photo")),

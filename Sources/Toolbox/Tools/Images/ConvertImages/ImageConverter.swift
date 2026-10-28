@@ -46,6 +46,16 @@ enum ImageConverter {
         return ConvertResult(url: output, sourceBytes: fileSize(source), bytes: fileSize(output))
     }
 
+    /// Saves a picture that is already upright (its pixels are final) in `settings.format`.
+    /// For tools that make their own pixels, such as Resize Images.
+    static func write(_ image: CGImage, properties: [CFString: Any], settings: ConvertSettings, to url: URL) throws {
+        if settings.format == .webp {
+            try writeWebP(image, orientation: 1, properties: properties, settings: settings, to: url)
+        } else {
+            try writeImageIO(image, orientation: 1, properties: properties, settings: settings, to: url)
+        }
+    }
+
     // MARK: ImageIO (HEIC, JPG, JPEG, PNG)
 
     private static func writeImageIO(_ image: CGImage, orientation: Int, properties: [CFString: Any], settings: ConvertSettings, to url: URL) throws {

@@ -18,6 +18,8 @@ enum ToolInput: Hashable {
     case convertImages
     /// Queue of photos re-saved smaller at a chosen quality (Compress Images).
     case compressImages
+    /// Queue of photos scaled by percentage, longest side or exact size, with a draggable preview (Resize Images).
+    case resizeImages
     /// Queue of photos with faces found and hidden on device (Blur Faces).
     case blurFaces
     /// Queue of screenshots framed on a background with padding and a shadow (Beautify Screenshot).

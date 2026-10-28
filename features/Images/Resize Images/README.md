@@ -10,12 +10,27 @@ Scale photos by percentage, longest side or exact size.
 `images/Images/Resize Images.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. Code in `Sources/Toolbox/Tools/Images/ResizeImages/`, routed through `ToolInput.resizeImages`.
+- `ImageResizer.swift` - `ImageResizePlan` (pure size arithmetic shared by the preview, the list and the saved copy) and `ImageResizer` (decode, turn upright, scale in halving steps, save in the photo's own format; WebP via the vendored encoder, TIFF/BMP via ImageIO, anything else as PNG). Photos already at the target size are copied unchanged.
+- `ResizeImagesModel.swift` - queue, selected photo, settings, and `drag(_:width:height:)`, which turns a handle drag into the value of the current mode.
+- `ResizeCanvas.swift` - the preview: the selected photo drawn at its new size, centered, with eight handles (four sides, four corners) and a dashed outline of the original.
+- `ResizeImagesView.swift` - drop zone, queue, options panel (Percentage / Longest Side / Size, Keep proportions, Enlarge smaller images).
+- Copies go to a dated `Toolbox Resized Images` folder in Downloads; originals are never touched. Camera/date/location details are kept.
+- Tests: `Tests/ToolboxTests/ResizeImagesTests.swift`.
 
-## Sub-features / options to build
-- By percentage, longest side, or exact size
-- Lock aspect
-- Batch
+## How the drag handles behave
+- The picture stays centered, so the grip under the cursor follows it exactly (an edge drag changes the size by twice the cursor's distance from the center).
+- Percentage, Longest Side, and Size with Keep proportions: every grip scales the photo uniformly (a corner follows the cursor's projection on the photo's diagonal) and writes the result into that mode's field.
+- Size with Keep proportions off: a side grip changes only that side; a corner changes both.
+- Pulling a photo bigger than it is switches Enlarge smaller images on, so the picture follows the cursor.
+- The preview scale is frozen while a grip is held and refits on release.
+- Click a row in the list to preview another photo; the settings still apply to the whole batch.
+
+## Sub-features / options
+- By percentage (1-1000 %), longest side, or exact size
+- Keep proportions (Size): fit inside the box; off stretches to exactly that size. Without Enlarge a side never grows.
+- Enlarge smaller images
+- Batch (files and folders)
 
 ## Implementation notes for an agent
 - ImageIO thumbnailing / Core Graphics scaling.
