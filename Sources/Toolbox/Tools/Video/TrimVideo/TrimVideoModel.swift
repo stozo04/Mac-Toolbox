@@ -67,7 +67,7 @@ final class TrimVideoModel {
                 file = nil
                 isLoading = false
                 loadError = (error as? TrimError)?.localizedDescription ?? "This file can't be opened as a video."
-                Log.warning("Trim video open failed", category: "trim", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                Log.warning("Trim video open failed", category: "trim", Log.details(error, file: url))
             }
         }
     }
@@ -186,7 +186,7 @@ final class TrimVideoModel {
                 saveState = .idle
             } catch {
                 saveState = .failed(error.localizedDescription)
-                Log.error("Trim failed", category: "trim", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                Log.error("Trim failed", category: "trim", Log.details(error, file: file))
             }
         }
     }

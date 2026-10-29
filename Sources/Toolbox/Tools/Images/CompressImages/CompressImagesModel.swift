@@ -98,7 +98,7 @@ final class CompressImagesModel {
                     Log.info("Image compressed", category: "compress-images", ["kind": item.kind, "level": settings.level.rawValue, "format": settings.format.rawValue])
                 case .failure(let error):
                     update(item.id, .failed(error.localizedDescription))
-                    Log.error("Image compression failed", category: "compress-images", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Image compression failed", category: "compress-images", Log.details(error, file: item.url))
                 }
             }
             for i in items.indices where items[i].status == .compressing { items[i].status = .waiting }

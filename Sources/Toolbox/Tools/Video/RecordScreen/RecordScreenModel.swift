@@ -68,7 +68,7 @@ final class RecordScreenModel {
 
     init() {
         recorder.onInterrupted = { [weak self] error in
-            Log.warning("Recording interrupted", category: "record", ["reason": Self.describe(error)])
+            Log.warning("Recording interrupted", category: "record", Log.details(error))
             Task { @MainActor in self?.stop() }
         }
     }
@@ -242,7 +242,7 @@ final class RecordScreenModel {
 
     private func report(_ error: Error) {
         let ns = error as NSError
-        Log.error("Recording failed", category: "record", ["reason": Self.describe(error)])
+        Log.error("Recording failed", category: "record", Log.details(error))
         if let recorderError = error as? RecorderError {
             let url: URL? = if case .microphoneDenied = recorderError { Self.microphoneSettingsURL } else { nil }
             notice = Notice(message: recorderError.localizedDescription, settingsURL: url)
@@ -254,11 +254,6 @@ final class RecordScreenModel {
     }
 
     /// Domain and code only: error text can contain file paths, which never go in the log.
-    nonisolated private static func describe(_ error: Error) -> String {
-        let ns = error as NSError
-        return "\(ns.domain) \(ns.code)"
-    }
-
     /// In Downloads, named by date. A numeric suffix keeps two recordings in the same second apart.
     private static func uniqueOutputURL(format: RecordingFormat) -> URL {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]

@@ -90,7 +90,7 @@ final class MuteVideoModel {
                     update(id, .waiting)
                 } catch {
                     update(id, .failed(error.localizedDescription))
-                    Log.error("Mute failed", category: "mute", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Mute failed", category: "mute", Log.details(error, file: url))
                 }
             }
             isRunning = false

@@ -208,7 +208,7 @@ final class RedactImageModel {
                     if n > 0 { images += 1 }
                 case .failure(let error):
                     failed += 1
-                    Log.error("Find failed", category: "redact-image", ["kind": kind.rawValue, "reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Find failed", category: "redact-image", Log.details(error, file: url, ["kind": kind.rawValue]))
                 }
             }
             Log.info("Regions found", category: "redact-image", ["kind": kind.rawValue, "found": "\(added)", "images": "\(targets.count)"])
@@ -261,7 +261,7 @@ final class RedactImageModel {
                                                                        "removeMetadata": "\(settings.removeMetadata)"])
                 case .failure(let error):
                     update(job.id, .failed(error.localizedDescription))
-                    Log.error("Redaction failed", category: "redact-image", ["style": settings.style.rawValue, "reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Redaction failed", category: "redact-image", Log.details(error, file: job.url, ["style": settings.style.rawValue]))
                 }
             }
             for i in items.indices where items[i].status == .working { items[i].status = .ready }

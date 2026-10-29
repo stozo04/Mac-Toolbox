@@ -8,9 +8,23 @@ enum Page: Hashable {
     case tool(Tool)
 }
 
+extension Page {
+    /// Short name for logs, e.g. "Video/Trim Video".
+    var logName: String {
+        switch self {
+        case .home: "home"
+        case .category(let c): c.rawValue
+        case .models: "AI Models"
+        case .tool(let t): t.id
+        }
+    }
+}
+
 @Observable
 final class AppState {
-    var page: Page = .home
+    var page: Page = .home {
+        didSet { if page != oldValue { Log.navigate(to: page.logName) } }
+    }
     var search = ""
     var isDark = true
     var favorites: Set<String> = []

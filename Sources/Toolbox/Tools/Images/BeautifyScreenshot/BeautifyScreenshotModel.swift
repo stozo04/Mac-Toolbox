@@ -120,7 +120,7 @@ final class BeautifyScreenshotModel {
                     Log.info("Screenshot framed", category: "beautify-screenshot", ["background": settings.background.rawValue, "ratio": settings.ratio.rawValue])
                 case .failure(let error):
                     update(job.id, .failed(error.localizedDescription))
-                    Log.error("Screenshot framing failed", category: "beautify-screenshot", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Screenshot framing failed", category: "beautify-screenshot", Log.details(error, file: job.url))
                 }
             }
             for i in items.indices where items[i].status == .framing { items[i].status = .waiting }

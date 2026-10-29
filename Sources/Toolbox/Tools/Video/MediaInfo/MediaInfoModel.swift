@@ -77,7 +77,7 @@ final class MediaInfoModel {
                 state = .ready(try await MediaInspector.inspect(item.url))
             } catch {
                 state = .failed(error.localizedDescription)
-                Log.warning("Media info failed", category: "mediainfo", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                Log.warning("Media info failed", category: "mediainfo", Log.details(error, file: item.url))
             }
             self?.set(item.id, state)
         }

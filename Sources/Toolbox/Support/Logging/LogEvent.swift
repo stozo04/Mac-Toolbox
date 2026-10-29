@@ -13,7 +13,8 @@ struct LogEvent: Codable, Equatable, Sendable {
     /// Area of the app, e.g. "download" or "app".
     var category: String
     var message: String
-    /// Small string facts about the event. Never put links, file names or personal data here.
+    /// String facts about the event. File names, error text and links without a query string are welcome (see
+    /// `Log.details`); never file contents, passwords, tokens or the account name.
     var metadata: [String: String]
     var appVersion: String
     var osVersion: String

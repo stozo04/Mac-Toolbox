@@ -53,7 +53,7 @@ final class NetworkSpeedTestModel {
                 state = .idle
             } catch {
                 state = .failed(error.localizedDescription)
-                Log.warning("Speed test failed", category: "speedtest")
+                Log.warning("Speed test failed", category: "speedtest", Log.details(error, ["mode": mode == .sequential ? "sequential" : "together"]))
             }
         }
     }

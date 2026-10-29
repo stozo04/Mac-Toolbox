@@ -114,7 +114,7 @@ final class BlurFacesModel {
                     Log.info("Faces found", category: "blur-faces", ["faces": "\(boxes.count)"])
                 case .failure(let error):
                     update(item.id, .failed(error.localizedDescription))
-                    Log.error("Face search failed", category: "blur-faces", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Face search failed", category: "blur-faces", Log.details(error, file: url))
                 }
             }
             detector = nil
@@ -150,7 +150,7 @@ final class BlurFacesModel {
                     Log.info("Faces hidden", category: "blur-faces", ["faces": "\(result.facesHidden)", "style": settings.style.rawValue])
                 case .failure(let error):
                     update(job.id, .failed(error.localizedDescription))
-                    Log.error("Face blur failed", category: "blur-faces", ["style": settings.style.rawValue, "reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Face blur failed", category: "blur-faces", Log.details(error, file: job.url, ["style": settings.style.rawValue]))
                 }
             }
             for i in items.indices where items[i].status == .blurring { items[i].status = .ready }

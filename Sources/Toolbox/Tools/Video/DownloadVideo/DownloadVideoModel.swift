@@ -100,7 +100,7 @@ final class DownloadVideoModel {
                 Log.info("yt-dlp installed", category: "download")
             } catch {
                 toolStatus = .installFailed(error.localizedDescription)
-                Log.warning("yt-dlp install failed", category: "download", ["reason": error.localizedDescription])
+                Log.warning("yt-dlp install failed", category: "download", Log.details(error))
             }
         }
     }
@@ -157,7 +157,7 @@ final class DownloadVideoModel {
                          ["copied": String(result.copied), "skipped": String(result.skipped)])
             } catch {
                 sendState = .failed(error.localizedDescription)
-                Log.warning("Send to Google Drive failed", category: "download", ["reason": error.localizedDescription])
+                Log.warning("Send to Google Drive failed", category: "download", Log.details(error, ["files": String(files.count)]))
             }
         }
     }
@@ -184,10 +184,10 @@ final class DownloadVideoModel {
             update(id) { $0.state = .cancelled }
         } catch {
             update(id) { $0.state = .failed(error.localizedDescription) }
-            // Links and titles are private, so only the site goes in the log.
+            // The link goes in without its query string (tokens live there); titles are not logged.
             Log.error("Download failed", category: "download",
-                      ["host": url.host ?? "unknown", "format": options.format.rawValue,
-                       "h264": String(options.preferH264), "reason": error.localizedDescription])
+                      Log.details(error, ["url": LogText.safeURL(url), "host": url.host ?? "unknown",
+                                          "format": options.format.rawValue, "h264": String(options.preferH264)]))
             if DownloadAlert.isYouTube(url) { alert = .youTubeFailed }
         }
     }

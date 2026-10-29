@@ -92,7 +92,7 @@ final class ConvertImagesModel {
                     Log.info("Image converted", category: "convert-images", ["from": item.kind, "to": settings.format.ext])
                 case .failure(let error):
                     update(item.id, .failed(error.localizedDescription))
-                    Log.error("Image conversion failed", category: "convert-images", ["to": settings.format.ext, "reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Image conversion failed", category: "convert-images", Log.details(error, file: item.url, ["to": settings.format.ext]))
                 }
             }
             for i in items.indices where items[i].status == .converting { items[i].status = .waiting }

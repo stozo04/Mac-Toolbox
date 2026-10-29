@@ -6,7 +6,7 @@ struct ToolboxApp: App {
 
     init() {
         var sinks: [LogSink] = [ConsoleLogSink()]
-        if let config = SupabaseLogConfig.load() { sinks.append(SupabaseLogSink(config: config)) }
+        if AppInfo.sendsRemoteLogs(), let config = SupabaseLogConfig.load() { sinks.append(SupabaseLogSink(config: config)) }
         Log.configure(sinks: sinks)
         Log.info("App launched", category: "app")
     }

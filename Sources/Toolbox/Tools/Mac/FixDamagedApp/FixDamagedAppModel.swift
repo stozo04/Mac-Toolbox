@@ -58,7 +58,7 @@ final class FixDamagedAppModel {
             Task { self.app = try? await AppInspector.inspect(url) }
         } catch {
             outcome = .failed(Quarantine.message(for: error))
-            Log.warning("Quarantine clear failed", category: "fixdamaged", ["code": String((error as NSError).code)])
+            Log.warning("Quarantine clear failed", category: "fixdamaged", Log.details(error, file: url, ["signed": String(app.signature.isSigned)]))
         }
     }
 
