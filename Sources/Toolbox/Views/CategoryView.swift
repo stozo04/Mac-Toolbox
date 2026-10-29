@@ -37,6 +37,13 @@ struct ToolCard: View {
                     Image(systemName: tool.symbol).font(.system(size: 34)).foregroundStyle(Theme.accent)
                 }
                 .frame(height: 110)
+                .overlay(alignment: .topTrailing) {
+                    if !tool.isImplemented {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.caption)
+                            .foregroundStyle(Theme.warning).padding(8)
+                            .help("Feature not implemented")
+                    }
+                }
                 Text(tool.name).font(.headline)
                 Text(tool.tagline).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(3).multilineTextAlignment(.leading)

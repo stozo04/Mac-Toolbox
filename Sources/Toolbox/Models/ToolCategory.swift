@@ -8,7 +8,6 @@ enum ToolCategory: String, CaseIterable, Identifiable, Hashable {
     case textAndSpeech = "Text & Speech"
     case files = "Files"
     case mac = "Mac"
-    case developer = "Developer"
 
     var id: String { rawValue }
 
@@ -21,7 +20,6 @@ enum ToolCategory: String, CaseIterable, Identifiable, Hashable {
         case .textAndSpeech: "text.bubble"
         case .files: "folder"
         case .mac: "desktopcomputer"
-        case .developer: "chevron.left.forwardslash.chevron.right"
         }
     }
 
@@ -34,7 +32,6 @@ enum ToolCategory: String, CaseIterable, Identifiable, Hashable {
         case .textAndSpeech: "Transcribe, translate and summarize, privately"
         case .files: "Rename in bulk and make QR codes"
         case .mac: "Free up space and fix what's stuck"
-        case .developer: "Format, decode, hash and compare. Offline and instant."
         }
     }
 }

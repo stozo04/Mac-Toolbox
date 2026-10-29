@@ -10,12 +10,17 @@ Scan paper with your iPhone or from photos. Pages are found, straightened and cl
 `images/Docs/Scan Document.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. Code in `Sources/Toolbox/Tools/Docs/ScanDocument/`:
+- `DocumentScanner.swift` - service, no UI: page detection (`VNDetectDocumentSegmentationRequest` and `VNDetectRectanglesRequest`, the one with the squarer corners wins), `CIPerspectiveCorrection`, the three looks (paper brightness is estimated and divided out, then color / gray / threshold), Vision OCR, and the PDF writer (JPEG passed through for Color and Grayscale, lossless 8-bit gray for Black & White, hidden text drawn with the invisible text mode).
+- `ScanDocumentModel.swift` - pages, reorder, rotate, remove, thumbnails per look, Save PDF (save panel, default Downloads).
+- `ScanDocumentView.swift` - design layout: pages grid (drag to reorder, hover to rotate or remove, double-click to preview), Scan card (Look, Page size, Make text searchable), Pages card with Save PDF.
+- `ContinuityCamera.swift` - the "Import from iPhone or iPad" menu (Take Photo, Scan Documents) through AppKit's services requestor; scans arrive as PDFs, photos as images.
 
-## Sub-features / options to build
-- Scan with iPhone or choose photos
-- Auto-detect, straighten, clean up pages
-- Reorder pages, export PDF
+Inputs: photos, PDFs and folders by drop or Choose Photos; iPhone scans and photos by Scan with iPhone. A PDF is taken as already flat (no edge search). If no edges are found the whole photo is used and a note says so.
+
+Not verified on a real iPhone: the Continuity Camera menu needs a nearby iPhone signed in to the same Apple Account.
+
+Tests: `Tests/ToolboxTests/ScanDocumentTests.swift`.
 
 ## Implementation notes for an agent
 - VisionKit `VNDocumentCameraViewController` is iOS only; on Mac use Continuity Camera import (`NSMenuItem` Import from iPhone) or Vision rectangle detection + Core Image perspective correction on photos.

@@ -24,9 +24,30 @@ struct ToolView: View {
                     }
                 }
             }
+            if !tool.isImplemented { NotImplementedBanner() }
             ToolWorkspace(tool: tool)
         }
         .padding(16)
+    }
+}
+
+/// Shown above every tool that still has only a generic placeholder workspace.
+struct NotImplementedBanner: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 40))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Feature not implemented").font(.system(size: 22, weight: .bold))
+                Text("This tool is not built yet, so nothing here will work.").font(.system(size: 14, weight: .medium))
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 20).padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.warning, in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("notImplementedBanner")
     }
 }
 
@@ -63,6 +84,10 @@ struct ToolWorkspace: View {
             BeautifyScreenshotView()
         case .removeBackground:
             RemoveBackgroundView()
+        case .scanDocument:
+            ScanDocumentView()
+        case .redactPDF:
+            RedactPDFView()
         case .burnInSubtitles:
             BurnInSubtitlesView()
         case .muteVideo:

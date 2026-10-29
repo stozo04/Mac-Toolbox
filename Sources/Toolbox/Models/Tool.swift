@@ -32,6 +32,10 @@ enum ToolInput: Hashable {
     case annotateScreenshot
     /// Queue of photos with the subject cut out onto a transparent or solid background (Remove Background).
     case removeBackground
+    /// Pages found, straightened and cleaned up from photos or an iPhone, saved as one PDF (Scan Document).
+    case scanDocument
+    /// One PDF with boxes dragged or found by text, whose pages are flattened so the text under them is gone (Redact PDF).
+    case redactPDF
     /// Queue of videos that get captions drawn in (Burn In Subtitles).
     case burnInSubtitles
     /// Queue of videos whose soundtrack is removed (Mute Video).
@@ -42,8 +46,17 @@ enum ToolInput: Hashable {
     case mac(MacTool)
     /// No input file; the tool acts live (Keep Awake...).
     case live(symbol: String, idle: String, action: String)
-    /// Free text in, result out (Base64, JSON Formatter...).
+    /// Free text in, result out (Summarize, Translate...).
     case text
+
+    /// Only the generic placeholder workspaces count as not built. Any dedicated case means the tool is real,
+    /// so a new tool gets the "not implemented" banner removed just by getting its own case.
+    var isImplemented: Bool {
+        switch self {
+        case .dropFiles, .live, .text: false
+        default: true
+        }
+    }
 }
 
 struct Tool: Identifiable, Hashable {
@@ -54,4 +67,6 @@ struct Tool: Identifiable, Hashable {
     let input: ToolInput
 
     var id: String { "\(category.rawValue)/\(name)" }
+    /// False while the tool only has a generic placeholder workspace (see `ToolInput.isImplemented`).
+    var isImplemented: Bool { input.isImplemented }
 }

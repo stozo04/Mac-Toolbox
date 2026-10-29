@@ -17,7 +17,6 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 | **Text & Speech** | Transcribe, translate and summarize, privately | Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document |
 | **Files** | Rename in bulk and make QR codes | QR Code, Batch Rename, Find Duplicates, Zip & Unzip |
 | **Mac** | Free up space and fix what's stuck | Network Speed Test, Storage Explorer, Wi-Fi Password & QR, Keep Awake, Uninstall App, Presentation Mode, Clean Keyboard, Eject All Disks, Login & Background Items, Fix "App Is Damaged", Reset Permissions, Hidden Settings, Display Control, Mouse Fixes |
-| **Developer** | Format, decode, hash and compare | Hash Generator, Diff Checker, Base64, JSON Formatter, and more on the way |
 
 ## Privacy
 
@@ -66,7 +65,7 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 |---|---|
 | Browsing all categories and tools | The other 54 tools: they open to an empty page and don't process files yet |
 | Search, favorites, recent tools | Saving your favorites and settings between launches |
-| Light / dark mode switch | The remaining Docs and Developer tools |
+| Light / dark mode switch | The remaining Docs tools |
 | Five video tools and all 14 Mac tools | A global hotkey for Record Screen |
 
 ## Requirements

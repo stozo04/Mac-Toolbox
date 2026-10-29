@@ -1,7 +1,7 @@
 import Foundation
 
 enum ToolCatalog {
-    static let all: [Tool] = video + audio + images + docs + textAndSpeech + files + mac + developer
+    static let all: [Tool] = video + audio + images + docs + textAndSpeech + files + mac
 
     static func tools(in category: ToolCategory) -> [Tool] {
         all.filter { $0.category == category }
@@ -124,10 +124,10 @@ enum ToolCatalog {
     static let docs: [Tool] = [
         Tool(name: "Scan Document", category: .docs, symbol: "doc.viewfinder",
              tagline: "Scan paper with your iPhone or from photos. Pages are found, straightened and cleaned up.",
-             input: drop("Photos", "Drop photos of paper, or scan with your iPhone.", "doc.viewfinder")),
+             input: .scanDocument),
         Tool(name: "Redact PDF", category: .docs, symbol: "eye.slash",
              tagline: "Black out names, numbers or whole areas so they're removed for good, not just covered up.",
-             input: drop("a PDF", "Drop a PDF to redact.", "doc.richtext")),
+             input: .redactPDF),
         Tool(name: "Fill & Flatten Forms", category: .docs, symbol: "square.and.pencil",
              tagline: "Fill in PDF forms, add text where there are no fields, and flatten the answers so they print as-is.",
              input: drop("a PDF", "Drop a PDF form to fill in.", "doc.richtext")),
@@ -251,18 +251,5 @@ enum ToolCatalog {
         Tool(name: "Mouse Fixes", category: .mac, symbol: "computermouse",
              tagline: "Scroll your mouse and trackpad in different directions, and make the mouse wheel faster.",
              input: .mac(.mouseFixes)),
-    ]
-
-    // MARK: Developer (4 of 8 tools are visible in the design so far)
-
-    static let developer: [Tool] = [
-        Tool(name: "Hash Generator", category: .developer, symbol: "number",
-             tagline: "Create MD5, SHA-1 and SHA-256 hashes of text or files.", input: .text),
-        Tool(name: "Diff Checker", category: .developer, symbol: "arrow.left.arrow.right",
-             tagline: "Compare two blocks of text and see what changed.", input: .text),
-        Tool(name: "Base64", category: .developer, symbol: "textformat.abc.dottedunderline",
-             tagline: "Encode and decode Base64.", input: .text),
-        Tool(name: "JSON Formatter", category: .developer, symbol: "curlybraces",
-             tagline: "Format, validate and minify JSON.", input: .text),
     ]
 }
