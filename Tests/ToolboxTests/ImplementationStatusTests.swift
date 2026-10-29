@@ -7,13 +7,13 @@ final class ImplementationStatusTests: XCTestCase {
     }
 
     func testPlaceholderToolsAreNotImplemented() throws {
-        for name in ["Transcribe", "Summarize", "Translate", "Capture Text", "Merge PDFs", "Rotate Images", "Color Picker", "Record Audio"] {
+        for name in ["Transcribe", "Summarize", "Translate", "Capture Text", "Merge PDFs", "Color Picker", "Record Audio"] {
             XCTAssertFalse(try tool(name).isImplemented, "\(name) should show the not-implemented banner")
         }
     }
 
     func testToolsWithADedicatedWorkspaceAreImplemented() throws {
-        for name in ["Convert Images", "Annotate Screenshot", "Download Video", "Trim Video", "Keep Awake", "Media Info", "Scan Document", "Redact PDF"] {
+        for name in ["Convert Images", "Annotate Screenshot", "Download Video", "Trim Video", "Keep Awake", "Media Info", "Scan Document", "Redact PDF", "Rotate Images"] {
             XCTAssertTrue(try tool(name).isImplemented, "\(name) has its own workspace")
         }
     }

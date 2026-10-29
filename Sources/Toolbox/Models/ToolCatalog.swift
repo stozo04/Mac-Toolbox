@@ -104,7 +104,7 @@ enum ToolCatalog {
              input: .resizeImages),
         Tool(name: "Rotate Images", category: .images, symbol: "rotate.right",
              tagline: "Rotate or flip many photos at once.",
-             input: drop("Images", "Drop images to rotate or flip.", "photo")),
+             input: .rotateImages),
         Tool(name: "Remove Metadata", category: .images, symbol: "location.slash",
              tagline: "Strip location, camera and date info from photos.",
              input: .removeMetadata),

@@ -20,6 +20,8 @@ enum ToolInput: Hashable {
     case compressImages
     /// Queue of photos scaled by percentage, longest side or exact size, with a draggable preview (Resize Images).
     case resizeImages
+    /// Queue of photos turned in 90 degree steps or mirrored, with a preview of the result (Rotate Images).
+    case rotateImages
     /// Queue of photos saved again without their location, camera and date details (Remove Metadata).
     case removeMetadata
     /// Queue of photos with faces found and hidden on device (Blur Faces).

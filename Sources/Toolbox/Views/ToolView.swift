@@ -72,6 +72,8 @@ struct ToolWorkspace: View {
             CompressImagesView()
         case .resizeImages:
             ResizeImagesView()
+        case .rotateImages:
+            RotateImagesView()
         case .removeMetadata:
             RemoveMetadataView()
         case .blurFaces:

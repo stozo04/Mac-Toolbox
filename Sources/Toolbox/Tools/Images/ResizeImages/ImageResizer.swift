@@ -205,7 +205,7 @@ enum ImageResizer {
         }
     }
 
-    private static func writeGeneric(_ image: CGImage, type: UTType, properties: [CFString: Any], to url: URL) throws {
+    static func writeGeneric(_ image: CGImage, type: UTType, properties: [CFString: Any], to url: URL) throws {
         guard let writer = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else { throw ImageResizeError.saveFailed }
         CGImageDestinationAddImage(writer, image, properties as CFDictionary)
         guard CGImageDestinationFinalize(writer) else {
