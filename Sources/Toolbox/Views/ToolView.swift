@@ -76,6 +76,8 @@ struct ToolWorkspace: View {
             RotateImagesView()
         case .removeMetadata:
             RemoveMetadataView()
+        case .colorPicker:
+            ColorPickerView()
         case .blurFaces:
             BlurFacesView()
         case .redactImage:

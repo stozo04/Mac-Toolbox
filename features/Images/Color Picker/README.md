@@ -10,12 +10,25 @@ Pick any color on screen and copy it as HEX, RGB, HSL or code.
 `images/Images/Color Picker.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Live tool with options panel on the left and status/action on the right (`LiveWorkspace`). No processing is implemented and there is no API or network access.
+Built. Code in `Sources/Toolbox/Tools/Images/ColorPicker/`, routed through `ToolInput.colorPicker`.
+- `RGBAColor.swift` - the sRGB color every format is made from (HSL, OKLab/OKLCH, WCAG luminance, distance between two colors), `ColorFormat` (the eight copy formats) and the parser for typed colors (`#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb()`/`rgba()`, `hsl()`/`hsla()`, comma or space separated).
+- `TailwindColors.swift` - Tailwind v3's default palette (white, black and 22 families x 11 shades); the nearest one is found by distance in OKLab and is called exact when it is the same color.
+- `ColorContrast.swift` - WCAG 2 ratio plus AA/AAA for normal and large text. A translucent color is judged as it looks (text over the background, background over white). The ratio is shown to two places but never rounded up across 3, 4.5 or 7.
+- `PaletteExtractor.swift` - main colors of an image: pixels are grouped, clustered with weighted k-means in OKLab and near-twins merged, so the count is 5 to 8 (fewer for a flat image).
+- `ColorHistory.swift` - last 20 picked or typed colors, saved in UserDefaults (`colorPicker.history`, as `#RRGGBBAA` text).
+- `ColorPickerModel.swift` / `ColorPickerView.swift` - Pick, Palette from Image and Contrast tabs. Pick uses `NSColorSampler`, which needs no screen recording permission; Esc cancels. Command-Shift-C starts a pick on every tab (a hidden button holds the shortcut). Picked colors are clamped to sRGB. Include alpha adds opacity to every format (`#RRGGBBAA`, `rgba()`, `opacity:`, Tailwind `/50`); typing a translucent color turns it on.
+- Palette: drop, choose or paste (Command-V) an image; click a color to copy its HEX, the eyedropper sends it to Pick, Copy All HEX copies one code per line.
+- Contrast: two boxes (Text, Background) each fillable by typing, Pick or History; the box used last receives Command-Shift-C. Swap exchanges them.
+- Nothing is written to disk but the history; no network.
+- Tests: `Tests/ToolboxTests/ColorPickerTests.swift` (formats, parsing, OKLCH against reference values, Tailwind, WCAG boundary cases, history, palette on synthetic images, model).
 
-## Sub-features / options to build
-- Pick from anywhere on screen
-- Copy as HEX, RGB, HSL, or code (Swift/CSS)
-- History of picked colors
+## Sub-features / options
+- Pick from anywhere on screen (any display)
+- Copy as HEX, RGB, HSL, OKLCH, SwiftUI, NSColor, UIColor or Tailwind
+- Include alpha / opacity
+- History of the last 20 colors
+- Palette from an image (5 to 8 colors)
+- Contrast checker (WCAG 2 AA/AAA)
 
 ## Implementation notes for an agent
 - `NSColorSampler` for on-screen sampling.

@@ -24,6 +24,8 @@ enum ToolInput: Hashable {
     case rotateImages
     /// Queue of photos saved again without their location, camera and date details (Remove Metadata).
     case removeMetadata
+    /// A color sampled from the screen as HEX, rgb(), hsl(), OKLCH and code, plus palettes from an image and a contrast check (Color Picker).
+    case colorPicker
     /// Queue of photos with faces found and hidden on device (Blur Faces).
     case blurFaces
     /// Queue of images with parts covered by a blur, a pixel mosaic or a black box, drawn by hand or found on device (Redact Image).

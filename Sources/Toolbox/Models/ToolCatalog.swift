@@ -110,7 +110,7 @@ enum ToolCatalog {
              input: .removeMetadata),
         Tool(name: "Color Picker", category: .images, symbol: "eyedropper",
              tagline: "Pick any color on screen and copy it as HEX, RGB, HSL or code.",
-             input: .live(symbol: "eyedropper", idle: "Pick a color from anywhere on screen.", action: "Pick Color")),
+             input: .colorPicker),
         Tool(name: "Redact Image", category: .images, symbol: "eye.slash",
              tagline: "Hide names, faces and private details in an image.",
              input: .redactImage),
