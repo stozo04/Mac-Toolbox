@@ -37,7 +37,7 @@ enum ToolCatalog {
              input: .recordScreen),
         Tool(name: "Compress Video", category: .video, symbol: "arrow.down.right.and.arrow.up.left",
              tagline: "Shrink video files while keeping them looking great.",
-             input: drop("Videos", "Drop videos to shrink.", "film")),
+             input: .compressVideo),
         Tool(name: "Resize Video", category: .video, symbol: "arrow.up.left.and.arrow.down.right",
              tagline: "Change the dimensions of videos to an exact size.",
              input: .resizeVideo),

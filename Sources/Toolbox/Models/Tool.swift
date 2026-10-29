@@ -14,6 +14,8 @@ enum ToolInput: Hashable {
     case videoToGif
     /// Queue of videos with size, fit and format options (Resize Video).
     case resizeVideo
+    /// Queue of videos re-encoded smaller at a chosen quality (Compress Video).
+    case compressVideo
     /// Queue of images saved in another format (Convert Images).
     case convertImages
     /// Queue of photos re-saved smaller at a chosen quality (Compress Images).

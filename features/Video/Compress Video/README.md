@@ -10,16 +10,23 @@ Shrink video files while keeping them looking great.
 `images/Video/Compress Video.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. Code in `Sources/Toolbox/Tools/Video/CompressVideo/`, routed from `ToolWorkspace` through `ToolInput.compressVideo`.
 
-## Sub-features / options to build
-- Quality slider with estimated size and % saved
-- Target size presets (fits in WhatsApp, Discord, Mail)
-- Batch, average savings stat
+- Drop videos or a whole folder (`BatchFiles.videos`), then Compress. Smaller copies go to a new "Toolbox Compressed Videos <date>" folder in Downloads, named "Clip (Compressed).mp4". Originals are never touched. The queue lives in `CompressVideoModel.shared`.
+- Options (240pt panel, as in the design): Quality High / Balanced / Small, Format H.264 / HEVC, Maximum size Original / 1080p / 720p / 480p, Remove audio, Use hardware encoder.
+- `VideoCompressor` reads with `AVAssetReader` and writes with `AVAssetWriter` (mp4, fast start), so the bitrate is set directly instead of through an export preset. `CompressSettings.swift` (`VideoCompressPlan`) holds the arithmetic and is unit tested.
+  - Video bitrate = pixels x frame rate x bits per pixel (High 0.12, Balanced 0.07, Small 0.04 for H.264; HEVC x0.55; hardware encoder x1.2). Above 30 fps the extra frames count half. It is never more than 90% of the source bitrate, with a 100 kbit/s floor.
+  - Maximum size caps the **shorter** side (so 720p means the same for a vertical phone video), never enlarges, and keeps sides even.
+  - Pictures that are not resized are read as stored and keep the file's rotation flag; resized ones are re-rendered upright through a video composition. A rotation matrix with no translation (some tools write that) is moved back into view first.
+  - HLG / PQ (HDR) sources are converted to standard BT.709 video, so they do not look washed out.
+  - Audio is re-encoded as AAC, stereo at most (160 / 128 / 96 kbit/s). Remove audio drops the soundtrack.
+  - "Use hardware encoder" off asks VideoToolbox for its software encoder (better quality per bit, much slower for HEVC); on is much faster and a bit larger. If the writer refuses that choice, a plain second try is made without it and without the file's metadata.
+  - If the new file would not be smaller, it is deleted and the row says so ("Already well compressed").
+  - Cancel stops the encode and removes the partial file. `Job` opens a `Gate` for each pump, because a cancelled `AVAssetWriter` never asks for more samples.
+- Each row shows "12.4 MB -> 3.1 MB, -75%"; the footer shows the total saved.
 
-## Implementation notes for an agent
-- AVAssetExportSession presets or AVAssetWriter with HEVC/H.264 bitrate targets.
-- Put the tool's logic in `Sources/Toolbox/Tools/Video/CompressVideo/` and swap `ToolWorkspace` for a dedicated view when the tool needs more than the generic empty state.
-- Everything runs on device; never modify the original file (write a new output next to it or to a chosen folder).
-- Match the screenshot: dark cards, `Theme` colors, options panel width 240, rounded `cardBackground`.
-- Keep UI state in a per-tool `@Observable` model; keep processing in a separate service type so it is testable without UI.
+## Not built
+- Estimated size before compressing, and target-size presets (WhatsApp, Discord, Mail).
+- HDR is always converted to SDR; there is no option to keep 10-bit HEVC.
+- Only the first video track is used; the container is always MP4.
+

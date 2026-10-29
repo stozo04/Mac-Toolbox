@@ -13,7 +13,7 @@ final class ImplementationStatusTests: XCTestCase {
     }
 
     func testToolsWithADedicatedWorkspaceAreImplemented() throws {
-        for name in ["Convert Images", "Annotate Screenshot", "Download Video", "Trim Video", "Keep Awake", "Media Info", "Scan Document", "Redact PDF", "Rotate Images", "Color Picker"] {
+        for name in ["Convert Images", "Annotate Screenshot", "Download Video", "Trim Video", "Keep Awake", "Media Info", "Scan Document", "Redact PDF", "Rotate Images", "Color Picker", "Compress Video"] {
             XCTAssertTrue(try tool(name).isImplemented, "\(name) has its own workspace")
         }
     }
