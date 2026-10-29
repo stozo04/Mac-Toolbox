@@ -197,7 +197,7 @@ final class ResizeImagesModel {
                     Log.info("Image resized", category: "resize-images", ["kind": item.kind, "mode": settings.mode.rawValue])
                 case .failure(let error):
                     update(item.id, .failed(error.localizedDescription))
-                    Log.error("Image resize failed", category: "resize-images", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Image resize failed", category: "resize-images", Log.details(error, file: item.url))
                 }
             }
             for i in items.indices where items[i].status == .resizing { items[i].status = .waiting }

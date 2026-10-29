@@ -126,7 +126,7 @@ final class AnnotateScreenshotModel {
                 if let image = try await AnnotateCapture.area() { open(image: image) }
             } catch {
                 notice = error.localizedDescription
-                Log.warning("Area capture failed", category: "annotate-screenshot", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                Log.warning("Area capture failed", category: "annotate-screenshot", Log.details(error))
             }
         }
     }
@@ -403,7 +403,7 @@ final class AnnotateScreenshotModel {
             Log.info("Annotated image saved", category: "annotate-screenshot", ["format": format.rawValue, "marks": "\(doc.annotations.count)"])
         } catch {
             notice = error.localizedDescription
-            Log.error("Annotated image save failed", category: "annotate-screenshot", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+            Log.error("Annotated image save failed", category: "annotate-screenshot", Log.details(error, ["format": format.rawValue, "image_name": doc.name]))
         }
     }
 

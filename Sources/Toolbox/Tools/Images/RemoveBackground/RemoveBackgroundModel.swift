@@ -106,7 +106,7 @@ final class RemoveBackgroundModel {
                     Log.info("Background removed", category: "remove-background", ["background": settings.background.rawValue])
                 case .failure(let error):
                     update(job.id, .failed(error.localizedDescription))
-                    Log.error("Background removal failed", category: "remove-background", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Background removal failed", category: "remove-background", Log.details(error, file: job.url))
                 }
             }
             for i in items.indices where items[i].status == .cutting { items[i].status = .waiting }

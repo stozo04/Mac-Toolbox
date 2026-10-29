@@ -117,7 +117,7 @@ final class ResizeVideoModel {
                     update(id, .waiting)
                 } catch {
                     update(id, .failed(error.localizedDescription))
-                    Log.error("Resize failed", category: "resize", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Resize failed", category: "resize", Log.details(error, file: url))
                 }
             }
             isRunning = false

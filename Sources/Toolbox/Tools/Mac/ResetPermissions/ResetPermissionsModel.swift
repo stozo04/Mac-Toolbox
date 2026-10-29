@@ -52,7 +52,7 @@ final class ResetPermissionsModel {
                 Log.info("Permission reset", category: "permissions", ["service": serviceID])
             } catch {
                 if selected == app { results[serviceID] = .failed(error.localizedDescription) }
-                Log.warning("Permission reset failed", category: "permissions", ["service": serviceID])
+                Log.warning("Permission reset failed", category: "permissions", Log.details(error, ["service": serviceID, "app": app.bundleID]))
             }
         }
     }

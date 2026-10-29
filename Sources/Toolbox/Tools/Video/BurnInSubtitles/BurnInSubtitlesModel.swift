@@ -151,7 +151,7 @@ final class BurnInSubtitlesModel {
                     update(id, .waiting)
                 } catch {
                     update(id, .failed(error.localizedDescription))
-                    Log.error("Burn in failed", category: "burn-in", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Burn in failed", category: "burn-in", Log.details(error, file: item.url))
                 }
             }
             isRunning = false

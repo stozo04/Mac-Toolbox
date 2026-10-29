@@ -106,7 +106,7 @@ final class RemoveMetadataModel {
                     Log.info("Metadata removed", category: "remove-metadata", ["kind": item.kind, "keepOrientation": "\(settings.keepOrientation)"])
                 case .failure(let error):
                     update(item.id, .failed(error.localizedDescription))
-                    Log.error("Metadata removal failed", category: "remove-metadata", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("Metadata removal failed", category: "remove-metadata", Log.details(error, file: item.url))
                 }
             }
             for i in items.indices where items[i].status == .working { items[i].status = .waiting }

@@ -107,7 +107,7 @@ final class VideoToGifModel {
                     update(id, .waiting)
                 } catch {
                     update(id, .failed(error.localizedDescription))
-                    Log.error("GIF failed", category: "gif", ["reason": "\((error as NSError).domain) \((error as NSError).code)"])
+                    Log.error("GIF failed", category: "gif", Log.details(error, file: url))
                 }
             }
             isRunning = false
