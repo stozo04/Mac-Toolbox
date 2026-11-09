@@ -12,6 +12,8 @@ enum ToolInput: Hashable {
     case trimVideo
     /// Queue of videos with frame rate and width options (Video to GIF).
     case videoToGif
+    /// Queue of videos, frame picking options and a grid of the saved stills (Extract Frames).
+    case extractFrames
     /// Queue of videos with size, fit and format options (Resize Video).
     case resizeVideo
     /// Queue of images saved in another format (Convert Images).

@@ -10,12 +10,23 @@ Save stills from videos as PNG, JPEG or HEIC images.
 `images/Video/Extract Frames.png`
 
 ## Current state
-Skeleton only. The tool opens from the category grid / search and shows the shared header (title, favorite star) plus the empty-state workspace: Drag-and-drop file input (`DropZone`). Empty state: title, hint, Choose File... button, privacy note. No processing is implemented and there is no API or network access.
+Built. Code in `Sources/Toolbox/Tools/Video/ExtractFrames/`, routed through `ToolInput.extractFrames`.
 
-## Sub-features / options to build
-- Pick frames by scrubbing, every N seconds, or N total
-- Output format: PNG / JPEG / HEIC
-- Output folder
+- **Frames:** every N seconds, frames per second (1-30), a set number spread evenly, or Pick by hand (scrub a player, step frame by frame, Save Frame saves one image per click).
+- **Only part of each video:** optional start/end (end blank = to the end).
+- **Format:** PNG, JPEG or HEIC, with a quality slider for JPEG/HEIC.
+- **Size:** Original, 1920, 1280, 640 or 320 px on the longest side; never enlarged.
+- **Save as:** Images, Images + ZIP, or ZIP only (skips the preview; the images are made in a temp folder and zipped with `ditto`, no `__MACOSX` files).
+- **Save to:** next to each video (default; Downloads if that folder is read-only) or a chosen folder. Each run makes a new `<name> Frames` folder (`<name> Frames 2` ...), so nothing is overwritten.
+- Files are named `<name>_0001_00m05.250s.png` (index for order, then the time).
+- Results: a grid of thumbnails filled in as frames are saved; double-click opens, drag out, right-click for Open / Show in Finder / Copy, eye button reveals.
+- Extract Again re-runs every video with new options; failed videos can be retried.
+- Timing follows the video track, not the file (sound can run past the last frame).
+- Over 5000 frames from one video is refused with a message.
+
+Debug-only launch flags for checking the filled-in screens: `--frames-files a.mp4,b.mov [--frames-mode manual] [--frames-run]`.
+
+Tests: `Tests/ToolboxTests/ExtractFramesTests.swift`.
 
 ## Implementation notes for an agent
 - AVAssetImageGenerator for stills; ImageIO for PNG/JPEG/HEIC encoding.

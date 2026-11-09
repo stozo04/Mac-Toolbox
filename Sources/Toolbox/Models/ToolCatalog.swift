@@ -28,7 +28,7 @@ enum ToolCatalog {
              input: drop("a Video", "Drop a video to change its speed.", "film")),
         Tool(name: "Extract Frames", category: .video, symbol: "photo.on.rectangle",
              tagline: "Save stills from videos as PNG, JPEG or HEIC images.",
-             input: drop("a Video", "Drop a video to pull frames from.", "film")),
+             input: .extractFrames),
         Tool(name: "Convert Video", category: .video, symbol: "arrow.triangle.2.circlepath",
              tagline: "Change videos to MP4, MOV, WebM or M4V.",
              input: drop("Videos", "Drop videos to convert.", "film")),
