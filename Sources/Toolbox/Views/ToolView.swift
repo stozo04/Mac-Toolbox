@@ -66,6 +66,8 @@ struct ToolWorkspace: View {
             TrimVideoView()
         case .resizeVideo:
             ResizeVideoView()
+        case .compressVideo:
+            CompressVideoView()
         case .convertImages:
             ConvertImagesView()
         case .compressImages:
