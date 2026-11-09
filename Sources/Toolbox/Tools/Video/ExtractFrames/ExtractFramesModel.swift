@@ -147,6 +147,8 @@ final class ExtractFramesModel {
                 if let i = items.firstIndex(where: { $0.id == item.id }) {
                     items[i].duration = span?.length
                     items[i].videoStart = span?.start ?? 0
+                    // The player was loaded before the start was known; move it to the first real frame.
+                    if items[i].id == selectedID, items[i].videoStart > 0 { seek(to: items[i].videoStart) }
                 }
             }
         }
@@ -275,6 +277,9 @@ final class ExtractFramesModel {
         player.pause()
         seekTarget = nil
         player.currentItem?.step(byCount: frames)
+        // Stepping back from the first frame must not land in the gap before the picture.
+        let start = selected?.videoStart ?? 0
+        if start > 0, player.currentTime().seconds < start { seek(to: start) }
     }
 
     private func loadPlayer() {
@@ -283,6 +288,8 @@ final class ExtractFramesModel {
         seekTarget = nil
         guard let item = selected else { player.replaceCurrentItem(with: nil); return }
         player.replaceCurrentItem(with: AVPlayerItem(url: item.url))
+        // A picture that starts after 0 (an offset track) opens on its first frame, not on the empty gap before it.
+        if item.videoStart > 0 { seek(to: item.videoStart) }
     }
 
     private func update(_ id: UUID, _ change: (inout Item) -> Void) {
