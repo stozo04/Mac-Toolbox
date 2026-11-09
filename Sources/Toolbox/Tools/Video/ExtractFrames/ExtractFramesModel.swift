@@ -17,7 +17,9 @@ final class ExtractFramesModel {
     struct Item: Identifiable {
         let id = UUID()
         let url: URL
+        /// How long the picture lasts, and where it starts in the file (usually 0).
         var duration: Double?
+        var videoStart = 0.0
         var status = Status.waiting
         /// Saved frames, newest last. Empty for "ZIP only".
         var frames: [URL] = []
@@ -61,7 +63,11 @@ final class ExtractFramesModel {
 
     init(arguments: [String] = CommandLine.arguments) {
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
-            MainActor.assumeIsolated { if time.seconds.isFinite { self?.playhead = time.seconds } }
+            // While a scrub is still seeking, the player reports where it was; keep the thumb where the user put it.
+            MainActor.assumeIsolated {
+                guard let self, self.seekTarget == nil, time.seconds.isFinite else { return }
+                self.playhead = time.seconds
+            }
         }
         #if DEBUG
         // Debug aid for checking the filled-in screens: `--frames-files a.mp4,b.mov [--frames-mode manual] [--frames-run]`.
@@ -106,13 +112,17 @@ final class ExtractFramesModel {
         return s
     }
 
-    /// Frames the current settings would save across the waiting videos, once their lengths are known.
-    var estimatedCount: Int? {
-        guard mode != .manual, let settings else { return nil }
-        let durations = targets.compactMap(\.duration)
-        guard !durations.isEmpty else { return nil }
-        return durations.reduce(0) { $0 + FramePlan.times(duration: $1, settings: settings).count }
+    /// Frames the current settings would save per video, once their lengths are known.
+    private var plannedCounts: [Int] {
+        guard mode != .manual, let settings else { return [] }
+        return targets.compactMap(\.duration).map { FramePlan.times(duration: $0, settings: settings).count }
     }
+
+    /// The batch total, for the "About N frames" line.
+    var estimatedCount: Int? { plannedCounts.isEmpty ? nil : plannedCounts.reduce(0, +) }
+
+    /// True when some video would go over the per-video limit and be refused.
+    var exceedsLimit: Bool { plannedCounts.contains { $0 > FramePlan.maxFrames } }
 
     // MARK: Queue
 
@@ -133,8 +143,11 @@ final class ExtractFramesModel {
         if selectedID == nil { selectedID = items.first?.id }
         for item in new {
             Task {
-                let d = await FrameExtractor.duration(of: item.url)
-                if let i = items.firstIndex(where: { $0.id == item.id }) { items[i].duration = d }
+                let span = await FrameExtractor.videoSpan(of: item.url)
+                if let i = items.firstIndex(where: { $0.id == item.id }) {
+                    items[i].duration = span?.length
+                    items[i].videoStart = span?.start ?? 0
+                }
             }
         }
     }

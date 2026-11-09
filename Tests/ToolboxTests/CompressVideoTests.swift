@@ -125,6 +125,26 @@ final class CompressVideoTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: source), before, "the original must not change")
     }
 
+    func testResizingDoesNotTurnASoundTailIntoBlackVideo() async throws {
+        // One second of picture, two of sound: the re-rendered picture must stop where the real one does
+        // (the composition reader ends with the video track; this guards against that changing).
+        let source = dir.appendingPathComponent("tail.mov")
+        try await makeSource(at: source, size: CGSize(width: 1280, height: 720), pictureSeconds: 1)
+        let original = AVURLAsset(url: source)
+        let sourceVideoEnd = try await original.loadTracks(withMediaType: .video)[0].load(.timeRange).end.seconds
+        let sourceLength = try await original.load(.duration).seconds
+        XCTAssertEqual(sourceVideoEnd, 1, accuracy: 0.05)
+        XCTAssertEqual(sourceLength, 2, accuracy: 0.05, "the sound must run past the picture for this test to mean anything")
+        let result = try compressed(await VideoCompressor.compress(
+            source: source, settings: VideoCompressSettings(maxSize: .p480), into: dir) { _ in })
+        let asset = AVURLAsset(url: result.url)
+        let video = try await asset.loadTracks(withMediaType: .video)[0]
+        let end = try await video.load(.timeRange).end.seconds
+        XCTAssertEqual(end, 1, accuracy: 0.1)
+        let audioCount = try await asset.loadTracks(withMediaType: .audio).count
+        XCTAssertEqual(audioCount, 1)
+    }
+
     func testHEVCAndHardwareChoicesBothProduceAPlayableFile() async throws {
         let source = dir.appendingPathComponent("clip.mov")
         try await makeSource(at: source, size: CGSize(width: 640, height: 360))
@@ -260,14 +280,15 @@ final class CompressVideoTests: XCTestCase {
     }
 
     /// Two seconds of noisy picture at a high bitrate, so there is plenty to save; optionally with a tone and a rotation flag.
-    private func makeSource(at url: URL, size: CGSize, rotation: Double = 0, sound: Bool = true) async throws {
+    private func makeSource(at url: URL, size: CGSize, rotation: Double = 0, sound: Bool = true, pictureSeconds: Double = 2) async throws {
         let picture = dir.appendingPathComponent("pic-\(UUID()).mov")
         try await writePicture(at: picture, size: size, seconds: 2, noisy: true, bitrate: 12_000_000, bands: rotation != 0)
         let pictureAsset = AVURLAsset(url: picture)
         let composition = AVMutableComposition()
         let range = CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600))
         let v = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
-        try v.insertTimeRange(range, of: try await pictureAsset.loadTracks(withMediaType: .video)[0], at: .zero)
+        let pictureRange = CMTimeRange(start: .zero, duration: CMTime(seconds: pictureSeconds, preferredTimescale: 600))
+        try v.insertTimeRange(pictureRange, of: try await pictureAsset.loadTracks(withMediaType: .video)[0], at: .zero)
         v.preferredTransform = CGAffineTransform(rotationAngle: rotation)
         var toneAsset: AVURLAsset?
         if sound {

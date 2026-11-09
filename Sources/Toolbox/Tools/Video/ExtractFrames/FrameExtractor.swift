@@ -35,12 +35,9 @@ struct FrameResult {
 /// Saves stills from a video. The original is never touched.
 enum FrameExtractor {
     /// How long the picture lasts. The video track's end, not the file's: sound can run on past the last frame.
-    static func duration(of url: URL) async -> Double? {
-        try? await videoDuration(AVURLAsset(url: url))
-    }
-
-    private static func videoDuration(_ asset: AVAsset) async throws -> Double? {
-        try await videoSpan(asset).map { $0.length }
+    /// Where the picture starts in the file and how long it lasts; nil when there is none.
+    static func videoSpan(of url: URL) async -> (start: Double, length: Double)? {
+        try? await videoSpan(AVURLAsset(url: url))
     }
 
     /// Where the picture starts in the file and how long it lasts. Times in the plan count from that start.
@@ -104,11 +101,13 @@ enum FrameExtractor {
     }
 
     /// Saves the single frame at `time` (Pick by hand) into `folder`, numbered after the frames already there.
+    /// `time` is the player's time in the file; the file name counts from where the picture starts, like a batch run.
     static func extractOne(source: URL, at time: Double, settings: FrameSettings, folder: URL) async throws -> URL {
         let asset = AVURLAsset(url: source)
-        guard try await !asset.loadTracks(withMediaType: .video).isEmpty else { throw FrameError.noVideo }
+        guard let video = try await videoSpan(asset) else { throw FrameError.noVideo }
         let generator = makeGenerator(asset, settings: settings)
-        let at = CMTime(seconds: time, preferredTimescale: 600)
+        let at = CMTime(seconds: max(time, video.start), preferredTimescale: 600)
+        let nameTime = max(0, time - video.start)
         let image: CGImage
         if let exact = try? await generator.image(at: at).image {
             image = exact
@@ -122,10 +121,10 @@ enum FrameExtractor {
         let base = source.deletingPathExtension().lastPathComponent
         let existing = (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.filter { $0.hasPrefix(base + "_") }.count ?? 0
         var index = existing + 1
-        var url = folder.appendingPathComponent(FramePlan.fileName(base: base, index: index, time: time, format: settings.format))
+        var url = folder.appendingPathComponent(FramePlan.fileName(base: base, index: index, time: nameTime, format: settings.format))
         while FileManager.default.fileExists(atPath: url.path) {
             index += 1
-            url = folder.appendingPathComponent(FramePlan.fileName(base: base, index: index, time: time, format: settings.format))
+            url = folder.appendingPathComponent(FramePlan.fileName(base: base, index: index, time: nameTime, format: settings.format))
         }
         try write(image, to: url, settings: settings)
         return url

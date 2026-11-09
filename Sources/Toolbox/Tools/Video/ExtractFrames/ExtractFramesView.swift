@@ -110,8 +110,8 @@ struct ExtractFramesView: View {
                 Button { model.step(-1) } label: { Image(systemName: "chevron.left") }.help("Previous frame")
                 Button { model.step(1) } label: { Image(systemName: "chevron.right") }.help("Next frame")
                 Slider(value: Binding(get: { model.playhead }, set: { model.seek(to: $0) }),
-                       in: 0...max(model.selected?.duration ?? 1, 0.01))
-                Text(TrimTime.format(model.playhead)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                       in: scrubRange)
+                Text(TrimTime.format(max(0, model.playhead - (model.selected?.videoStart ?? 0)))).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Button {
                     model.saveCurrentFrame()
                 } label: { Label("Save Frame", systemImage: "camera") }
@@ -119,6 +119,12 @@ struct ExtractFramesView: View {
                     .disabled(model.isSavingOne || model.settings == nil)
             }
         }
+    }
+
+    /// The picture's own span in the file; usually 0 to its length.
+    private var scrubRange: ClosedRange<Double> {
+        let start = model.selected?.videoStart ?? 0
+        return start...(start + max(model.selected?.duration ?? 1, 0.01))
     }
 
     // MARK: Frames
@@ -294,9 +300,9 @@ struct ExtractFramesView: View {
         } else if model.mode != .manual {
             VStack(alignment: .leading, spacing: 6) {
                 if let n = model.estimatedCount {
-                    Text(n > FramePlan.maxFrames ? "Too many frames for one video. Lower the rate."
+                    Text(model.exceedsLimit ? "Over \(FramePlan.maxFrames) frames for one video. Lower the rate or use part of it."
                          : "About \(n) frame\(n == 1 ? "" : "s") in all.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(model.exceedsLimit ? .red : .secondary)
                 }
                 HStack {
                     Spacer()

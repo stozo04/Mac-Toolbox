@@ -28,6 +28,7 @@ final class CompressVideoModel {
     var settings = VideoCompressSettings()
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -60,6 +61,7 @@ final class CompressVideoModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -70,6 +72,8 @@ final class CompressVideoModel {
 
     func compress() {
         guard !isRunning, hasPending else { return }
+        let run = UUID()
+        runID = run
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Compressed Videos")
@@ -77,8 +81,10 @@ final class CompressVideoModel {
         let settings = self.settings
         task = Task { [weak self] in
             guard let self else { return }
+            // A run cancelled by Clear may finish after a new one started; only the current run may mark itself idle.
+            defer { if runID == run { isRunning = false } }
             for id in items.filter({ $0.status == .waiting }).map(\.id) {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(id, .compressing(0))
                 guard let url = items.first(where: { $0.id == id })?.url else { continue }
                 do {
@@ -107,7 +113,6 @@ final class CompressVideoModel {
                     ]))
                 }
             }
-            isRunning = false
         }
     }
 
