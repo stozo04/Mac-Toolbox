@@ -66,6 +66,8 @@ struct ToolWorkspace: View {
             TrimVideoView()
         case .resizeVideo:
             ResizeVideoView()
+        case .compressVideo:
+            CompressVideoView()
         case .convertImages:
             ConvertImagesView()
         case .compressImages:
@@ -102,6 +104,8 @@ struct ToolWorkspace: View {
             MacToolView(tool: tool)
         case .videoToGif:
             VideoToGifView()
+        case .extractFrames:
+            ExtractFramesView()
         case .live(let symbol, let idle, let action):
             LiveWorkspace(symbol: symbol, idle: idle, action: action)
         case .text:
