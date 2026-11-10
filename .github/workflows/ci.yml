@@ -15,6 +15,18 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    name: Version bumped
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version raised and release notes added (AGENTS.md, "Versioning")
+        run: scripts/check-version-bump.sh "origin/${{ github.base_ref }}"
+
   build-and-test:
     name: Build & test
     runs-on: macos-26
@@ -54,7 +66,7 @@ jobs:
         if: steps.tools-cache.outputs.cache-hit != 'true'
         run: scripts/fetch-tools.sh
       - name: Build the app (release, ad-hoc signed)
-        run: VERSION="0.1.${{ github.run_number }}" scripts/make-app.sh
+        run: BUILD="${{ github.run_number }}" scripts/make-app.sh   # version from ReleaseNotes.swift, run number as build
       - name: Upload Toolbox.zip
         uses: actions/upload-artifact@v4
         with:

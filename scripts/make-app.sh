@@ -2,7 +2,7 @@
 # Builds dist/Toolbox.app (+ dist/Toolbox.zip) with yt-dlp, ffmpeg and ffprobe inside.
 #
 #   scripts/fetch-tools.sh && scripts/make-app.sh
-#   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" VERSION=1.0.0 scripts/make-app.sh
+#   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" scripts/make-app.sh
 #
 # Without SIGN_IDENTITY the app is ad-hoc signed: fine on this Mac, not for distribution.
 # For distribution also notarize: xcrun notarytool submit dist/Toolbox.zip --wait ... ; xcrun stapler staple dist/Toolbox.app
@@ -10,7 +10,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TOOLS="${TOOLS_DIR:-$ROOT/build/tools}"
-VERSION="${VERSION:-0.1.0}"
+# Version comes from AppVersion.current in ReleaseNotes.swift (override with VERSION=... only for experiments).
+VERSION="${VERSION:-$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' "$ROOT/Sources/Toolbox/Support/ReleaseNotes.swift" | head -1)}"
+[ -n "$VERSION" ] || { echo "Could not read the version from ReleaseNotes.swift"; exit 1; }
+BUILD="${BUILD:-$VERSION}"   # CFBundleVersion; CI passes its run number
 IDENTITY="${SIGN_IDENTITY:--}"
 ARCH_FLAGS=(--arch arm64 --arch x86_64)
 [ -n "${ARCHS:-}" ] && ARCH_FLAGS=($(for a in $ARCHS; do echo --arch "$a"; done))
@@ -44,7 +47,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
