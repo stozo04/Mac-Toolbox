@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lineLength": 160,
+  "indentation": { "spaces": 4 },
+  "maximumBlankLines": 1,
+  "respectsExistingLineBreaks": true,
+  "lineBreakBeforeEachArgument": false,
+  "rules": {
+    "AlwaysUseLowerCamelCase": false,
+    "AllPublicDeclarationsHaveDocumentation": false,
+    "OrderedImports": true,
+    "NoBlockComments": false,
+    "UseLetInEveryBoundCaseVariable": false,
+    "ValidateDocumentationComments": false,
+    "OneCasePerLine": false,
+    "OneVariableDeclarationPerLine": false,
+    "NeverForceUnwrap": false,
+    "NeverUseForceTry": false,
+    "NeverUseImplicitlyUnwrappedOptionals": false
+  }
+}

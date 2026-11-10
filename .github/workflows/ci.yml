@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & test
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/CWebP/**') }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test --skip-build
+
+  package:
+    name: Package Toolbox.app
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      ARCHS: arm64   # Apple silicon build for trying the PR; make-app.sh without ARCHS builds universal for releases
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache yt-dlp + ffmpeg (built by scripts/fetch-tools.sh)
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: build/tools
+          key: tools-${{ runner.os }}-${{ env.ARCHS }}-${{ hashFiles('scripts/fetch-tools.sh') }}
+      - name: Fetch and build helper tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: scripts/fetch-tools.sh
+      - name: Build the app (release, ad-hoc signed)
+        run: VERSION="0.1.${{ github.run_number }}" scripts/make-app.sh
+      - name: Upload Toolbox.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Toolbox-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || format('run{0}', github.run_number) }}
+          path: dist/Toolbox.zip
+          retention-days: 14
+          if-no-files-found: error
+      - name: How to open it
+        run: |
+          {
+            echo "### Toolbox.app for this run"
+            echo "Download the **Toolbox-…** artifact below (or \`gh run download ${{ github.run_id }} -R ${{ github.repository }}\`), unzip it, then unzip Toolbox.zip."
+            echo "It is ad-hoc signed, so the first time: right-click Toolbox.app → Open, or run \`xattr -dr com.apple.quarantine Toolbox.app\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: Lint & format
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SwiftLint
+        run: command -v swiftlint >/dev/null || brew install swiftlint
+      - name: SwiftLint (errors fail the check, warnings are annotated)
+        run: swiftlint lint --reporter github-actions-logging
+      - name: swift-format (report only for now)
+        continue-on-error: true
+        run: |
+          xcrun swift-format lint --recursive --parallel Sources/Toolbox Tests 2>&1 | tee swift-format.txt | head -200
+          echo "swift-format findings: $(grep -c ': warning:' swift-format.txt || true)" >> "$GITHUB_STEP_SUMMARY"
