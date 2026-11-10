@@ -19,6 +19,12 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Own row so it never covers a tool's buttons in the bottom-right corner.
+            HStack {
+                Spacer()
+                VersionBadge()
+            }
+            .padding(.horizontal, 12).padding(.bottom, 6)
         }
         .background(Theme.background)
     }

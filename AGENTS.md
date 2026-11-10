@@ -12,11 +12,14 @@ Toolbox: a native macOS app (SwiftUI, macOS 14+, Swift Package Manager) that bun
 swift build
 swift run Toolbox
 .build/debug/Toolbox --page "Video/Trim Video"   # debug: open a page at launch (home | <Category> | <Category>/<Tool>)
+.build/debug/Toolbox --release-notes             # debug: open the release history at launch
+.build/debug/Toolbox --release-notes             # debug: open the release history at launch
 ```
 
 ## Code map
 - `Sources/Toolbox/Models/ToolCatalog.swift` - single source of truth for every tool (name, category, SF Symbol, tagline, workspace type). Add or rename tools here.
 - `Sources/Toolbox/Models/Tool.swift`, `ToolCategory.swift` - models; `ToolInput` picks the generic workspace.
+- `Sources/Toolbox/Support/ReleaseNotes.swift` - app version and release history; `Views/VersionBadge.swift` shows them.
 - `Sources/Toolbox/Support/AppState.swift` - page, search, favorites, recents, dark/light. `Theme.swift` - adaptive colors (use `Theme.*`, never hardcode white/black).
 - `Sources/Toolbox/AIModels/` - `ModelScanner` (where models are and what they are), `ModelKnowledge` (plain-words descriptions), `GGUFInfo`, `AppAssociations` (which app uses a model), `ModelLibrary` (the live list: `FileWatcher` + Spotlight), `ModelMover` (central folder with links).
 - `Sources/Toolbox/Views/` - `RootView`, `TopBar`, `HomeView`, `CategoryView`/`ToolCard`, `ToolView` (shared header + `ToolWorkspace` switch), `Workspaces.swift` (DropZone, Link, Live, Text, OptionsPanel).
@@ -27,6 +30,13 @@ swift run Toolbox
 2. Create the view and logic under `Sources/Toolbox/Tools/<Category>/<Tool>/` (separate service type from UI state so it is testable).
 3. Route to it from `ToolWorkspace` in `Views/ToolView.swift`.
 4. Run the app and compare against the screenshot (window-only screenshot: `screencapture -l<windowID>`; do not capture the full screen).
+
+## Versioning (every PR)
+- The version lives in one place: `AppVersion.current` in `Sources/Toolbox/Support/ReleaseNotes.swift` (semantic versioning, `MAJOR.MINOR.PATCH`). `scripts/make-app.sh` reads it for Info.plist, and the app shows it in the bottom-right corner; clicking it opens the release history.
+- Every PR bumps it: PATCH for bug fixes and small tweaks, MINOR for a new tool or feature (resets PATCH), MAJOR only when the user says so. One bump per PR, even with several commits; if main moved on, re-bump above main's version before merging.
+- In the same PR add a `Release` at the TOP of `ReleaseNotes.all` with today's date and one plain-words line per change, tagged `.new`, `.improved`, `.fixed` or `.removed`. Write for the user, not the code ("Trim Video keeps the sound", not "fix AVAssetExportSession preset").
+- CI enforces it: the "Version bumped" job in `.github/workflows/ci.yml` runs `scripts/check-version-bump.sh`, which fails if the version is not higher than main's or the notes are missing. Run it locally before opening a PR. `ReleaseNotesTests` checks the history is ordered and matches the current version.
+- After the PR merges, tag main: `git tag vX.Y.Z && git push origin vX.Y.Z` (ask before pushing).
 
 ## Rules
 - On device only; no network/API calls unless a tool's README says otherwise (Download Video, Network Speed Test). The one app-wide exception is `Log` (see `Support/Logging/`), which may send warning+ events to Supabase (all Supabase SQL objects are prefixed `macToolKit_`, see supabase/migrations/). Only the installed app sends (debug builds, `swift run` and `.build/` runs never do; `TOOLBOX_LOG_REMOTE=1` forces it for pipeline tests). Warning/error/critical logs must be detailed enough to diagnose without the user: use `Log.details(error, file:, [context])` (error type/domain/code/description, underlying error, file name/extension/size); `Log` adds the current page and the last events automatically. File names and link paths are fine; never file contents, passwords, tokens, link query strings or the account name (scrubbed by `LogText`). A weekday 10:00 scheduled task (`scripts/log-fixer/PROMPT.md`) reads new warning+ rows and opens a draft PR with fixes; when you add a failure path, log it with `Log.details`.
