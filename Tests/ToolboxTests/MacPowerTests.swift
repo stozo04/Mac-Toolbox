@@ -15,7 +15,18 @@ final class FakeRestarter: ProcessRestarter {
 final class FakePreventer: SleepPreventer {
     private(set) var isHeld = false
     private(set) var display = false
-    func hold(keepDisplayOn: Bool, reason: String) { isHeld = true; display = keepDisplayOn }
+    private(set) var holds = 0
+    private(set) var releases = 0
+    func hold(keepDisplayOn: Bool, reason: String) { isHeld = true; display = keepDisplayOn; holds += 1 }
+    func release() { isHeld = false; releases += 1 }
+}
+
+/// Like IOKit refusing the display assertion: `hold` is called but `isHeld` stays false until `refuse` is cleared.
+final class RefusingPreventer: SleepPreventer {
+    var refuse = true
+    private(set) var isHeld = false
+    private(set) var holds = 0
+    func hold(keepDisplayOn: Bool, reason: String) { holds += 1; isHeld = !refuse }
     func release() { isHeld = false }
 }
 
@@ -37,6 +48,19 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let after = try await assertions()
         XCTAssertFalse(after.contains(reason), "assertion should be gone after release")
         XCTAssertFalse(held.isHeld)
+    }
+
+    /// Holding again with the same settings keeps the assertions already held instead of making new ones.
+    func testHoldingAgainDoesNotStackAssertions() async throws {
+        let reason = "Toolbox Keep Awake \(UUID().uuidString.prefix(8))"
+        let held = PowerAssertions()
+        held.hold(keepDisplayOn: true, reason: reason)
+        held.hold(keepDisplayOn: true, reason: reason)
+        held.hold(keepDisplayOn: false, reason: reason)
+        defer { held.release() }
+        let lines = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
+        XCTAssertEqual(lines.count, 1, "one system-sleep assertion, the display one dropped")
+        XCTAssertTrue(lines[0].contains("PreventUserIdleSystemSleep"))
     }
 
     func testDisplayAssertionIsOptional() async throws {
@@ -101,6 +125,50 @@ final class KeepAwakeTests: XCTestCase {
         onPower = true
         m.refresh()
         XCTAssertTrue(p.isHeld)
+        m.stop()
+    }
+
+    /// While plugged in, the power source notifies on every charge-level change. Those refreshes must never drop
+    /// and re-create the hold: the gap lets macOS sleep at once when the user has been idle past the sleep setting.
+    func testPowerUpdatesWhilePluggedInKeepTheSameHold() {
+        let p = FakePreventer(), m = make(p)
+        m.onlyOnPowerAdapter = true
+        m.start()
+        for _ in 0..<5 { m.refresh() }
+        XCTAssertTrue(p.isHeld)
+        XCTAssertEqual(p.holds, 1)
+        XCTAssertEqual(p.releases, 0)
+        m.stop()
+    }
+
+    /// If an assertion could not be created, the preventer reports it is not held and the next refresh asks again.
+    func testRefusedAssertionIsRetriedOnNextRefresh() {
+        let p = RefusingPreventer(), m = KeepAwakeModel(assertions: p, now: { self.clock }, onPowerAdapter: { self.onPower })
+        m.start()
+        XCTAssertEqual(p.holds, 1)
+        XCTAssertFalse(p.isHeld)
+        p.refuse = false
+        m.refresh()
+        XCTAssertEqual(p.holds, 2)
+        XCTAssertTrue(p.isHeld)
+        m.refresh()
+        XCTAssertEqual(p.holds, 2)
+        m.stop()
+    }
+
+    func testUnplugAndReplugReleasesThenHoldsAgain() {
+        let p = FakePreventer(), m = make(p)
+        m.onlyOnPowerAdapter = true
+        m.start()
+        onPower = false
+        m.refresh()
+        XCTAssertFalse(p.isHeld)
+        onPower = true
+        m.refresh()
+        m.refresh()
+        XCTAssertTrue(p.isHeld)
+        XCTAssertEqual(p.holds, 2)
+        guard case .awake = m.state else { return XCTFail("\(m.state)") }
         m.stop()
     }
 

@@ -41,6 +41,8 @@ final class KeepAwakeModel {
     private let onPowerAdapter: () -> Bool
     private var timer: Task<Void, Never>?
     private var powerObserver: AnyObject?
+    /// The display setting of the assertions we hold, so a repeat refresh leaves them alone.
+    private var heldDisplay: Bool?
 
     var isOn: Bool { state != .off }
 
@@ -68,10 +70,12 @@ final class KeepAwakeModel {
         timer = nil
         powerObserver = nil
         assertions.release()
+        heldDisplay = nil
         state = .off
     }
 
-    /// Applies the toggles and the power source to what is currently held.
+    /// Applies the toggles and the power source to what is currently held. The power source notifies on every
+    /// charge-level change while plugged in, so this must not touch assertions that are already right.
     func refresh() {
         let end: Date?
         switch state {
@@ -80,9 +84,13 @@ final class KeepAwakeModel {
         }
         if onlyOnPowerAdapter && !onPowerAdapter() {
             assertions.release()
+            heldDisplay = nil
             state = .waitingForPower(until: end)
         } else {
-            assertions.hold(keepDisplayOn: keepDisplayOn, reason: "Toolbox Keep Awake")
+            if !assertions.isHeld || heldDisplay != keepDisplayOn {
+                assertions.hold(keepDisplayOn: keepDisplayOn, reason: "Toolbox Keep Awake")
+                heldDisplay = keepDisplayOn
+            }
             state = .awake(until: end)
         }
     }
