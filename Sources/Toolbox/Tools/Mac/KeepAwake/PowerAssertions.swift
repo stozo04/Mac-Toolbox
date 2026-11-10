@@ -37,7 +37,8 @@ final class PowerAssertions: SleepPreventer {
         }
         for id in stale { IOPMAssertionRelease(id) }
         heldReason = reason
-        isHeld = system != 0
+        // Only true when everything asked for exists, so a refused assertion is retried on the next refresh.
+        isHeld = system != 0 && (!keepDisplayOn || display != 0)
     }
 
     func release() {

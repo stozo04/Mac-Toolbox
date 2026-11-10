@@ -21,6 +21,15 @@ final class FakePreventer: SleepPreventer {
     func release() { isHeld = false; releases += 1 }
 }
 
+/// Like IOKit refusing the display assertion: `hold` is called but `isHeld` stays false until `refuse` is cleared.
+final class RefusingPreventer: SleepPreventer {
+    var refuse = true
+    private(set) var isHeld = false
+    private(set) var holds = 0
+    func hold(keepDisplayOn: Bool, reason: String) { holds += 1; isHeld = !refuse }
+    func release() { isHeld = false }
+}
+
 final class PowerAssertionsLiveTests: XCTestCase {
     private func assertions() async throws -> String {
         try await Shell.run("/usr/bin/pmset", ["-g", "assertions"]).out
@@ -129,6 +138,21 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertTrue(p.isHeld)
         XCTAssertEqual(p.holds, 1)
         XCTAssertEqual(p.releases, 0)
+        m.stop()
+    }
+
+    /// If an assertion could not be created, the preventer reports it is not held and the next refresh asks again.
+    func testRefusedAssertionIsRetriedOnNextRefresh() {
+        let p = RefusingPreventer(), m = KeepAwakeModel(assertions: p, now: { self.clock }, onPowerAdapter: { self.onPower })
+        m.start()
+        XCTAssertEqual(p.holds, 1)
+        XCTAssertFalse(p.isHeld)
+        p.refuse = false
+        m.refresh()
+        XCTAssertEqual(p.holds, 2)
+        XCTAssertTrue(p.isHeld)
+        m.refresh()
+        XCTAssertEqual(p.holds, 2)
         m.stop()
     }
 
