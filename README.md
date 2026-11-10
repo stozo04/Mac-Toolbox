@@ -4,7 +4,7 @@
 
 Toolbox puts the small utilities you reach for every day into one app: convert a video, trim a recording, compress photos, sign a PDF, rename a pile of files, keep your Mac awake. Everything runs on your Mac, and your original files are never changed.
 
-> **Status: early preview.** The app's layout, navigation and look are in place, and nineteen tools are fully working: five video tools (**Download Video**, **Record Screen**, **Trim Video**, **Video to GIF**, **Resize Video**) and all fourteen **Mac** tools. The rest can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
+> **Status: early preview.** The app's layout, navigation and look are in place, and thirty-seven tools are fully working: ten **Video** tools, all eleven **Images** tools, two **Docs** tools (**Scan Document** and **Redact PDF**) and all fourteen **Mac** tools. The rest can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
 
 ## What's inside
 
@@ -37,6 +37,8 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 
 ### Working tools
 
+#### Video
+
 | Tool | What it does |
 |---|---|
 | **Download Video** | Paste one or more links (YouTube, X, TikTok, Instagram, Vimeo and more) and save them to a dated folder in Downloads. Choose best quality, 1080p, 720p or audio only, and prefer H.264 so the files play everywhere. Needs the internet. |
@@ -44,6 +46,39 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 | **Trim Video** | Drop a video, drag the start and end handles on a filmstrip timeline (or set them to the playhead, or type a time), preview the selection, and save a `(Trimmed)` copy to a dated folder in Downloads. The video is copied without re-encoding whenever the format allows, so quality doesn't change. |
 | **Video to GIF** | Drop one or more videos (or a whole folder), choose 10, 15 or 24 fps and a width of 320, 480, 640 pixels or the original size, and decide whether the GIF loops forever. Optionally convert only a part of each video by setting a start time and duration. GIFs are saved to a dated folder in Downloads; videos are never enlarged. |
 | **Resize Video** | Drop one or more videos (or a whole folder) and resize them to a preset (4K, 1440p, 1080p, 720p, 480p, Square, Vertical) or any custom width and height. With the aspect ratio kept, choose Fit within size, Add black bars or Crop to fill; turn it off to stretch. Saves H.264 or HEVC MP4 files to a dated folder in Downloads. Odd sizes are rounded down to even, as video encoders require. |
+| **Compress Video** | Shrink videos with High, Balanced or Small quality, as H.264 or HEVC, with an optional maximum size that never enlarges. Rotated videos stay upright, and a copy that wouldn't come out smaller isn't kept. |
+| **Extract Frames** | Save stills from one or more videos: every few seconds, a set number per second, a set number spread evenly, or one at a time from a scrubbable player. Choose PNG, JPEG or HEIC and a size, and get images, a ZIP or both, in a new "Frames" folder. |
+| **Media Info** | See the codec, resolution, frame rate, bitrate and metadata of videos and audio. |
+| **Mute Video** | Remove the soundtrack from videos without re-encoding. |
+| **Burn In Subtitles** | Add captions to a video from an SRT file or automatic transcription. |
+
+#### Images
+
+| Tool | What it does |
+|---|---|
+| **Convert Images** | Save photos as HEIC, WebP, JPG, JPEG or PNG. |
+| **Compress Images** | Make photos smaller without visible loss in quality. |
+| **Resize Images** | Scale photos by percentage, longest side or exact size, with a preview whose handles you drag to set the size. |
+| **Rotate Images** | Turn photos 90 degrees or flip them, a whole batch at once, with a live preview. Copies go to a dated folder in Downloads. |
+| **Blur Faces** | Find faces in photos and blur, pixelate or black them out. |
+| **Remove Background** | Lift the subject out of photos and save it with a transparent or solid background. |
+| **Remove Metadata** | Strip location, camera and date info from photos. JPEGs are copied without losing quality, and the result is checked. |
+| **Redact Image** | Blur, pixelate or black out areas you drag, or let Find & Cover find names and faces for you. |
+| **Annotate Screenshot** | Add arrows, shapes, text, numbered steps, pen marks and blur to a screenshot, crop it, then copy, save or drag it out. |
+| **Beautify Screenshot** | Put screenshots on a soft background with padding, rounded corners and a shadow. |
+| **Color Picker** | Pick any color on screen and copy it as HEX, rgb(), hsl(), OKLCH, SwiftUI, NSColor, UIColor or the nearest Tailwind color. Keeps your last 20 colors, finds the main colors of an image and checks text against its background for WCAG contrast. |
+
+#### Docs
+
+| Tool | What it does |
+|---|---|
+| **Scan Document** | Scan paper with your iPhone or from photos. Pages are found, straightened and cleaned up as Color, Grayscale or Black & White, then reordered, rotated or removed and saved as one PDF, with optional searchable text. |
+| **Redact PDF** | Drag boxes or search for a word on every page to black it out. The text under each box is removed for good, not just covered up, and the saved copy is checked before it is kept. |
+
+#### Mac
+
+| Tool | What it does |
+|---|---|
 | **Network Speed Test** | Measure download, upload, responsiveness and latency with Apple's own `networkQuality` test, with a gauge, a plain-language verdict and a history to compare rooms or times. |
 | **Storage Explorer** | See what's filling your disk: the usual space hogs (app caches, Homebrew, Docker, simulators, backups, Trash, old Downloads) and a folder-size browser. Clearing goes to the Trash. |
 | **Wi-Fi Password & QR** | Show the password of a saved Wi-Fi network (macOS asks for your approval) and make a QR code guests can scan to join. |
@@ -59,14 +94,24 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 | **Display Control** | Change an external monitor's brightness, contrast and volume over DDC/CI. Apple silicon only; some adapters and docks block it. |
 | **Mouse Fixes** | Reverse, speed up or smooth out the mouse wheel without touching the trackpad. Needs Accessibility access and works while Toolbox is open. |
 
+### Coming soon
+
+These 31 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
+
+- **Video:** Change Speed, Convert Video, Crop & Rotate Video, Merge Videos
+- **Audio:** Clean Up Audio, Record Audio, Trim Audio, Extract Audio, Convert Audio
+- **Docs:** Fill & Flatten Forms, Make PDF Searchable, PDF to Word, Sign PDF, Merge PDFs, Split PDF, Organize PDF, Delete Pages, Extract Pages, Images to PDF, Compress PDF
+- **Text & Speech:** Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document
+- **Files:** QR Code, Batch Rename, Find Duplicates, Zip & Unzip
+
 ### The app itself
 
 | Works now | Not built yet |
 |---|---|
-| Browsing all categories and tools | The other 54 tools: they open to an empty page and don't process files yet |
+| Browsing all categories and tools | The 31 tools listed under [Coming soon](#coming-soon) |
 | Search, favorites, recent tools | Saving your favorites and settings between launches |
 | Light / dark mode switch | The remaining Docs tools |
-| Five video tools and all 14 Mac tools | A global hotkey for Record Screen |
+| 37 working tools: ten Video, eleven Images, two Docs and all fourteen Mac | A global hotkey for Record Screen |
 
 ## Requirements
 
@@ -87,7 +132,7 @@ To build the packaged app (a universal `Toolbox.app` with yt-dlp and ffmpeg insi
 
 ## Permissions you may be asked for
 
-macOS asks for permission the first time a tool needs it. Today that means **Screen Recording** for Record Screen, and **Microphone** only if you turn on the microphone there. Later tools will ask for more, such as Microphone (Record Audio) or Accessibility (Clean Keyboard). When you run with `swift run`, macOS lists your terminal app in these prompts rather than Toolbox. You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
+macOS asks for permission the first time a tool needs it. Today that means **Screen Recording** for Record Screen, **Microphone** only if you turn on the microphone there, and **Accessibility** for Clean Keyboard and Mouse Fixes. Later tools will ask for more, such as Microphone (Record Audio). When you run with `swift run`, macOS lists your terminal app in these prompts rather than Toolbox. You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
 
 ## Feedback
 
