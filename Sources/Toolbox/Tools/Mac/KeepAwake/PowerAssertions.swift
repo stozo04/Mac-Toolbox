@@ -13,24 +13,48 @@ protocol SleepPreventer: AnyObject {
 final class PowerAssertions: SleepPreventer {
     private var system: IOPMAssertionID = 0
     private var display: IOPMAssertionID = 0
+    private var heldReason: String?
     private(set) var isHeld = false
 
+    /// Changes only what differs, and creates any new assertion before dropping an old one. A moment with no
+    /// assertion is enough for macOS to sleep the display or the Mac when the user has been idle past the sleep setting.
     func hold(keepDisplayOn: Bool, reason: String) {
-        release()
+        let renamed = reason != heldReason
+        var stale: [IOPMAssertionID] = []
         // Idle system sleep is always prevented; the display only when asked, so the screen can still turn off.
-        IOPMAssertionCreateWithName("PreventUserIdleSystemSleep" as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                                    reason as CFString, &system)
-        if keepDisplayOn {
-            IOPMAssertionCreateWithName("PreventUserIdleDisplaySleep" as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                                        reason as CFString, &display)
+        if renamed || system == 0 {
+            if system != 0 { stale.append(system) }
+            system = create("PreventUserIdleSystemSleep", reason)
         }
-        isHeld = true
+        if keepDisplayOn {
+            if renamed || display == 0 {
+                if display != 0 { stale.append(display) }
+                display = create("PreventUserIdleDisplaySleep", reason)
+            }
+        } else if display != 0 {
+            stale.append(display)
+            display = 0
+        }
+        for id in stale { IOPMAssertionRelease(id) }
+        heldReason = reason
+        isHeld = system != 0
     }
 
     func release() {
         if system != 0 { IOPMAssertionRelease(system); system = 0 }
         if display != 0 { IOPMAssertionRelease(display); display = 0 }
+        heldReason = nil
         isHeld = false
+    }
+
+    private func create(_ type: String, _ reason: String) -> IOPMAssertionID {
+        var id: IOPMAssertionID = 0
+        let result = IOPMAssertionCreateWithName(type as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), reason as CFString, &id)
+        guard result == kIOReturnSuccess else {
+            Log.warning("Power assertion was not created", category: "keepawake", ["type": type, "code": String(result)])
+            return 0
+        }
+        return id
     }
 
     deinit { release() }
