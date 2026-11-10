@@ -39,7 +39,7 @@ final class LoggingTests: XCTestCase {
         XCTAssertEqual(req.url?.absoluteString, "https://abc.supabase.co/rest/v1/mactoolkit_app_logs")
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "pub")
         XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer pub")
-        let json = try JSONSerialization.jsonObject(with: req.httpBody!) as! [[String: Any]]
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(req.httpBody)) as? [[String: Any]])
         XCTAssertEqual(json[0]["level"] as? String, "error")
         XCTAssertEqual(json[0]["install_id"] as? String, "i")
         XCTAssertEqual(json[0]["timestamp"] as? String, "1970-01-01T00:00:00Z")
