@@ -174,6 +174,65 @@ final class AIModelsTests: XCTestCase {
         XCTAssertTrue(model.tags.contains("Q4_K_M"))
     }
 
+    func testAFolderOfShardsBesideAConfigIsOneModelNotOnePerFile() throws {
+        let folder = home.appendingPathComponent("models/qwen3.8-27b-8bit")
+        let shards = ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"].map { folder.appendingPathComponent($0) }
+        for shard in shards { try makeFile(shard, megabytes: 6) }
+        try Data(#"{"vision_config":{},"quantization":{"bits":8,"group_size":64}}"#.utf8).write(to: folder.appendingPathComponent("config.json"))
+        try Data("{}".utf8).write(to: folder.appendingPathComponent("video_preprocessor_config.json"))
+        let found = scan(extra: shards)
+        XCTAssertEqual(found.count, 1)
+        let model = try XCTUnwrap(found.first)
+        XCTAssertEqual(model.name, "Qwen3.8 27B 8-bit")
+        XCTAssertEqual(model.kind, .language)
+        XCTAssertEqual(model.parts, 2)
+        XCTAssertEqual(model.version?.value, "3.8")
+        XCTAssertTrue(model.tags.contains("8-bit") && model.tags.contains("Vision"))
+        XCTAssertTrue(model.summary.contains("pictures and video"))
+        XCTAssertEqual(model.movability, .managed("A folder of files; folders are not moved automatically."))
+    }
+
+    func testAVideoModelFolderIsNamedAndSortedAsVideoCreation() throws {
+        let folder = home.appendingPathComponent("models/ltx-2.5-mlx-q8")
+        let files = ["transformer-distilled.safetensors", "text_encoder.safetensors"].map { folder.appendingPathComponent($0) }
+        for file in files { try makeFile(file, megabytes: 6) }
+        try Data("{}".utf8).write(to: folder.appendingPathComponent("embedded_config.json"))
+        let model = try XCTUnwrap(scan(extra: files).first)
+        XCTAssertEqual(model.name, "LTX 2.5 MLX Q8")
+        XCTAssertEqual(model.kind, .videoGeneration)
+        XCTAssertEqual(model.version?.value, "2.5")
+        XCTAssertTrue(model.tags.contains("8-bit"))
+    }
+
+    func testAPipelineWithComponentConfigsIsOneModelCountedOnce() throws {
+        let root = home.appendingPathComponent("models/ltx-2.5-mlx-q8")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: root.appendingPathComponent("embedded_config.json"))
+        let encoder = root.appendingPathComponent("text_encoder")
+        let files = [root.appendingPathComponent("transformer.safetensors"),
+                     encoder.appendingPathComponent("model-00001-of-00002.safetensors"),
+                     encoder.appendingPathComponent("model-00002-of-00002.safetensors"),
+                     root.appendingPathComponent("vae/diffusion_pytorch_model.safetensors")]
+        for file in files { try makeFile(file, megabytes: 6) }
+        try Data("{}".utf8).write(to: encoder.appendingPathComponent("config.json"))
+        let found = scan(extra: files)
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first?.url.standardizedFileURL.path, root.standardizedFileURL.path)
+        XCTAssertEqual(found.first?.bytes, ModelScanner.size(ofFolder: root))
+    }
+
+    func testOutermostFoldersDropsNestedOnes() {
+        let a = URL(fileURLWithPath: "/m/ltx"), b = URL(fileURLWithPath: "/m/ltx/text_encoder"), c = URL(fileURLWithPath: "/m/ltx-2")
+        XCTAssertEqual(ModelScanner.outermostFolders([a, b, c]), [a, c])
+    }
+
+    func testSafetensorsFilesWithNoConfigBesideThemStayIndividualModels() throws {
+        let folder = home.appendingPathComponent("ComfyUI/models/text_encoders")
+        let files = ["one.safetensors", "two.safetensors"].map { folder.appendingPathComponent($0) }
+        for file in files { try makeFile(file, megabytes: 6) }
+        XCTAssertEqual(scan(extra: files).count, 2)
+    }
+
     func testAddingAndRemovingAFileChangesTheNextScan() throws {
         try makeDigUp()
         XCTAssertEqual(scan().count, 2)

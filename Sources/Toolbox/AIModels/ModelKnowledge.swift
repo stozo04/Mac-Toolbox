@@ -82,6 +82,8 @@ enum ModelKnowledge {
         Rule(matches: ["demucs*", "spleeter"], title: nil, summary: "Separates a song into vocals, drums, bass and other parts.", kind: .audio),
         Rule(matches: ["stable-diffusion*", "stable_diffusion*", "sdxl*", "sd_xl*", "flux", "sd3", "dreamshaper*"], title: nil,
              summary: "Creates images from a written description (text to image).", kind: .imageGeneration),
+        Rule(matches: ["ltx*"], title: nil,
+             summary: "Creates video, with sound, from a written description or a still picture (text to video, image to video).", kind: .videoGeneration),
         Rule(matches: ["realesrgan*", "esrgan*", "upscal*"], title: nil, summary: "Makes images bigger and sharper (upscaling).", kind: .vision),
         Rule(matches: ["u2net*", "isnet*", "birefnet*", "rembg*", "modnet*"], title: nil, summary: "Cuts the subject out of a photo by finding what is foreground and what is background.", kind: .vision),
         Rule(matches: ["segment-anything*", "sam_vit*", "sam2*", "mobile_sam*"], title: nil, summary: "Outlines any object in a picture that you point at (segmentation).", kind: .vision),

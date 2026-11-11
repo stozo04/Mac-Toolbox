@@ -325,6 +325,7 @@ struct ModelScanner {
 
     private func looseModels(outside roots: [Root]) -> [InstalledModel] {
         var out: [InstalledModel] = []
+        var modelFolders = Set<URL>()
         for path in extraPaths {
             let url = path.standardizedFileURL
             let text = url.path + (url.hasDirectoryPath ? "/" : "")
@@ -339,6 +340,11 @@ struct ModelScanner {
             } else {
                 let real = url.resolvingSymlinksInPath()
                 guard let format = Self.format(of: real) else { continue }
+                // A downloaded model keeps its weights in shards beside a config file: that folder is one model, not one per shard.
+                if format == "Safetensors", let folder = Self.modelFolder(containing: url) {
+                    modelFolders.insert(folder)
+                    continue
+                }
                 let bytes = Int64((try? real.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
                 guard bytes >= Self.looseMinimumBytes else { continue }
                 if format == "GGUF", let info = GGUFInfo.read(real), info.isVocabularyOnly { continue }
@@ -347,7 +353,109 @@ struct ModelScanner {
             guard found.bytes >= Self.looseMinimumBytes else { continue }
             out.append(single(found, root: Root(url: url.deletingLastPathComponent(), owner: nil)))
         }
+        for folder in Self.outermostFolders(modelFolders) {
+            if let model = folderModel(folder) { out.append(model) }
+        }
         return out
+    }
+
+    // MARK: Model folders (weights in shards beside a config, tokenizer and so on)
+
+    /// Files that say "this folder is one model": Hugging Face style (`config.json`, the shard index) or a pipeline's own manifest.
+    static let modelFolderMarkers = ["config.json", "model.safetensors.index.json", "split_model.json", "embedded_config.json", "quantize_config.json"]
+
+    /// How far above a weights file its model folder may be: a pipeline keeps components such as `text_encoder/` one level down.
+    static let modelFolderSearchDepth = 2
+
+    /// The model folder a weights file belongs to, else nil. Of the marked folders within reach, the outermost wins,
+    /// so a pipeline whose components carry their own `config.json` is one model, not one per component.
+    static func modelFolder(containing file: URL) -> URL? {
+        var folder = file.deletingLastPathComponent()
+        var outermost: URL?
+        for _ in 0..<modelFolderSearchDepth {
+            if isModelFolder(folder) { outermost = folder }
+            let parent = folder.deletingLastPathComponent()
+            guard parent.path != folder.path else { break }
+            folder = parent
+        }
+        return outermost
+    }
+
+    static func isModelFolder(_ folder: URL) -> Bool {
+        let fm = FileManager.default
+        return modelFolderMarkers.contains { fm.fileExists(atPath: folder.appendingPathComponent($0).path) }
+    }
+
+    /// Drops any folder that sits inside another one in the set, so no weights are listed or counted twice.
+    static func outermostFolders(_ folders: Set<URL>) -> [URL] {
+        let paths = folders.map { $0.standardizedFileURL.path }
+        return folders.filter { folder in
+            let path = folder.standardizedFileURL.path
+            return !paths.contains { $0 != path && path.hasPrefix($0 + "/") }
+        }.sorted { $0.path < $1.path }
+    }
+
+    /// One model made of a folder of files, such as `qwen3.8-27b-8bit` or `ltx-2.5-mlx-q8`.
+    private func folderModel(_ folder: URL) -> InstalledModel? {
+        let bytes = Self.size(ofFolder: folder)
+        guard bytes >= Self.looseMinimumBytes else { return nil }
+        let fm = FileManager.default
+        let label = folder.lastPathComponent
+        let config = Self.readJSON(folder.appendingPathComponent("config.json"))
+        let description = ModelKnowledge.describe(label: label, path: label, format: "Safetensors", owner: nil, gguf: nil)
+        let ruleChoseName = description.name != ModelKnowledge.displayName(label, nil)
+        var summary = description.summary
+        var tags = description.tags
+        if config?["vision_config"] != nil {
+            let sawVideo = fm.fileExists(atPath: folder.appendingPathComponent("video_preprocessor_config.json").path)
+            summary += sawVideo ? " It can also look at pictures and video." : " It can also look at pictures."
+            tags.append("Vision")
+        }
+        if let quant = Self.folderQuantization(folder, label: label, config: config), !tags.contains(quant) { tags.append(quant) }
+        let shards = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension.lowercased() == "safetensors" }.count
+        return InstalledModel(name: ruleChoseName ? description.name : Self.folderDisplayName(label), summary: summary, owner: nil,
+                              kind: description.kind, format: "Safetensors", tags: tags,
+                              version: ModelVersions.version(recorded: nil, names: [label], generationFrom: label, format: nil),
+                              bytes: bytes, url: folder, location: folder, linkedFrom: [],
+                              movability: .managed("A folder of files; folders are not moved automatically."), parts: max(shards, 1))
+    }
+
+    /// "8-bit" from what the model records (`quantization.bits`), else from its folder name ("8bit", "q8"), else "BF16" and the like.
+    static func folderQuantization(_ folder: URL, label: String, config: [String: Any]?) -> String? {
+        func bits(_ json: [String: Any]?) -> Int? {
+            guard let json else { return nil }
+            for key in ["quantization", "quantization_config"] {
+                if let q = json[key] as? [String: Any], let b = (q["bits"] as? NSNumber)?.intValue { return b }
+            }
+            return (json["bits"] as? NSNumber)?.intValue
+        }
+        if let b = bits(config) ?? bits(readJSON(folder.appendingPathComponent("quantize_config.json"))) { return "\(b)-bit" }
+        for pattern in [#"(?i)(?<![A-Za-z0-9])(\d{1,2})-?bit"#, #"(?i)(?<![A-Za-z0-9])q(\d)(?![A-Za-z0-9_])"#] {
+            if let range = label.range(of: pattern, options: .regularExpression) {
+                let digits = label[range].filter(\.isNumber)
+                if !digits.isEmpty { return "\(digits)-bit" }
+            }
+        }
+        return ModelKnowledge.quantization(in: label)
+    }
+
+    /// "qwen3.8-27b-8bit" → "Qwen3.8 27B 8-bit", "ltx-2.5-mlx-q8" → "LTX 2.5 MLX Q8".
+    static func folderDisplayName(_ label: String) -> String {
+        let shortCaps: Set<String> = ["ltx", "mlx", "gguf", "tts", "vl", "moe", "gpt"]
+        let words = label.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ").split(separator: " ").map(String.init)
+        return words.map { word -> String in
+            let lower = word.lowercased()
+            if shortCaps.contains(lower) { return lower.uppercased() }
+            if lower.range(of: #"^\d+(\.\d+)?[bm]$"#, options: .regularExpression) != nil { return lower.uppercased() }
+            if lower.range(of: #"^(q\d+|bf16|f16|f32)$"#, options: .regularExpression) != nil { return lower.uppercased() }
+            if lower.range(of: #"^\d+bit$"#, options: .regularExpression) != nil { return lower.replacingOccurrences(of: "bit", with: "-bit") }
+            return word.prefix(1).uppercased() + word.dropFirst()
+        }.joined(separator: " ")
+    }
+
+    static func readJSON(_ url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     // MARK: Helpers
