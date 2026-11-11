@@ -33,6 +33,9 @@ enum ReleaseNotes {
             .init(kind: .new, text: "AI Models recognizes video models such as LTX and lists them under Video creation."),
             .init(kind: .improved, text: "AI Models also watches the models folder in your home folder."),
         ]),
+        Release(version: "0.2.1", date: "2026-11-11", changes: [
+            .init(kind: .improved, text: "Extract Frames has a Show in Finder button once frames are saved, which opens the folder they went to."),
+        ]),
         Release(version: "0.2.0", date: "2026-11-10", changes: [
             .init(kind: .new, text: "The version now shows in the bottom-right corner. Click it to see what changed in each release."),
             .init(kind: .new, text: "Video: Record Screen, Trim Video, Video to GIF, Resize Video, Compress Video, Media Info, Mute Video, Burn In Subtitles and Extract Frames."),

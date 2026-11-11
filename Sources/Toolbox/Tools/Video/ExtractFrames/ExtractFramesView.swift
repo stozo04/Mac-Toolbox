@@ -33,6 +33,9 @@ struct ExtractFramesView: View {
                 Button("Add Videos…") { chooseMore() }.disabled(model.isRunning)
                 Button("Clear") { model.clear() }
                 Spacer()
+                if model.savedLocation != nil && !model.isRunning {
+                    Button("Show in Finder") { model.showSaved() }
+                }
             }
         }
         .padding(14)
