@@ -182,6 +182,39 @@ final class YtDlpDownloaderTests: XCTestCase {
     }
 }
 
+final class YtDlpConcurrencyTests: XCTestCase {
+    func testManyDownloadsFinishingTogetherAllReturn() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tbx-many-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let script = dir.appendingPathComponent("yt-dlp")
+        try """
+        #!/bin/sh
+        if [ "$1" = "-J" ]; then echo '{"formats":[{"format_id":"v","vcodec":"h264","acodec":"aac","width":720,"height":1280}]}'; exit 0; fi
+        for last; do :; done
+        name="$(basename "$last" .info.json).mp4"
+        touch "\(dir.path)/$name"
+        echo "TBX_FILE|\(dir.path)/$name"
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let downloader = YtDlpDownloader(executable: script, ffmpeg: URL(fileURLWithPath: "/usr/bin/true"))
+
+        let finished = try await withThrowingTaskGroup(of: Int.self) { group in
+            for i in 0..<8 {
+                group.addTask {
+                    for _ in 0..<25 {
+                        _ = try await downloader.download(url: URL(string: "https://example.com/\(i)")!,
+                                                          options: DownloadOptions(), into: dir) { _ in }
+                    }
+                    return 25
+                }
+            }
+            return try await group.reduce(0, +)
+        }
+        XCTAssertEqual(finished, 200)
+    }
+}
+
 /// Hits the network. Run with: TOOLBOX_YTDLP=/path/to/yt-dlp TOOLBOX_TEST_URL=<link> [TOOLBOX_TEST_FORMAT="Best Quality"] [TOOLBOX_TEST_MIN_SHORT_SIDE=1080] swift test --filter Integration
 final class DownloadVideoIntegrationTests: XCTestCase {
     func testRealDownload() async throws {

@@ -74,6 +74,8 @@ struct YtDlpDownloader: Downloader {
         }
         process.standardError = err
         process.standardInput = FileHandle.nullDevice
+        let exit = ProcessExit()
+        process.terminationHandler = { _ in exit.finish() }
 
         try await withTaskCancellationHandler {
             try process.run()
@@ -82,7 +84,7 @@ struct YtDlpDownloader: Downloader {
                 for try await line in out.fileHandleForReading.bytes.lines { onLine(line) }
             }
             let stderr = (try? await errors.value) ?? ""
-            process.waitUntilExit()
+            await exit.wait()
             try Task.checkCancellation()
             guard process.terminationStatus == 0 else {
                 throw DownloadError.failed(YtDlpCommand.friendlyError(from: stderr))
@@ -96,6 +98,34 @@ struct YtDlpDownloader: Downloader {
         var s = ""
         for try await line in pipe.fileHandleForReading.bytes.lines { s += line + "\n" }
         return s
+    }
+}
+
+private final class ProcessExit: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exited = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func finish() {
+        lock.lock()
+        exited = true
+        let resume = waiter
+        waiter = nil
+        lock.unlock()
+        resume?.resume()
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if exited {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiter = continuation
+                lock.unlock()
+            }
+        }
     }
 }
 
