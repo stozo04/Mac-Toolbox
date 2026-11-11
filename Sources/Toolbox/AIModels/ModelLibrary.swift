@@ -137,7 +137,7 @@ final class ModelLibrary {
 
     /// The folders worth watching that exist right now.
     var watchTargets: [String] {
-        [central.path, "Library/Application Support", "Library/Caches", ".cache", ".ollama", ".lmstudio", "jan"]
+        [central.path, "Library/Application Support", "Library/Caches", ".cache", ".ollama", ".lmstudio", "jan", "models"]
             .map { $0.hasPrefix("/") ? $0 : home.appendingPathComponent($0).path }
             .filter { FileManager.default.fileExists(atPath: $0) }
     }

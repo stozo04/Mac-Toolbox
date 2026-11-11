@@ -3,7 +3,7 @@ import Foundation
 /// What a model is for, in plain words.
 enum ModelKind: String, CaseIterable {
     case language = "Language", embedding = "Search", speech = "Speech", vision = "Vision"
-    case imageGeneration = "Image creation", audio = "Audio", other = "Other"
+    case imageGeneration = "Image creation", videoGeneration = "Video creation", audio = "Audio", other = "Other"
 
     var symbol: String {
         switch self {
@@ -12,6 +12,7 @@ enum ModelKind: String, CaseIterable {
         case .speech: "waveform"
         case .vision: "camera.viewfinder"
         case .imageGeneration: "photo.artframe"
+        case .videoGeneration: "film"
         case .audio: "music.note"
         case .other: "cpu"
         }
