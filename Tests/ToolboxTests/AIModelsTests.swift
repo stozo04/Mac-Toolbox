@@ -204,6 +204,27 @@ final class AIModelsTests: XCTestCase {
         XCTAssertTrue(model.tags.contains("8-bit"))
     }
 
+    func testAPipelineWithComponentConfigsIsOneModelCountedOnce() throws {
+        let root = home.appendingPathComponent("models/ltx-2.5-mlx-q8")
+        try Data("{}".utf8).write(to: { try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); return root.appendingPathComponent("embedded_config.json") }())
+        let encoder = root.appendingPathComponent("text_encoder")
+        let files = [root.appendingPathComponent("transformer.safetensors"),
+                     encoder.appendingPathComponent("model-00001-of-00002.safetensors"),
+                     encoder.appendingPathComponent("model-00002-of-00002.safetensors"),
+                     root.appendingPathComponent("vae/diffusion_pytorch_model.safetensors")]
+        for file in files { try makeFile(file, megabytes: 6) }
+        try Data("{}".utf8).write(to: encoder.appendingPathComponent("config.json"))
+        let found = scan(extra: files)
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first?.url.standardizedFileURL.path, root.standardizedFileURL.path)
+        XCTAssertEqual(found.first?.bytes, ModelScanner.size(ofFolder: root))
+    }
+
+    func testOutermostFoldersDropsNestedOnes() {
+        let a = URL(fileURLWithPath: "/m/ltx"), b = URL(fileURLWithPath: "/m/ltx/text_encoder"), c = URL(fileURLWithPath: "/m/ltx-2")
+        XCTAssertEqual(ModelScanner.outermostFolders([a, b, c]), [a, c])
+    }
+
     func testSafetensorsFilesWithNoConfigBesideThemStayIndividualModels() throws {
         let folder = home.appendingPathComponent("ComfyUI/models/text_encoders")
         let files = ["one.safetensors", "two.safetensors"].map { folder.appendingPathComponent($0) }

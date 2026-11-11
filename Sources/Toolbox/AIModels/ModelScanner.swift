@@ -353,7 +353,7 @@ struct ModelScanner {
             guard found.bytes >= Self.looseMinimumBytes else { continue }
             out.append(single(found, root: Root(url: url.deletingLastPathComponent(), owner: nil)))
         }
-        for folder in modelFolders.sorted(by: { $0.path < $1.path }) {
+        for folder in Self.outermostFolders(modelFolders) {
             if let model = folderModel(folder) { out.append(model) }
         }
         return out
@@ -364,11 +364,35 @@ struct ModelScanner {
     /// Files that say "this folder is one model": Hugging Face style (`config.json`, the shard index) or a pipeline's own manifest.
     static let modelFolderMarkers = ["config.json", "model.safetensors.index.json", "split_model.json", "embedded_config.json", "quantize_config.json"]
 
-    /// The folder a weights file belongs to when that folder is itself a model, else nil.
+    /// How far above a weights file its model folder may be: a pipeline keeps components such as `text_encoder/` one level down.
+    static let modelFolderSearchDepth = 2
+
+    /// The model folder a weights file belongs to, else nil. Of the marked folders within reach, the outermost wins,
+    /// so a pipeline whose components carry their own `config.json` is one model, not one per component.
     static func modelFolder(containing file: URL) -> URL? {
-        let folder = file.deletingLastPathComponent()
+        var folder = file.deletingLastPathComponent()
+        var outermost: URL?
+        for _ in 0..<modelFolderSearchDepth {
+            if isModelFolder(folder) { outermost = folder }
+            let parent = folder.deletingLastPathComponent()
+            guard parent.path != folder.path else { break }
+            folder = parent
+        }
+        return outermost
+    }
+
+    static func isModelFolder(_ folder: URL) -> Bool {
         let fm = FileManager.default
-        return modelFolderMarkers.contains { fm.fileExists(atPath: folder.appendingPathComponent($0).path) } ? folder : nil
+        return modelFolderMarkers.contains { fm.fileExists(atPath: folder.appendingPathComponent($0).path) }
+    }
+
+    /// Drops any folder that sits inside another one in the set, so no weights are listed or counted twice.
+    static func outermostFolders(_ folders: Set<URL>) -> [URL] {
+        let paths = folders.map { $0.standardizedFileURL.path }
+        return folders.filter { folder in
+            let path = folder.standardizedFileURL.path
+            return !paths.contains { $0 != path && path.hasPrefix($0 + "/") }
+        }.sorted { $0.path < $1.path }
     }
 
     /// One model made of a folder of files, such as `qwen3.8-27b-8bit` or `ltx-2.5-mlx-q8`.
