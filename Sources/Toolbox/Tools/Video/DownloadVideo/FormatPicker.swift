@@ -99,6 +99,8 @@ struct StreamFormat: Decodable, Equatable, Sendable {
 
     var hasVideo: Bool { vcodec != "none" && ext != "mhtml" && shortSide != nil }
     var hasAudio: Bool { acodec != "none" }
+    var hasKnownAudio: Bool { acodec != nil && hasAudio }
+    var isVideoOnly: Bool { acodec == "none" }
     var isAudioOnly: Bool { vcodec == "none" && acodec != nil && hasAudio }
     var isDirectFile: Bool { transport.map { $0.hasPrefix("http") && !$0.contains("m3u8") && !$0.contains("dash") } ?? true }
     var codec: VideoCodec { VideoCodec(ytDlpName: vcodec) }
@@ -145,9 +147,17 @@ enum FormatPicker {
         let usable = formats.filter { $0.hasVideo && $0.hasDRM != true && (hasFFmpeg || $0.hasAudio) }
         let compatible = usable.filter { $0.codec == .h264 }
         let pool = options.mostCompatible && !compatible.isEmpty ? compatible : usable
-        guard let video = best(in: capped(pool, to: options.format.maxHeight), decodesAV1: decodesAV1) else { return nil }
+        let candidates = capped(pool, to: options.format.maxHeight)
+        guard var video = best(in: candidates, decodesAV1: decodesAV1) else { return nil }
 
-        let audio = video.hasAudio || !hasFFmpeg ? nil : bestAudio(in: formats, aacOnly: options.mostCompatible)
+        var audio: StreamFormat?
+        if hasFFmpeg && !video.hasKnownAudio {
+            audio = bestAudio(in: formats, aacOnly: options.mostCompatible)
+            if audio == nil, video.isVideoOnly,
+               let withSound = best(in: candidates.filter(\.hasKnownAudio), decodesAV1: decodesAV1) {
+                video = withSound
+            }
+        }
         return FormatChoice(formatSpec: audio.map { "\(video.formatID)+\($0.formatID)" } ?? video.formatID,
                             width: video.width, height: video.height, fps: video.fps, codec: video.codec,
                             playsInQuickTime: video.codec.playsOnThisMac(decodesAV1: decodesAV1))

@@ -90,6 +90,31 @@ final class FormatPickerTests: XCTestCase {
         XCTAssertEqual(c.formatSpec, "hevc")
     }
 
+    func testSilentTopVideoWithoutSeparateAudioFallsBackToAVersionWithSound() throws {
+        let list = [
+            StreamFormat(formatID: "silent4k", vcodec: "avc1", acodec: "none", width: 3840, height: 2160, fps: 30),
+            StreamFormat(formatID: "muxed720", vcodec: "avc1", acodec: "mp4a.40.2", width: 1280, height: 720, fps: 30),
+        ]
+        let c = try XCTUnwrap(FormatPicker.choose(from: list, options: DownloadOptions(), hasFFmpeg: true, decodesAV1: true))
+        XCTAssertEqual(c.formatSpec, "muxed720")
+        XCTAssertEqual(c.height, 720)
+    }
+
+    func testVideoWithUnknownAudioIsPairedWithSeparateAudio() throws {
+        let list = [
+            StreamFormat(formatID: "hls1080", vcodec: "avc1", width: 1920, height: 1080, fps: 30),
+            StreamFormat(formatID: "aud", vcodec: "none", acodec: "mp4a.40.2", abr: 128),
+        ]
+        let c = try XCTUnwrap(FormatPicker.choose(from: list, options: DownloadOptions(), hasFFmpeg: true, decodesAV1: true))
+        XCTAssertEqual(c.formatSpec, "hls1080+aud")
+    }
+
+    func testVideoWithUnknownAudioAndNoSeparateAudioIsKept() throws {
+        let list = [StreamFormat(formatID: "only", vcodec: "avc1", width: 1920, height: 1080)]
+        let c = try XCTUnwrap(FormatPicker.choose(from: list, options: DownloadOptions(), hasFFmpeg: true, decodesAV1: true))
+        XCTAssertEqual(c.formatSpec, "only")
+    }
+
     func testNoResolutionInfoFallsBackToYtDlp() {
         let list = [StreamFormat(formatID: "only", vcodec: "h264", acodec: "aac")]
         XCTAssertNil(FormatPicker.choose(from: list, options: DownloadOptions(), hasFFmpeg: true, decodesAV1: true))
