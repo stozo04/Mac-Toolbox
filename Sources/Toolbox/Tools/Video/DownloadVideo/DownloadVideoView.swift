@@ -142,13 +142,20 @@ struct DownloadVideoView: View {
 
     // MARK: Options
 
+    private var qualityHint: String {
+        if model.options.mostCompatible {
+            return "H.264 only, for older devices and video editors. YouTube stops at 1080p in H.264."
+        }
+        return "Each link gets the highest resolution and frame rate that video has, in a format your Mac plays (AV1, HEVC or H.264)."
+    }
+
     private var options: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Options").font(.headline)
             Text("Applies to every download.").font(.caption).foregroundStyle(.secondary)
             VStack(spacing: 0) {
                 HStack {
-                    Text("Format").font(.callout)
+                    Text("Format").font(.callout).fixedSize()
                     Spacer()
                     Picker("Format", selection: $model.options.format) {
                         ForEach(DownloadFormat.allCases) { Text($0.rawValue).tag($0) }
@@ -157,14 +164,20 @@ struct DownloadVideoView: View {
                 }
                 .padding(10)
                 Divider().overlay(Theme.stroke)
-                Toggle("Prefer H.264", isOn: $model.options.preferH264)
+                Toggle("Most compatible (H.264)", isOn: $model.options.mostCompatible)
                     .toggleStyle(.switch).font(.callout)
                     .disabled(model.options.format == .audio)
                     .padding(10)
+                Divider().overlay(Theme.stroke)
+                HStack {
+                    Text("Save to").font(.callout)
+                    Spacer()
+                    Text("Downloads").font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(10)
             }
             .background(Theme.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            Text("H.264 plays everywhere, including QuickTime Player and iPhone. Turn this off for the highest resolution, which may need another player.")
-                .font(.caption2).foregroundStyle(.secondary)
+            Text(qualityHint).font(.caption2).foregroundStyle(.secondary)
             if !model.hasFFmpeg && model.toolStatus == .ready {
                 Text("ffmpeg was not found, so only ready-made MP4 files can be saved. Install it with: brew install ffmpeg")
                     .font(.caption2).foregroundStyle(.yellow)
@@ -214,9 +227,14 @@ private struct DownloadRow: View {
             Text("Waiting").font(.caption).foregroundStyle(.secondary)
         case .downloading(let fraction, let speed, let eta):
             if let fraction { ProgressView(value: fraction) } else { ProgressView().progressViewStyle(.linear) }
-            Text(Self.progressText(fraction, speed, eta)).font(.caption).foregroundStyle(.secondary)
+            Text(Self.progressText(item.quality, fraction, speed, eta)).font(.caption).foregroundStyle(.secondary)
         case .done(let file):
-            Text("Saved as \(file.lastPathComponent)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text([item.quality?.summary, "Saved as \(file.lastPathComponent)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            if let quality = item.quality, !quality.playsInQuickTime {
+                Text("\(quality.codec.rawValue) is the only format at this resolution. QuickTime can't open it; use IINA or VLC.")
+                    .font(.caption).foregroundStyle(.orange).lineLimit(2)
+            }
         case .failed(let message):
             Text(message).font(.caption).foregroundStyle(.red).lineLimit(3)
         case .cancelled:
@@ -224,8 +242,9 @@ private struct DownloadRow: View {
         }
     }
 
-    private static func progressText(_ fraction: Double?, _ speed: Double?, _ eta: Int?) -> String {
+    private static func progressText(_ quality: FormatChoice?, _ fraction: Double?, _ speed: Double?, _ eta: Int?) -> String {
         var parts: [String] = []
+        if let summary = quality?.summary, !summary.isEmpty { parts.append(summary) }
         if let fraction { parts.append("\(Int(fraction * 100))%") } else { parts.append("Starting...") }
         if let speed { parts.append(ByteCountFormatter.string(fromByteCount: Int64(speed), countStyle: .file) + "/s") }
         if let eta { parts.append("\(eta)s left") }

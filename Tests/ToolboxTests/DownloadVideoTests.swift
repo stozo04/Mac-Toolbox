@@ -5,25 +5,53 @@ final class DownloadVideoTests: XCTestCase {
     private let url = URL(string: "https://www.youtube.com/watch?v=abc")!
     private let folder = URL(fileURLWithPath: "/tmp/out")
 
-    private func args(_ o: DownloadOptions, ffmpeg: Bool = true) -> [String] {
-        YtDlpCommand.arguments(url: url, options: o, folder: folder, hasFFmpeg: ffmpeg,
-                               ffmpegDirectory: ffmpeg ? URL(fileURLWithPath: "/opt/homebrew/bin") : nil)
+    private func args(_ o: DownloadOptions, ffmpeg: Bool = true, choice: FormatChoice? = nil,
+                      source: YtDlpCommand.Source? = nil, js: JSRuntime? = nil) -> [String] {
+        YtDlpCommand.arguments(source: source ?? .link(url), options: o, choice: choice, folder: folder,
+                               hasFFmpeg: ffmpeg,
+                               ffmpegDirectory: ffmpeg ? URL(fileURLWithPath: "/opt/homebrew/bin") : nil,
+                               jsRuntime: js)
     }
 
     private func value(after flag: String, in a: [String]) -> String? {
         a.firstIndex(of: flag).map { a[$0 + 1] }
     }
 
-    func testBestQualityPrefersH264() {
-        let a = args(DownloadOptions(format: .best, preferH264: true))
-        XCTAssertEqual(value(after: "-S", in: a), "vcodec:h264,res,acodec:aac")
+    func testBestQualityDefaultsToHighestResolutionThenFrameRate() {
+        XCTAssertFalse(DownloadOptions().mostCompatible)
+        XCTAssertEqual(DownloadOptions().format, .best)
+        let a = args(DownloadOptions())
+        XCTAssertEqual(value(after: "-S", in: a), "res,fps")
         XCTAssertEqual(value(after: "--merge-output-format", in: a), "mp4")
         XCTAssertEqual(a.last, url.absoluteString)
     }
 
-    func testResolutionCapWithoutH264() {
-        let a = args(DownloadOptions(format: .p720, preferH264: false))
-        XCTAssertEqual(value(after: "-S", in: a), "res:720")
+    func testMostCompatibleSortsH264First() {
+        let a = args(DownloadOptions(format: .best, mostCompatible: true))
+        XCTAssertEqual(value(after: "-S", in: a), "vcodec:h264,res,fps,acodec:aac")
+    }
+
+    func testResolutionCap() {
+        XCTAssertEqual(value(after: "-S", in: args(DownloadOptions(format: .p720))), "res:720,fps")
+    }
+
+    func testChosenFormatIsDownloadedFromTheProbe() {
+        let info = URL(fileURLWithPath: "/tmp/x.info.json")
+        let choice = FormatChoice(formatSpec: "701+251", width: 3840, height: 2160, fps: 60, codec: .av1, playsInQuickTime: true)
+        let a = args(DownloadOptions(), choice: choice, source: .infoJSON(info))
+        XCTAssertEqual(value(after: "-f", in: a), "701+251")
+        XCTAssertEqual(value(after: "--load-info-json", in: a), info.path)
+        XCTAssertFalse(a.contains("-S"))
+        XCTAssertFalse(a.contains(url.absoluteString))
+    }
+
+    func testJSRuntimeIsPassed() {
+        let deno = JSRuntime(name: "deno", path: URL(fileURLWithPath: "/opt/homebrew/bin/deno"))
+        XCTAssertEqual(value(after: "--js-runtimes", in: args(DownloadOptions(), js: deno)), "deno:/opt/homebrew/bin/deno")
+        let probe = YtDlpCommand.probeArguments(url: url, jsRuntime: deno)
+        XCTAssertEqual(Array(probe.prefix(3)), ["-J", "--no-playlist", "--no-warnings"])
+        XCTAssertEqual(value(after: "--js-runtimes", in: probe), "deno:/opt/homebrew/bin/deno")
+        XCTAssertFalse(args(DownloadOptions()).contains("--js-runtimes"))
     }
 
     func testAudioOnlyExtractsM4A() {
@@ -117,7 +145,44 @@ final class DownloadVideoTests: XCTestCase {
     }
 }
 
-/// Hits the network. Run with: TOOLBOX_YTDLP=/path/to/yt-dlp TOOLBOX_TEST_URL=<link> swift test --filter Integration
+final class YtDlpDownloaderTests: XCTestCase {
+    func testLargeProbeDoesNotHangAndTheChosenFormatIsDownloaded() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tbx-fake-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let filler = (0..<3000).map { #"{"format_id":"f\#($0)","vcodec":"avc1","acodec":"none","width":256,"height":144,"fps":30}"# }
+        let best = #"{"format_id":"top","vcodec":"hvc1","acodec":"mp4a.40.2","width":1080,"height":1920,"fps":60}"#
+        let probe = dir.appendingPathComponent("probe.json")
+        let json: String = #"{"formats":["# + (filler + [best]).joined(separator: ",") + "]}"
+        try Data(json.utf8).write(to: probe)
+        XCTAssertGreaterThan(try Data(contentsOf: probe).count, 200_000)
+
+        let saved = dir.appendingPathComponent("out.mp4")
+        let argsLog = dir.appendingPathComponent("args.txt")
+        let script = dir.appendingPathComponent("yt-dlp")
+        try """
+        #!/bin/sh
+        if [ "$1" = "-J" ]; then cat '\(probe.path)'; exit 0; fi
+        echo "$@" > '\(argsLog.path)'
+        touch '\(saved.path)'
+        echo 'TBX_FILE|\(saved.path)'
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+        let downloader = YtDlpDownloader(executable: script, ffmpeg: URL(fileURLWithPath: "/usr/bin/true"))
+        let events = EventLog()
+        let file = try await downloader.download(url: URL(string: "https://example.com/v")!, options: DownloadOptions(),
+                                                 into: dir) { events.add($0) }
+        XCTAssertEqual(file.path, saved.path)
+        XCTAssertEqual(events.choice?.formatSpec, "top")
+        let args = try String(contentsOf: argsLog, encoding: .utf8)
+        XCTAssertTrue(args.contains("-f top"), args)
+        XCTAssertTrue(args.contains("--load-info-json"), args)
+    }
+}
+
+/// Hits the network. Run with: TOOLBOX_YTDLP=/path/to/yt-dlp TOOLBOX_TEST_URL=<link> [TOOLBOX_TEST_FORMAT="Best Quality"] [TOOLBOX_TEST_MIN_SHORT_SIDE=1080] swift test --filter Integration
 final class DownloadVideoIntegrationTests: XCTestCase {
     func testRealDownload() async throws {
         let env = ProcessInfo.processInfo.environment
@@ -137,6 +202,10 @@ final class DownloadVideoIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(size, 10_000)
         XCTAssertEqual(file.pathExtension, format == .audio ? "m4a" : "mp4")
         XCTAssertGreaterThan(events.count, 0)
+        if let minimum = env["TOOLBOX_TEST_MIN_SHORT_SIDE"].flatMap(Int.init) {
+            let chosen = try XCTUnwrap(events.choice, "no format was chosen")
+            XCTAssertGreaterThanOrEqual(min(chosen.width ?? 0, chosen.height ?? 0), minimum, chosen.summary)
+        }
     }
 }
 
@@ -145,4 +214,8 @@ private final class EventLog: @unchecked Sendable {
     private var events: [DownloadEvent] = []
     func add(_ e: DownloadEvent) { lock.lock(); events.append(e); lock.unlock() }
     var count: Int { lock.lock(); defer { lock.unlock() }; return events.count }
+    var choice: FormatChoice? {
+        lock.lock(); defer { lock.unlock() }
+        return events.lazy.compactMap { if case .chosen(let c) = $0 { c } else { nil } }.first
+    }
 }
