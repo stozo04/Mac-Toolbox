@@ -206,7 +206,8 @@ final class AIModelsTests: XCTestCase {
 
     func testAPipelineWithComponentConfigsIsOneModelCountedOnce() throws {
         let root = home.appendingPathComponent("models/ltx-2.5-mlx-q8")
-        try Data("{}".utf8).write(to: { try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); return root.appendingPathComponent("embedded_config.json") }())
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: root.appendingPathComponent("embedded_config.json"))
         let encoder = root.appendingPathComponent("text_encoder")
         let files = [root.appendingPathComponent("transformer.safetensors"),
                      encoder.appendingPathComponent("model-00001-of-00002.safetensors"),
