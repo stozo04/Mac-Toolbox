@@ -10,6 +10,22 @@ final class ExtractFramesTests: XCTestCase {
         return s
     }
 
+    // MARK: Show in Finder
+
+    func testSavedLocationPrefersTheSelectedVideo() {
+        var first = ExtractFramesModel.Item(url: URL(fileURLWithPath: "/v/a.mp4"))
+        first.folder = URL(fileURLWithPath: "/v/a Frames")
+        var second = ExtractFramesModel.Item(url: URL(fileURLWithPath: "/v/b.mp4"))
+        second.zip = URL(fileURLWithPath: "/v/b Frames.zip")
+        let waiting = ExtractFramesModel.Item(url: URL(fileURLWithPath: "/v/c.mp4"))
+
+        XCTAssertEqual(ExtractFramesModel.savedLocation(selected: first, items: [first, second]), first.folder)
+        XCTAssertEqual(ExtractFramesModel.savedLocation(selected: second, items: [first, second]), second.zip)
+        XCTAssertEqual(ExtractFramesModel.savedLocation(selected: waiting, items: [first, second, waiting]), second.zip)
+        XCTAssertNil(ExtractFramesModel.savedLocation(selected: waiting, items: [waiting]))
+        XCTAssertNil(ExtractFramesModel.savedLocation(selected: nil, items: []))
+    }
+
     // MARK: Plan
 
     func testEveryNSecondsStartsAtFirstFrameAndStopsBeforeTheEnd() {

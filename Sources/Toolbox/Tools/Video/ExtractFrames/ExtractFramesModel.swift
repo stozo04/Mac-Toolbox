@@ -321,6 +321,19 @@ final class ExtractFramesModel {
         if panel.runModal() == .OK, let url = panel.url { customFolder = url }
     }
 
+    /// Where the selected video's frames went, else the last video that saved any: its folder, or the ZIP.
+    var savedLocation: URL? { Self.savedLocation(selected: selected, items: items) }
+
+    nonisolated static func savedLocation(selected: Item?, items: [Item]) -> URL? {
+        let candidates = [selected].compactMap { $0 } + items.reversed()
+        return candidates.lazy.compactMap { $0.folder ?? $0.zip }.first
+    }
+
+    func showSaved() {
+        guard let location = savedLocation else { return }
+        if location.pathExtension.lowercased() == "zip" { reveal(location) } else { open(location) }
+    }
+
     func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     func open(_ url: URL) { NSWorkspace.shared.open(url) }
 
