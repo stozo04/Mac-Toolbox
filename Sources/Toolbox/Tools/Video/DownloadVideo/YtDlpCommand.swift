@@ -6,8 +6,17 @@ enum YtDlpCommand {
     static let titlePrefix = "TBX_TITLE|"
     static let filePrefix = "TBX_FILE|"
 
-    static func arguments(url: URL, options: DownloadOptions, folder: URL, hasFFmpeg: Bool,
-                          ffmpegDirectory: URL?) -> [String] {
+    enum Source: Equatable {
+        case link(URL)
+        case infoJSON(URL)
+    }
+
+    static func probeArguments(url: URL, jsRuntime: JSRuntime?) -> [String] {
+        ["-J", "--no-playlist", "--no-warnings"] + runtimeArguments(jsRuntime) + [url.absoluteString]
+    }
+
+    static func arguments(source: Source, options: DownloadOptions, choice: FormatChoice?, folder: URL,
+                          hasFFmpeg: Bool, ffmpegDirectory: URL?, jsRuntime: JSRuntime?) -> [String] {
         var a = [
             "--no-playlist", "--newline", "--progress", "--no-warnings",
             "-P", folder.path,
@@ -17,25 +26,37 @@ enum YtDlpCommand {
             "--print", "pre_process:\(titlePrefix)%(title)s",
             "--print", "after_move:\(filePrefix)%(filepath)s",
         ]
+        a += runtimeArguments(jsRuntime)
         if let ffmpegDirectory { a += ["--ffmpeg-location", ffmpegDirectory.path] }
-
-        if options.format == .audio {
-            a += ["-f", "ba[ext=m4a]/ba/b"]
-            if hasFFmpeg { a += ["-x", "--audio-format", "m4a"] }
-        } else if hasFFmpeg {
-            // Sort keys: codec first (so H.264 wins over a taller VP9/AV1 stream), then height.
-            var sort: [String] = []
-            if options.preferH264 { sort.append("vcodec:h264") }
-            if let h = options.format.maxHeight { sort.append("res:\(h)") } else { sort.append("res") }
-            if options.preferH264 { sort.append("acodec:aac") }
-            a += ["-f", "bv*+ba/b", "-S", sort.joined(separator: ","), "--merge-output-format", "mp4"]
-        } else {
-            // Without ffmpeg only single-file (already muxed) formats can be saved.
-            let cap = options.format.maxHeight.map { "[height<=\($0)]" } ?? ""
-            a += ["-f", "b\(cap)[ext=mp4]/b\(cap)/b"]
+        a += formatArguments(options: options, choice: choice, hasFFmpeg: hasFFmpeg)
+        switch source {
+        case .link(let url): a.append(url.absoluteString)
+        case .infoJSON(let file): a += ["--load-info-json", file.path]
         }
-        a.append(url.absoluteString)
         return a
+    }
+
+    private static func runtimeArguments(_ runtime: JSRuntime?) -> [String] {
+        runtime.map { ["--js-runtimes", "\($0.name):\($0.path.path)"] } ?? []
+    }
+
+    private static func formatArguments(options: DownloadOptions, choice: FormatChoice?, hasFFmpeg: Bool) -> [String] {
+        if options.format == .audio {
+            return ["-f", "ba[ext=m4a]/ba/b"] + (hasFFmpeg ? ["-x", "--audio-format", "m4a"] : [])
+        }
+        if let choice {
+            return ["-f", choice.formatSpec] + (hasFFmpeg ? ["--merge-output-format", "mp4"] : [])
+        }
+        if hasFFmpeg {
+            var sort: [String] = []
+            if options.mostCompatible { sort.append("vcodec:h264") }
+            sort.append(options.format.maxHeight.map { "res:\($0)" } ?? "res")
+            sort.append("fps")
+            if options.mostCompatible { sort.append("acodec:aac") }
+            return ["-f", "bv*+ba/b", "-S", sort.joined(separator: ","), "--merge-output-format", "mp4"]
+        }
+        let cap = options.format.maxHeight.map { "[height<=\($0)]" } ?? ""
+        return ["-f", "b\(cap)[ext=mp4]/b\(cap)/b"]
     }
 
     enum Line: Equatable {

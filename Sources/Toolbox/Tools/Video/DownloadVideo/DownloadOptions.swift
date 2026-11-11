@@ -8,7 +8,7 @@ enum DownloadFormat: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Tallest frame height to accept, or nil for no cap.
+    /// Largest short side (the "p" number) to accept, or nil for no cap.
     var maxHeight: Int? {
         switch self {
         case .best, .audio: nil
@@ -20,11 +20,12 @@ enum DownloadFormat: String, CaseIterable, Identifiable {
 
 struct DownloadOptions: Equatable {
     var format: DownloadFormat = .best
-    var preferH264 = true
+    var mostCompatible = false
 }
 
 enum DownloadEvent: Equatable {
     case title(String)
+    case chosen(FormatChoice)
     /// `fraction` is nil when the size is unknown.
     case progress(fraction: Double?, bytesPerSecond: Double?, etaSeconds: Int?)
 }

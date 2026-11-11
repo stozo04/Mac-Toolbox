@@ -13,6 +13,7 @@ struct DownloadItem: Identifiable, Equatable {
     let id = UUID()
     let url: URL
     var title: String?
+    var quality: FormatChoice?
     var state: State = .queued
 }
 
@@ -179,7 +180,9 @@ final class DownloadVideoModel {
                 Task { @MainActor in self?.apply(event, to: id) }
             }
             update(id) { $0.state = .done(file) }
-            Log.info("Download finished", category: "download", ["host": url.host ?? "unknown"])
+            let quality = items.first(where: { $0.id == id })?.quality
+            Log.info("Download finished", category: "download",
+                     ["host": url.host ?? "unknown", "quality": quality?.summary ?? "unknown"])
         } catch is CancellationError {
             update(id) { $0.state = .cancelled }
         } catch {
@@ -187,7 +190,7 @@ final class DownloadVideoModel {
             // The link goes in without its query string (tokens live there); titles are not logged.
             Log.error("Download failed", category: "download",
                       Log.details(error, ["url": LogText.safeURL(url), "host": url.host ?? "unknown",
-                                          "format": options.format.rawValue, "h264": String(options.preferH264)]))
+                                          "format": options.format.rawValue, "compatible": String(options.mostCompatible)]))
             if DownloadAlert.isYouTube(url) { alert = .youTubeFailed }
         }
     }
@@ -196,6 +199,7 @@ final class DownloadVideoModel {
         update(id) { item in
             switch event {
             case .title(let t): item.title = t
+            case .chosen(let choice): item.quality = choice
             case .progress(let f, let s, let e):
                 // A late event must not undo a finished state.
                 if case .downloading = item.state { item.state = .downloading(fraction: f, speed: s, eta: e) }

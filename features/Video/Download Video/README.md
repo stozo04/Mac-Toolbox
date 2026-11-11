@@ -10,7 +10,11 @@ Save videos from YouTube, X, TikTok and more.
 `images/Video/Download Video.png`
 
 ## Current state
-Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (argument builder + output parser, pure), `YtDlpDownloader` (Process runner, `YtDlpLocator` finds/installs the binary), `DownloadVideoModel` (queue, shared singleton), `DownloadVideoView`. Unit tests in `Tests/ToolboxTests/`.
+Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (argument builder + output parser, pure), `FormatPicker` (chooses the stream for each link, pure), `YtDlpDownloader` (Process runner, `YtDlpLocator` finds/installs the binary), `DownloadVideoModel` (queue, shared singleton), `DownloadVideoView`. Unit tests in `Tests/ToolboxTests/` (`FormatPickerTests` uses real YouTube and TikTok format lists).
+
+- Every link is probed first (`yt-dlp -J`), `FormatPicker` chooses, and the download reuses that probe (`--load-info-json`), so the choice is made per video. Ranking: tallest short side (so vertical 1080×1920 counts as 1080p), then a codec this Mac plays (H.264, HEVC, and AV1 when `VTIsHardwareDecodeSupported` says the chip decodes it; VP9 only when nothing else has that resolution, and the row then warns QuickTime can't open it), then highest frame rate, then AV1 > HEVC > H.264, then direct HTTPS over HLS, then bitrate. Audio: original language, not DRC, highest bitrate; a video stream whose audio is unknown is paired with it too. If the top stream has no sound and the site offers no separate audio, the best version with sound is taken instead, so nothing is saved silent. If the probe has no usable resolutions, yt-dlp's own sort (`-S res,fps`) decides.
+- Most compatible (off by default) limits video to H.264 and audio to AAC. YouTube has no H.264 above 1080p; TikTok's 720p and 1080p are usually HEVC only.
+- yt-dlp needs a JavaScript runtime for YouTube. An app opened from the Dock has no Homebrew PATH, so `YtDlpLocator.findJSRuntime` finds deno (or node) and passes `--js-runtimes`.
 
 - yt-dlp is looked up in: `$TOOLBOX_YTDLP`, app bundle, `~/Library/Application Support/Toolbox/bin/yt-dlp`, Homebrew. If missing, the view offers "Install yt-dlp" (downloads the official release from GitHub).
 - ffmpeg is looked up in the bundle and Homebrew; without it only ready-made MP4s can be saved.
@@ -24,7 +28,7 @@ Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (arg
 ## Sub-features / options to build
 - Paste one or more links (Paste button reads clipboard)
 - Format: Best Quality / specific resolution / audio only
-- Prefer H.264 toggle (QuickTime/iPhone compatible)
+- Most compatible (H.264) toggle
 - Per-link progress, cancel, reveal in Finder
 - Legal note shown: only download videos you own or may save
 
