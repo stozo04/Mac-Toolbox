@@ -118,7 +118,7 @@ struct VaultDoorView: View {
         }
         .opacity(fade)
         .onChange(of: vault.phase) { _, phase in
-            if phase == .opening { playOpening() }
+            if phase == .opening { playOpening() } else if phase != .open { closeDoor() }
         }
         .onAppear {
             focused = true
@@ -164,7 +164,6 @@ struct VaultDoorView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(vault.isWorking)
-            .keyboardShortcut(.defaultAction)
         }
         .textFieldStyle(.roundedBorder)
     }
@@ -187,10 +186,17 @@ struct VaultDoorView: View {
         }
     }
 
+    private func closeDoor() {
+        wheelTurn = .zero
+        swing = 0
+        fade = 1
+    }
+
     private func playOpening() {
         withAnimation(.easeInOut(duration: Self.wheelSeconds)) { wheelTurn = .degrees(300) }
         Task {
             try? await Task.sleep(for: .seconds(Self.wheelSeconds))
+            guard vault.phase == .opening else { return closeDoor() }
             withAnimation(.easeIn(duration: Self.swingSeconds)) { swing = -105 }
             withAnimation(.easeIn(duration: Self.swingSeconds / 2).delay(Self.swingSeconds / 2)) { fade = 0 }
             try? await Task.sleep(for: .seconds(Self.swingSeconds))

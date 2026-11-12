@@ -64,15 +64,22 @@ struct VaultDisk {
                                                          "--size", Self.maximumSize, "--volumeName", Self.volumeName,
                                                          "--fs", "APFS", location.image.path],
                                          input: Data(password.utf8))
-        guard result.succeeded else { throw VaultError.diskTool(action: "be created", message: Self.reason(result)) }
+        guard result.succeeded else {
+            try? FileManager.default.removeItem(at: location.image)
+            throw VaultError.diskTool(action: "be created", message: Self.reason(result))
+        }
     }
 
     func unlock(password: String) async throws {
         if isOpen { try await lock() }
+        if !FileManager.default.fileExists(atPath: location.mountPoint.path) {
+            try FileManager.default.createDirectory(at: location.mountPoint, withIntermediateDirectories: false)
+        }
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "attach", "--nobrowse",
                                                          "--mountPoint", location.mountPoint.path, location.image.path],
                                          input: Data(password.utf8))
         guard result.succeeded else {
+            removeEmptyMountPoint()
             if Self.isWrongPassword(result) { throw VaultError.wrongPassword }
             throw VaultError.diskTool(action: "open", message: Self.reason(result))
         }
@@ -80,17 +87,25 @@ struct VaultDisk {
     }
 
     func lock() async throws {
-        guard isOpen else { return }
+        guard isOpen else { return removeEmptyMountPoint() }
         let eject = try await Shell.run(Self.diskutil, ["eject", location.mountPoint.path])
-        if eject.succeeded || !isOpen { return }
+        if eject.succeeded || !isOpen { return removeEmptyMountPoint() }
         let forced = try await Shell.run(Self.hdiutil, ["detach", "-force", location.mountPoint.path])
         guard forced.succeeded || !isOpen else { throw VaultError.diskTool(action: "lock", message: Self.reason(forced)) }
+        removeEmptyMountPoint()
+    }
+
+    func removeEmptyMountPoint() {
+        let fileManager = FileManager.default
+        guard !isOpen, let contents = try? fileManager.contentsOfDirectory(atPath: location.mountPoint.path), contents.isEmpty else { return }
+        try? fileManager.removeItem(at: location.mountPoint)
     }
 
     func lockAndWait() {
-        guard isOpen else { return }
+        guard isOpen else { return removeEmptyMountPoint() }
         Self.runAndWait(Self.diskutil, ["eject", location.mountPoint.path])
         if isOpen { Self.runAndWait(Self.hdiutil, ["detach", "-force", location.mountPoint.path]) }
+        removeEmptyMountPoint()
     }
 
     func changePassword(from old: String, to new: String) async throws {

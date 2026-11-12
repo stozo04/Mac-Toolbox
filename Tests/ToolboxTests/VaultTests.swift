@@ -211,6 +211,25 @@ final class VaultTests: XCTestCase {
         XCTAssertNil(VaultLibrary.neighbor(of: "/missing", in: items, step: 1))
     }
 
+    func testAClosedGateDropsLateThumbnailWrites() {
+        let gate = VaultWriteGate()
+        var writes = 0
+        gate.write { writes += 1 }
+        gate.close()
+        gate.write { writes += 1 }
+        XCTAssertEqual(writes, 1)
+        XCTAssertTrue(gate.isClosed)
+    }
+
+    func testThumbnailsAreNotWrittenWhenTheVaultIsNotMounted() async throws {
+        let photo = try makePhoto("unmounted.png", in: vault)
+        let item = try XCTUnwrap(VaultLibrary.items(in: vault).first { $0.url.lastPathComponent == photo.lastPathComponent })
+        let thumbnails = VaultThumbnails(vaultRoot: vault)
+        let image = await thumbnails.image(for: item)
+        XCTAssertNil(image)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".toolbox").path))
+    }
+
     func testNewestItemsComeFirst() {
         let old = VaultItem(url: URL(fileURLWithPath: "/v/old.png"), kind: .image, added: Date(timeIntervalSince1970: 1), bytes: 1)
         let new = VaultItem(url: URL(fileURLWithPath: "/v/new.png"), kind: .image, added: Date(timeIntervalSince1970: 2), bytes: 1)
@@ -257,6 +276,7 @@ final class VaultTests: XCTestCase {
         _ = try await VaultMover.move(try makePhoto("secret.png"), into: disk.location.mountPoint)
         try await disk.lock()
         XCTAssertFalse(disk.isOpen)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: disk.location.mountPoint.path), "an empty mount point is left behind")
 
         try await disk.changePassword(from: "first-pass", to: "second-pass")
         do {

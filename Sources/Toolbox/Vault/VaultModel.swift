@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Observation
 
 @MainActor
@@ -21,10 +22,13 @@ final class VaultModel {
     private(set) var moveProgress: MoveProgress?
     var moveFailures: [VaultMoveFailure] = []
     private(set) var thumbnails: VaultThumbnails?
+    private(set) var isLocking = false
+    @ObservationIgnored var player: AVPlayer?
 
     let disk: VaultDisk
     private var lockCount = 0
     private var moveTask: Task<Void, Never>?
+    private var moveID: UUID?
     private var observers: [NSObjectProtocol] = []
 
     init(location: VaultLocation = .standard, watchesSystem: Bool = true) {
@@ -38,6 +42,7 @@ final class VaultModel {
     var totalBytes: Int64 { items.reduce(0) { $0 + $1.bytes } }
 
     func create(password: String, confirmation: String) async {
+        guard !isWorking else { return }
         message = nil
         do {
             try VaultDisk.validateNewPassword(password, confirmation: confirmation)
@@ -56,8 +61,8 @@ final class VaultModel {
     }
 
     func unlock(password: String) async {
+        guard !isWorking, !password.isEmpty else { return }
         message = nil
-        guard !password.isEmpty else { return }
         isWorking = true
         defer { isWorking = false }
         let locksBefore = lockCount
@@ -74,7 +79,7 @@ final class VaultModel {
     }
 
     func finishOpening() {
-        guard phase == .opening else { return }
+        guard phase == .opening, !isLocking, disk.isOpen else { return }
         phase = .open
         addDebugFiles()
     }
@@ -89,8 +94,8 @@ final class VaultModel {
     }
 
     func lock() async {
-        lockCount += 1
-        moveTask?.cancel()
+        guard !isLocking else { return }
+        beginLocking()
         await moveTask?.value
         clearOpenState()
         do {
@@ -103,8 +108,7 @@ final class VaultModel {
     }
 
     func lockImmediately() {
-        lockCount += 1
-        moveTask?.cancel()
+        beginLocking()
         clearOpenState()
         disk.lockAndWait()
         settleAfterLocking()
@@ -112,7 +116,22 @@ final class VaultModel {
 
     static let stillOpenMessage = "The vault couldn't be locked because something is still using a file in it. Close it and press Lock again."
 
+    private func beginLocking() {
+        lockCount += 1
+        isLocking = true
+        moveTask?.cancel()
+        thumbnails?.gate.close()
+        releasePlayer()
+    }
+
+    private func releasePlayer() {
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+    }
+
     private func settleAfterLocking() {
+        isLocking = false
         guard disk.isOpen else {
             if disk.exists { phase = .locked }
             return
@@ -145,11 +164,13 @@ final class VaultModel {
     }
 
     func add(_ urls: [URL]) {
-        guard phase == .open, moveTask == nil else { return }
+        guard phase == .open, !isLocking, moveTask == nil else { return }
         let files = VaultMover.expand(urls)
         guard !files.isEmpty else { return }
         moveFailures = []
         moveProgress = MoveProgress(done: 0, total: files.count)
+        let id = UUID()
+        moveID = id
         moveTask = Task {
             for file in files {
                 if Task.isCancelled || !disk.isOpen { break }
@@ -164,8 +185,10 @@ final class VaultModel {
             }
             Log.info("Moved into vault", category: VaultLog.category,
                      ["count": String(files.count), "failed": String(moveFailures.count)])
+            guard moveID == id else { return }
             moveProgress = nil
             moveTask = nil
+            moveID = nil
         }
     }
 
@@ -229,6 +252,8 @@ final class VaultModel {
         items = []
         moveProgress = nil
         moveTask = nil
+        moveID = nil
+        releasePlayer()
         let old = thumbnails
         thumbnails = nil
         Task { await old?.forget() }

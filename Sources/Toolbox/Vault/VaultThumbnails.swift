@@ -4,12 +4,37 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+final class VaultWriteGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var closed = false
+
+    var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    func close() {
+        lock.lock()
+        closed = true
+        lock.unlock()
+    }
+
+    func write(_ body: () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return }
+        body()
+    }
+}
+
 actor VaultThumbnails {
     static let maxPixels = 480
     private static let jpegQuality = 0.8
     private static let videoFrameSecond = 1.0
 
     let folder: URL
+    nonisolated let gate = VaultWriteGate()
     private let vaultRoot: URL
     private let requiresMountedVolume: Bool
     private var memory: [String: CGImage] = [:]
@@ -21,7 +46,11 @@ actor VaultThumbnails {
     }
 
     private var vaultIsMounted: Bool {
-        !requiresMountedVolume || (try? vaultRoot.resourceValues(forKeys: [.isVolumeKey]))?.isVolume == true
+        !requiresMountedVolume || Self.isMountedVolume(vaultRoot.path)
+    }
+
+    static func isMountedVolume(_ path: String) -> Bool {
+        (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isVolumeKey]))?.isVolume == true
     }
 
     func image(for item: VaultItem) async -> CGImage? {
@@ -32,9 +61,16 @@ actor VaultThumbnails {
             memory[key] = stored
             return stored
         }
-        guard vaultIsMounted, let made = await Self.make(for: item), vaultIsMounted else { return nil }
+        guard !gate.isClosed, vaultIsMounted, let made = await Self.make(for: item) else { return nil }
         memory[key] = made
-        Self.save(made, to: file, inside: folder.deletingLastPathComponent())
+        let privateFolder = folder.deletingLastPathComponent()
+        let mounted = { [requiresMountedVolume, rootPath = vaultRoot.path] in
+            !requiresMountedVolume || Self.isMountedVolume(rootPath)
+        }
+        gate.write {
+            guard mounted() else { return }
+            Self.save(made, to: file, inside: privateFolder)
+        }
         return made
     }
 

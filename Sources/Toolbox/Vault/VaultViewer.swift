@@ -62,6 +62,7 @@ struct VaultViewer: View {
 }
 
 private struct VaultViewerContent: View {
+    @Environment(VaultModel.self) private var vault
     let item: VaultItem
     @State private var image: NSImage?
     @State private var player: AVPlayer?
@@ -88,10 +89,15 @@ private struct VaultViewerContent: View {
             case .video:
                 let made = AVPlayer(url: item.url)
                 player = made
+                vault.player = made
                 made.play()
             }
         }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            if let player, vault.player === player { vault.player = nil }
+        }
     }
 }
 
