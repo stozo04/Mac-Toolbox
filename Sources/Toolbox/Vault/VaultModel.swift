@@ -57,13 +57,17 @@ final class VaultModel {
     var mode: Mode = .library {
         didSet {
             guard mode != oldValue else { return }
-            if mode == .duplicates { findDuplicates() }
+            if mode == .duplicates {
+                selection = []
+                findDuplicates()
+            }
             keepOnlyVisibleItemsChosen()
         }
     }
     private(set) var duplicateGroups: [VaultDuplicates.Group]? {
         didSet { keepOnlyVisibleItemsChosen() }
     }
+    private(set) var trash = VaultTrash.Summary()
 
     let disk: VaultDisk
     private var lockCount = 0
@@ -75,9 +79,12 @@ final class VaultModel {
     private var indexAgain = false
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
-    private var durationTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
     private var digests: [VaultItem: Data] = [:]
+    private var lengthsInFlight: Set<VaultItem> = []
+    private var unreadableLengths: Set<VaultItem> = []
+    private var openGeneration = 0
+    private static let duplicatePause: Duration = .milliseconds(400)
     private static let typingPause: Duration = .milliseconds(250)
 
     init(location: VaultLocation = .standard, watchesSystem: Bool = true) {
@@ -220,6 +227,7 @@ final class VaultModel {
         if let viewing, !items.contains(where: { $0.id == viewing }) { self.viewing = nil }
         loadDurations()
         VaultPlayable.prune(keeping: items, privateFolder: privateFolder)
+        trash = VaultTrash.summary(in: privateFolder)
         if mode == .duplicates { findDuplicates() }
     }
 
@@ -233,27 +241,40 @@ final class VaultModel {
 
     private func findDuplicates() {
         duplicateTask?.cancel()
-        let snapshot = items
-        let present = Set(snapshot)
-        let known = digests.filter { present.contains($0.key) }
+        let generation = openGeneration
         duplicateTask = Task {
-            let (groups, found) = await Task.detached(priority: .userInitiated) {
-                var found = known
-                let groups = VaultDuplicates.groups(in: snapshot) { item in
-                    if let digest = found[item] { return digest }
-                    let digest = try VaultMover.sha256(item.url)
-                    found[item] = digest
-                    return digest
-                }
-                return (groups, found)
-            }.value
+            try? await Task.sleep(for: Self.duplicatePause)
             guard !Task.isCancelled else { return }
-            digests = found
+            let snapshot = items
+            let present = Set(snapshot)
+            let known = digests.filter { present.contains($0.key) }
+            let stop = StopFlag()
+            let (groups, found) = await withTaskCancellationHandler {
+                await Task.detached(priority: .userInitiated) {
+                    var found = known
+                    let groups = VaultDuplicates.groups(in: snapshot) { item in
+                        if let digest = found[item] { return digest }
+                        guard !stop.isSet else { throw CancellationError() }
+                        let digest = try VaultMover.sha256(item.url)
+                        found[item] = digest
+                        return digest
+                    }
+                    return (groups, found)
+                }.value
+            } onCancel: { stop.set() }
+            guard generation == openGeneration else { return }
+            digests.merge(found) { _, new in new }
+            guard !Task.isCancelled else { return }
             duplicateGroups = groups
         }
     }
 
     func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
+        guard VaultDuplicates.isStillIntact(group, keeping: keeper) else {
+            message = "These copies changed since they were compared. Look again before choosing."
+            findDuplicates()
+            return
+        }
         await moveToTrash(VaultDuplicates.others(than: keeper, in: group))
     }
 
@@ -261,7 +282,7 @@ final class VaultModel {
         var trashed: [VaultItem] = []
         for item in doomed {
             do {
-                try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                try VaultTrash.move(item.url, privateFolder: privateFolder)
                 trashed.append(item)
                 await thumbnails?.remove(item)
             } catch {
@@ -277,16 +298,37 @@ final class VaultModel {
         if !query.isEmpty { runQuery() }
     }
 
+    func putBackTrash() {
+        let failures = VaultTrash.putBackAll(privateFolder: privateFolder, into: root)
+        for (file, error) in failures { VaultLog.failure("Vault put back failed", error, file: file) }
+        if !failures.isEmpty { message = failures.count == 1 ? "1 item couldn't be put back." : "\(failures.count) items couldn't be put back." }
+        reload()
+        refreshIndex()
+    }
+
+    func emptyTrash() {
+        let failures = VaultTrash.empty(privateFolder: privateFolder)
+        for (file, error) in failures { VaultLog.failure("Vault empty trash failed", error, file: file) }
+        if !failures.isEmpty { message = failures.count == 1 ? "1 item couldn't be deleted." : "\(failures.count) items couldn't be deleted." }
+        trash = VaultTrash.summary(in: privateFolder)
+    }
+
     private func loadDurations() {
         let present = Set(items)
         durations = durations.filter { present.contains($0.key) }
-        let missing = items.filter { $0.kind == .video && durations[$0] == nil }
-        durationTask?.cancel()
+        unreadableLengths.formIntersection(present)
+        let missing = items.filter {
+            $0.kind == .video && durations[$0] == nil && !lengthsInFlight.contains($0) && !unreadableLengths.contains($0)
+        }
         guard !missing.isEmpty else { return }
-        durationTask = Task {
+        lengthsInFlight.formUnion(missing)
+        let generation = openGeneration
+        Task {
             let found = await VaultBrowse.durations(of: missing)
-            guard !Task.isCancelled else { return }
+            guard generation == openGeneration else { return }
+            lengthsInFlight.subtract(missing)
             durations.merge(found) { _, new in new }
+            unreadableLengths.formUnion(missing.filter { found[$0] == nil })
         }
     }
 
@@ -530,6 +572,7 @@ final class VaultModel {
     }
 
     private func beginOpening() {
+        VaultPlayable.removeUnfinishedCopies(privateFolder: privateFolder)
         thumbnails = VaultThumbnails(vaultRoot: root)
         wrongPasswordAttempts = 0
         reload()
@@ -545,9 +588,11 @@ final class VaultModel {
         moveTask = nil
         moveID = nil
         releasePlayer()
-        durationTask?.cancel()
-        durationTask = nil
+        openGeneration += 1
         durations = [:]
+        lengthsInFlight = []
+        unreadableLengths = []
+        trash = VaultTrash.Summary()
         duplicateTask?.cancel()
         duplicateTask = nil
         duplicateGroups = nil
@@ -583,4 +628,11 @@ final class VaultModel {
             MainActor.assumeIsolated { self?.lockImmediately() }
         })
     }
+}
+
+private final class StopFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+    var isSet: Bool { lock.withLock { stopped } }
+    func set() { lock.withLock { stopped = true } }
 }

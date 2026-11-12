@@ -71,6 +71,61 @@ final class VaultDuplicatesTests: XCTestCase {
         XCTAssertTrue(groups.isEmpty)
     }
 
+    func testKeepingIsRefusedWhenACopyChangedOrVanished() throws {
+        try write("AAAA", to: "a.jpg")
+        try write("AAAA", to: "b.jpg")
+        let items = VaultLibrary.items(in: root)
+        let group = try XCTUnwrap(VaultDuplicates.groups(in: items) { try VaultMover.sha256($0.url) }.first)
+        let keeper = group.copies[0]
+        XCTAssertTrue(VaultDuplicates.isStillIntact(group, keeping: keeper))
+
+        try FileManager.default.removeItem(at: keeper.url)
+        XCTAssertFalse(VaultDuplicates.isStillIntact(group, keeping: keeper))
+
+        try write("AAAA-longer", to: keeper.name)
+        XCTAssertFalse(VaultDuplicates.isStillIntact(group, keeping: keeper))
+        XCTAssertFalse(VaultDuplicates.isStillIntact(group, keeping: item("stranger.jpg", bytes: 4, added: 0)))
+    }
+
+    func testTheVaultTrashKeepsFilesInsideAndPutsThemBack() throws {
+        let privateFolder = root.appendingPathComponent(VaultLibrary.privateFolderName)
+        try write("AAAA", to: "a.jpg")
+        try write("BB", to: "b.jpg")
+
+        try VaultTrash.move(root.appendingPathComponent("a.jpg"), privateFolder: privateFolder)
+        let trashed = try VaultTrash.move(root.appendingPathComponent("b.jpg"), privateFolder: privateFolder)
+
+        XCTAssertTrue(trashed.path.hasPrefix(privateFolder.path + "/"))
+        XCTAssertEqual(VaultTrash.summary(in: privateFolder), VaultTrash.Summary(count: 2, bytes: 6))
+        XCTAssertTrue(VaultLibrary.items(in: root).isEmpty, "Trashed files leave the library")
+
+        try write("new", to: "a.jpg")
+        XCTAssertTrue(VaultTrash.putBackAll(privateFolder: privateFolder, into: root).isEmpty)
+        XCTAssertEqual(Set(VaultLibrary.items(in: root).map(\.name)), ["a.jpg", "a 2.jpg", "b.jpg"])
+        XCTAssertTrue(VaultTrash.summary(in: privateFolder).isEmpty)
+    }
+
+    func testEmptyingTheVaultTrashDeletesForGood() throws {
+        let privateFolder = root.appendingPathComponent(VaultLibrary.privateFolderName)
+        try write("AAAA", to: "a.jpg")
+        let trashed = try VaultTrash.move(root.appendingPathComponent("a.jpg"), privateFolder: privateFolder)
+
+        XCTAssertTrue(VaultTrash.empty(privateFolder: privateFolder).isEmpty)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: trashed.path))
+        XCTAssertTrue(VaultTrash.summary(in: privateFolder).isEmpty)
+    }
+
+    @MainActor
+    func testOpeningDuplicatesClearsTheSelection() {
+        let model = VaultModel(location: VaultLocation(folder: root.appendingPathComponent("unused")), watchesSystem: false)
+        model.selection = ["/vault/a.jpg"]
+
+        model.mode = .duplicates
+
+        XCTAssertTrue(model.selection.isEmpty)
+    }
+
     private func write(_ text: String, to name: String) throws {
         try Data(text.utf8).write(to: root.appendingPathComponent(name))
     }

@@ -8,6 +8,7 @@ struct VaultLibraryView: View {
     @State private var dropTargeted = false
     @State private var changingPassword = false
     @State private var keeping: (keeper: VaultItem, group: VaultDuplicates.Group)?
+    @State private var confirmingEmptyTrash = false
 
     private static let tileMinimum: CGFloat = 150
     private static let tileMaximum: CGFloat = 230
@@ -50,8 +51,14 @@ struct VaultLibraryView: View {
                 Task { await vault.keep(keeping.keeper, in: keeping.group) }
             }
         } message: {
-            Text("The other copies go to the Trash inside the vault, where they stay encrypted. Empty the Trash while the vault is open to free the space, or put them back from there.")
+            Text("The other copies go to the vault's own Trash, where they stay encrypted. You can put them back or empty it from the Duplicates view.")
         }
+        .confirmationDialog(emptyTrashTitle, isPresented: $confirmingEmptyTrash, titleVisibility: .visible) {
+            Button("Empty Trash", role: .destructive) { vault.emptyTrash() }
+        } message: {
+            Text("They're deleted for good. This can't be undone.")
+        }
+        .onChange(of: vault.mode) { selecting = false }
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
     }
 
@@ -154,6 +161,7 @@ struct VaultLibraryView: View {
     }
 
     @ViewBuilder private var duplicatesContent: some View {
+        if !vault.trash.isEmpty { trashBar }
         if let groups = vault.visibleDuplicateGroups {
             if groups.isEmpty {
                 Text(noDuplicatesMessage).font(.title3.weight(.semibold)).foregroundStyle(.secondary)
@@ -194,6 +202,25 @@ struct VaultLibraryView: View {
         }
     }
 
+    private var trashBar: some View {
+        HStack(spacing: 10) {
+            Label(trashDescription, systemImage: "trash").font(.callout)
+            Spacer()
+            Button("Put Back All") { vault.putBackTrash() }
+            Button("Empty Trash…", role: .destructive) { confirmingEmptyTrash = true }
+        }
+        .padding(12).cardBackground(corner: 12)
+    }
+
+    private var trashDescription: String {
+        let size = ByteCountFormatter.string(fromByteCount: vault.trash.bytes, countStyle: .file)
+        return vault.trash.count == 1 ? "1 item in the vault's Trash (\(size))" : "\(vault.trash.count) items in the vault's Trash (\(size))"
+    }
+
+    private var emptyTrashTitle: String {
+        vault.trash.count == 1 ? "Delete 1 item in the vault's Trash?" : "Delete \(vault.trash.count) items in the vault's Trash?"
+    }
+
     private var noDuplicatesMessage: String {
         switch vault.filter {
         case .all: "No duplicates in the vault"
@@ -205,7 +232,7 @@ struct VaultLibraryView: View {
     private func duplicatesSummary(_ groups: [VaultDuplicates.Group]) -> String {
         let extra = ByteCountFormatter.string(fromByteCount: groups.reduce(0) { $0 + $1.extraBytes }, countStyle: .file)
         let sets = groups.count == 1 ? "1 set of identical files" : "\(groups.count) sets of identical files"
-        return "\(sets), \(extra) in extra copies. Pick the copy to keep; the others go to the Trash."
+        return "\(sets), \(extra) in extra copies. Pick the copy to keep; the others go to the vault's Trash."
     }
 
     private var keepTitle: String {

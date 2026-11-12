@@ -79,6 +79,7 @@ final class VaultSearchTests: XCTestCase {
                         segments: [VaultSegment(modality: .image, start: 3, end: 6, vector: vector),
                                    VaultSegment(modality: .audio, start: 0, end: 30, vector: vector)])
         XCTAssertEqual(try index.vectors().rows, 3)
+        XCTAssertEqual(try index.pathsWithSound(), ["b.mov"])
         XCTAssertEqual(try index.files()["b.mov"], VaultIndexedFile(bytes: 20, modified: 2))
 
         try index.remove(["b.mov"])

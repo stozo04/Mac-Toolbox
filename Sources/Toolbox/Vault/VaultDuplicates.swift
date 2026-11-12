@@ -28,6 +28,15 @@ enum VaultDuplicates {
         return groups.sorted { $0.extraBytes != $1.extraBytes ? $0.extraBytes > $1.extraBytes : $0.id < $1.id }
     }
 
+    /// The keeper and every copy are still there with the same size, so trashing the others can't lose the last copy.
+    static func isStillIntact(_ group: Group, keeping keeper: VaultItem) -> Bool {
+        guard group.copies.contains(keeper) else { return false }
+        return group.copies.allSatisfy { copy in
+            let size = (try? FileManager.default.attributesOfItem(atPath: copy.url.path))?[.size] as? NSNumber
+            return size?.int64Value == copy.bytes
+        }
+    }
+
     static func others(than keeper: VaultItem, in group: Group) -> [VaultItem] {
         group.copies.filter { $0.id != keeper.id }
     }

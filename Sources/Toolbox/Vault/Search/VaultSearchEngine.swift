@@ -69,11 +69,8 @@ final class VaultSearchEngine: @unchecked Sendable {
             }
             return (changed, silentVideos)
         }
-        var hiddenSound: [VaultItem] = []
-        for video in silentVideos where await VaultPlayable.needsCopy(video, privateFolder: privateFolder, tools: tools) {
-            hiddenSound.append(video)
-        }
-        return changed + hiddenSound
+        guard tools != nil else { return changed }
+        return changed + silentVideos.filter { VaultPlayable.needsLook($0, privateFolder: privateFolder) }
     }
 
     func index(_ item: VaultItem) async throws {

@@ -40,6 +40,12 @@ enum Shell {
                     errData.append(err.fileHandleForReading.readDataToEndOfFile())
                     continuation.resume(returning: Result(status: p.terminationStatus, out: outData.string, err: errData.string))
                 }
+                if Task.isCancelled {
+                    out.fileHandleForReading.readabilityHandler = nil
+                    err.fileHandleForReading.readabilityHandler = nil
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 do { try process.run() } catch {
                     out.fileHandleForReading.readabilityHandler = nil
                     err.fileHandleForReading.readabilityHandler = nil
