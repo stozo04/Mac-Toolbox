@@ -16,6 +16,7 @@ struct VaultLibraryView: View {
         @Bindable var vault = vault
         VStack(spacing: 12) {
             header
+            if !vault.items.isEmpty { VaultSearchBar() }
             if let progress = vault.moveProgress { MoveProgressBar(progress: progress) }
             if !vault.moveFailures.isEmpty { failures }
             if let message = vault.message { banner(message) }
@@ -71,11 +72,15 @@ struct VaultLibraryView: View {
                 .menuStyle(.borderlessButton).fixedSize()
             Button { Task { await vault.lock() } } label: { Label("Lock", systemImage: "lock.fill") }
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.warning)
         }
         .controlSize(.large)
     }
 
     @ViewBuilder private var content: some View {
+        if !vault.query.isEmpty, let result = vault.searchResult, !vault.items.isEmpty {
+            searchSummary(result)
+        }
         if vault.items.isEmpty {
             VStack(spacing: 10) {
                 Image(systemName: "photo.on.rectangle.angled").font(.system(size: 44)).foregroundStyle(.secondary)
@@ -88,7 +93,7 @@ struct VaultLibraryView: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
                           spacing: Self.spacing) {
-                    ForEach(vault.items) { item in
+                    ForEach(vault.displayedItems) { item in
                         VaultTile(item: item, selected: vault.selection.contains(item.id))
                             .onTapGesture { tap(item) }
                             .contextMenu {
@@ -99,6 +104,21 @@ struct VaultLibraryView: View {
                 .padding(.bottom, 16)
             }
         }
+    }
+
+    @ViewBuilder private func searchSummary(_ result: VaultSearchResult) -> some View {
+        let count = vault.displayedItems.count
+        Group {
+            if count == 0 {
+                Text("No matches for “\(vault.query)”")
+            } else if !result.strong {
+                Text("No close matches. These are the nearest:")
+            } else {
+                Text(count == 1 ? "1 match" : "\(count) matches")
+            }
+        }
+        .font(.callout).foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var failures: some View {
@@ -215,8 +235,13 @@ struct VaultTile: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(alignment: .bottomLeading) {
                 if item.kind == .video {
-                    Image(systemName: "play.fill").font(.caption).foregroundStyle(.white)
-                        .padding(6).background(Circle().fill(.black.opacity(0.55))).padding(8)
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill")
+                        if let start = vault.matchStart(for: item) { Text(VaultTime.label(start)).monospacedDigit() }
+                    }
+                    .font(.caption).foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 5)
+                    .background(Capsule().fill(.black.opacity(0.6))).padding(8)
                 }
             }
             .overlay(alignment: .topTrailing) {

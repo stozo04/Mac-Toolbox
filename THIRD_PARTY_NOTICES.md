@@ -1,6 +1,7 @@
 # Third-party software in Toolbox
 
-Toolbox ships these programs inside the app (Contents/Resources) and runs them as separate processes.
+Toolbox ships these programs inside the app (Contents/Resources) and runs them as separate processes, and compiles the
+libraries further down into the app itself.
 
 ## yt-dlp
 Public domain (The Unlicense). https://github.com/yt-dlp/yt-dlp
@@ -51,3 +52,38 @@ BSD 3-Clause license:
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Toolbox is not affiliated with the FFmpeg, yt-dlp or WebP projects.
+
+## llama.cpp
+Compiled into the Toolbox app itself; it runs the Vault's smart search model. Build tag b11461 with one small patch
+(`scripts/llama.cpp-no-logits.patch`), built by `scripts/build-llama.sh`. https://github.com/ggml-org/llama.cpp
+MIT License, Copyright (c) 2023-2026 The ggml authors. The full license text is the MIT text reproduced under DigUp below.
+
+## DigUp (Vault search engine)
+`Sources/VaultSearch/` is adapted from DigUp's EmbeddingGemma 2 runtime (`LlamaEmbedder`, `ImageSizing`, the media
+readers and the scoring), along with `scripts/build-llama.sh` and its patch. https://github.com/ARahim3/DigUp
+MIT License, full text in `Sources/VaultSearch/LICENSE-DigUp`:
+
+    Copyright (c) 2026 Abdur Rahim
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+## EmbeddingGemma 2 (model, not shipped)
+The Vault's search model is not inside the app. Toolbox uses the copy DigUp already downloaded, or downloads
+ggml-org's Q8_0 GGUF conversion of google/embeddinggemma-2 from Hugging Face once, on request. The model is under
+Google's Gemma terms of use: https://ai.google.dev/gemma/terms
