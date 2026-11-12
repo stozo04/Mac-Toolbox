@@ -31,6 +31,14 @@ enum ReleaseNotes {
         Release(version: "0.8.1", date: "2026-11-12", changes: [
             .init(kind: .improved, text: "Behind the scenes: updates to the build and test setup no longer need a new app version, so they can go out without an app release."),
         ]),
+        Release(version: "0.8.0", date: "2026-11-12", changes: [
+            .init(kind: .new, text: "Vault: right-click a photo or video and choose Details to see its size, length, resolution, codecs and sound, and to rename it."),
+            .init(kind: .new, text: "Vault: Details shows whether a file is in smart search, and Add to Search puts it at the front of the queue. Press ⌘I in the viewer to open it."),
+        ]),
+        Release(version: "0.7.1", date: "2026-11-12", changes: [
+            .init(kind: .fixed, text: "Vault: Duplicates also finds the same video saved twice under different names, like a TikTok saved once by its ID and once by its caption."),
+            .init(kind: .improved, text: "Vault: each set in Duplicates is marked Exact or Likely, and likely copies show their file sizes so you can pick the better one to keep."),
+        ]),
         Release(version: "0.7.0", date: "2026-11-12", changes: [
             .init(kind: .new, text: "Vault: show All, Images or Videos, each with its count, and sort videos from shortest to longest or longest to shortest."),
             .init(kind: .new, text: "Vault: a Duplicates view finds photos and videos that are exact copies of each other. Pick the one to keep and the others go to the vault's own Trash, where you can put them back or empty it."),

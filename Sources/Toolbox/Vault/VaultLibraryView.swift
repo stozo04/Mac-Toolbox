@@ -61,6 +61,9 @@ struct VaultLibraryView: View {
         }
         .onChange(of: vault.mode) { selecting = false }
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
+        .sheet(isPresented: detailsShown) {
+            if let item = vault.items.first(where: { $0.id == vault.detailing }) { VaultDetailsSheet(item: item) }
+        }
     }
 
     private var header: some View {
@@ -105,7 +108,7 @@ struct VaultLibraryView: View {
             }
             .labelsHidden()
             .fixedSize()
-            .help("Library shows everything; Duplicates finds files that are exact copies of each other")
+            .help("Library shows everything; Duplicates finds exact copies and files that look like the same photo or video")
             Picker("Show", selection: $vault.filter) {
                 ForEach(VaultFilter.allCases) { Text($0.tabTitle(in: vault.items)).monospacedDigit().tag($0) }
             }
@@ -180,7 +183,7 @@ struct VaultLibraryView: View {
         } else {
             VStack(spacing: 10) {
                 ProgressView()
-                Text("Looking for files that are exact copies…").font(.callout).foregroundStyle(.secondary)
+                Text("Comparing photos and videos…").font(.callout).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -188,19 +191,45 @@ struct VaultLibraryView: View {
 
     private func duplicateGroup(_ group: VaultDuplicates.Group) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("\(group.copies.count) copies · \(ByteCountFormatter.string(fromByteCount: group.bytesEach, countStyle: .file)) each")
+            HStack(spacing: 8) {
+                matchBadge(group.match)
+                sectionHeader(groupTitle(group))
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
                       alignment: .leading, spacing: Self.spacing) {
                 ForEach(group.copies) { item in
                     VStack(alignment: .leading, spacing: 6) {
                         VaultTile(item: item, selected: false).onTapGesture { vault.viewing = item.id }
                         Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.name)
+                        if group.match == .likely {
+                            Text(ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
+                                .font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
+                        }
                         Button("Keep This One") { keeping = (item, group) }.controlSize(.small)
                             .disabled(vault.moveProgress != nil)
                     }
                 }
             }
         }
+    }
+
+    private var detailsShown: Binding<Bool> {
+        Binding(get: { vault.detailing != nil }, set: { if !$0 { vault.detailing = nil } })
+    }
+
+    private func matchBadge(_ match: VaultDuplicates.Match) -> some View {
+        Text(match == .exact ? "Exact" : "Likely")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Capsule().fill(match == .exact ? Theme.accent.opacity(0.18) : Color.orange.opacity(0.2)))
+            .padding(.top, 6)
+            .help(match == .exact ? "Byte-for-byte the same file"
+                  : "Same post ID or the same frames, but not the same file. Compare before keeping one.")
+    }
+
+    private func groupTitle(_ group: VaultDuplicates.Group) -> String {
+        guard group.match == .exact else { return "\(group.copies.count) versions of the same \(group.kind == .video ? "video" : "photo")" }
+        return "\(group.copies.count) copies · \(ByteCountFormatter.string(fromByteCount: group.bytesEach, countStyle: .file)) each"
     }
 
     private var trashBar: some View {
@@ -233,8 +262,10 @@ struct VaultLibraryView: View {
 
     private func duplicatesSummary(_ groups: [VaultDuplicates.Group]) -> String {
         let extra = ByteCountFormatter.string(fromByteCount: groups.reduce(0) { $0 + $1.extraBytes }, countStyle: .file)
-        let sets = groups.count == 1 ? "1 set of identical files" : "\(groups.count) sets of identical files"
-        return "\(sets), \(extra) in extra copies. Pick the copy to keep; the others go to the vault's Trash."
+        let likely = groups.filter { $0.match == .likely }.count
+        let sets = groups.count == 1 ? "1 set of duplicates" : "\(groups.count) sets of duplicates"
+        let detail = likely == 0 ? "" : " (\(likely) likely, not byte-identical)"
+        return "\(sets)\(detail), \(extra) in extra copies. Pick the copy to keep; the others go to the vault's Trash."
     }
 
     private var keepTitle: String {
@@ -254,6 +285,7 @@ struct VaultLibraryView: View {
                 .onTapGesture { tap(item) }
                 .contextMenu {
                     Button("Delete", role: .destructive) { confirmingDelete = [item.id] }
+                    Button("Details…") { vault.detailing = item.id }
                 }
         }
     }
