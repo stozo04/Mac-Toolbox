@@ -38,7 +38,9 @@ final class VaultModel {
     var query = "" {
         didSet { if query != oldValue { runQuery() } }
     }
-    private(set) var searchResult: VaultSearchResult?
+    private(set) var searchResult: VaultSearchResult? {
+        didSet { keepOnlyVisibleItemsChosen() }
+    }
     private(set) var isSearching = false
 
     let disk: VaultDisk
@@ -245,6 +247,12 @@ final class VaultModel {
         guard !query.isEmpty, let searchResult else { return items }
         let byPath = Dictionary(items.map { (searchEngine?.relativePath(of: $0.url) ?? $0.name, $0) }, uniquingKeysWith: { first, _ in first })
         return searchResult.hits.compactMap { byPath[$0.path] }
+    }
+
+    private func keepOnlyVisibleItemsChosen() {
+        let visible = Set(displayedItems.map(\.id))
+        if !selection.isEmpty { selection.formIntersection(visible) }
+        if let viewing, !visible.contains(viewing) { self.viewing = nil }
     }
 
     func matchStart(for item: VaultItem) -> Double? {

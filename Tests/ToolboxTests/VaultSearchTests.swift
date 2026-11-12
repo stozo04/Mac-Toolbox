@@ -168,6 +168,42 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 1, "closing the search engine blocked the main thread")
     }
 
+    @MainActor
+    func testSearchingKeepsOnlyVisibleItemsSelectedInARealVault() async throws {
+        guard EmbeddingModel.locate() != nil else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
+        let location = VaultLocation(folder: root.appendingPathComponent("vault"))
+        try await VaultDisk(location: location).create(password: "search-pass")
+        let model = VaultModel(location: location, watchesSystem: false)
+        defer { model.lockImmediately() }
+        await model.unlock(password: "search-pass")
+        model.finishOpening()
+        let red = try makePhoto("red square.png", red: 230, green: 20, blue: 20)
+        let blue = try makePhoto("blue square.png", red: 20, green: 40, blue: 230)
+        _ = try await VaultMover.move(red, into: model.root)
+        _ = try await VaultMover.move(blue, into: model.root)
+        model.reload()
+        model.retrySearch()
+        try await waitUntil { if case .ready = model.searchState { true } else { false } }
+
+        model.selection = Set(model.items.map(\.id))
+        model.viewing = model.items.first { $0.name == "blue square.png" }?.id
+        model.query = "red"
+        try await waitUntil { model.searchResult != nil }
+
+        XCTAssertEqual(model.displayedItems.map(\.name), ["red square.png"])
+        XCTAssertEqual(model.selection, Set(model.displayedItems.map(\.id)))
+        XCTAssertNil(model.viewing, "the viewer stayed on an item the search hides")
+    }
+
+    @MainActor
+    private func waitUntil(seconds: Double = 60, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("Timed out waiting") }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     private func makePhoto(_ name: String, red: UInt8, green: UInt8, blue: UInt8) throws -> URL {
         let url = root.appendingPathComponent(name)
         let side = 512
