@@ -17,14 +17,15 @@ enum Shell {
     }
 
     /// Cancelling the calling task stops the program.
-    static func run(_ path: String, _ arguments: [String] = [], timeout: TimeInterval? = nil) async throws -> Result {
+    static func run(_ path: String, _ arguments: [String] = [], input: Data? = nil, timeout: TimeInterval? = nil) async throws -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
-        process.standardInput = FileHandle.nullDevice
+        let inputPipe = input.map { _ in Pipe() }
+        process.standardInput = inputPipe ?? FileHandle.nullDevice
         let box = ProcessBox(process)
 
         return try await withTaskCancellationHandler {
@@ -44,6 +45,10 @@ enum Shell {
                     err.fileHandleForReading.readabilityHandler = nil
                     continuation.resume(throwing: ShellError.launchFailed(path))
                     return
+                }
+                if let inputPipe, let input {
+                    try? inputPipe.fileHandleForWriting.write(contentsOf: input)
+                    try? inputPipe.fileHandleForWriting.close()
                 }
                 if let timeout {
                     DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { box.terminate() }

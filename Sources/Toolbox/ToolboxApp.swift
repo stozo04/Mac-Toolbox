@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct ToolboxApp: App {
     @State private var state = AppState()
+    @State private var vault = VaultModel(location: .launch())
 
     init() {
         var sinks: [LogSink] = [ConsoleLogSink()]
@@ -15,6 +16,7 @@ struct ToolboxApp: App {
         WindowGroup {
             RootView()
                 .environment(state)
+                .environment(vault)
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(state.isDark ? .dark : .light)
                 .onAppear {
