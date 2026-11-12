@@ -43,6 +43,13 @@ jobs:
           path: .build
           key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/CWebP/**') }}
           restore-keys: spm-${{ runner.os }}-
+      - name: Cache llama.cpp (built by scripts/build-llama.sh)
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: Vendor/llama
+          key: llama-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama.cpp-no-logits.patch') }}
+      - name: Build llama.cpp (Vault search)
+        run: scripts/build-llama.sh
       - name: Build
         run: swift build --build-tests
       - name: Test
@@ -53,7 +60,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      ARCHS: arm64   # Apple silicon build for trying the PR; make-app.sh without ARCHS builds universal for releases
+      ARCHS: arm64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Cache yt-dlp + ffmpeg (built by scripts/fetch-tools.sh)
@@ -65,6 +72,11 @@ jobs:
       - name: Fetch and build helper tools
         if: steps.tools-cache.outputs.cache-hit != 'true'
         run: scripts/fetch-tools.sh
+      - name: Cache llama.cpp (built by scripts/build-llama.sh)
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: Vendor/llama
+          key: llama-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama.cpp-no-logits.patch') }}
       - name: Build the app (release, ad-hoc signed)
         run: BUILD="${{ github.run_number }}" scripts/make-app.sh   # version from ReleaseNotes.swift, run number as build
       - name: Upload Toolbox.zip
