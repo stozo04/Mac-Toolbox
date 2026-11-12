@@ -211,6 +211,14 @@ final class VaultTests: XCTestCase {
         XCTAssertNil(VaultLibrary.neighbor(of: "/missing", in: items, step: 1))
     }
 
+    func testLockingAVaultThatIsStillAttachingLeavesItsMountPointAlone() async throws {
+        let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent("attaching")))
+        try FileManager.default.createDirectory(at: disk.location.mountPoint, withIntermediateDirectories: true)
+        try await disk.lock()
+        disk.lockAndWait()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: disk.location.mountPoint.path))
+    }
+
     func testAClosedGateDropsLateThumbnailWrites() {
         let gate = VaultWriteGate()
         var writes = 0

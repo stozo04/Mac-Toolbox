@@ -87,7 +87,7 @@ struct VaultDisk {
     }
 
     func lock() async throws {
-        guard isOpen else { return removeEmptyMountPoint() }
+        guard isOpen else { return }
         let eject = try await Shell.run(Self.diskutil, ["eject", location.mountPoint.path])
         if eject.succeeded || !isOpen { return removeEmptyMountPoint() }
         let forced = try await Shell.run(Self.hdiutil, ["detach", "-force", location.mountPoint.path])
@@ -102,7 +102,7 @@ struct VaultDisk {
     }
 
     func lockAndWait() {
-        guard isOpen else { return removeEmptyMountPoint() }
+        guard isOpen else { return }
         Self.runAndWait(Self.diskutil, ["eject", location.mountPoint.path])
         if isOpen { Self.runAndWait(Self.hdiutil, ["detach", "-force", location.mountPoint.path]) }
         removeEmptyMountPoint()
