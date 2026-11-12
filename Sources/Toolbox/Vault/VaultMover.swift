@@ -10,6 +10,7 @@ enum VaultMoveError: LocalizedError, Equatable {
     case alreadyInVault
     case link
     case copyDiffers
+    case interrupted
     case unreadable
     case originalKept(String)
 
@@ -20,6 +21,7 @@ enum VaultMoveError: LocalizedError, Equatable {
         case .notDownloaded: "It's in iCloud and not downloaded to this Mac yet."
         case .alreadyInVault: "It's already in the vault."
         case .link: "It's a link to a file stored somewhere else. Add the file itself."
+        case .interrupted: "Moving stopped when the vault locked, so the original was kept."
         case .copyDiffers: "The copy in the vault didn't match the original, so the original was kept."
         case .unreadable: "The copy in the vault couldn't be opened, so the original was kept."
         case .originalKept(let reason): "It's in the vault, but the original couldn't be deleted: \(reason)"
@@ -50,9 +52,12 @@ enum VaultMover {
     }
 
     static func check(_ source: URL, vaultRoot: URL) throws {
-        let path = source.standardizedFileURL.path
-        if path.hasPrefix(vaultRoot.standardizedFileURL.path + "/") { throw VaultMoveError.alreadyInVault }
-        if source.pathComponents.contains(where: { $0.lowercased().hasSuffix("." + photosLibraryExtension) }) {
+        let places = [source.standardizedFileURL, resolvingFolders(of: source)]
+        let vaultPaths = [vaultRoot.standardizedFileURL.path, vaultRoot.resolvingSymlinksInPath().path]
+        if places.contains(where: { place in vaultPaths.contains { place.path.hasPrefix($0 + "/") } }) {
+            throw VaultMoveError.alreadyInVault
+        }
+        if places.contains(where: { $0.pathComponents.contains { $0.lowercased().hasSuffix("." + photosLibraryExtension) } }) {
             throw VaultMoveError.insidePhotosLibrary
         }
         guard VaultItem.kind(of: source) != nil else { throw VaultMoveError.unsupportedType }
@@ -73,12 +78,24 @@ enum VaultMover {
             try? FileManager.default.removeItem(at: destination)
             throw error
         }
+        guard !Task.isCancelled, copyIsStillThere(destination, matching: source) else {
+            throw VaultMoveError.interrupted
+        }
         do {
             try FileManager.default.removeItem(at: source)
         } catch {
             throw VaultMoveError.originalKept(error.localizedDescription)
         }
         return destination
+    }
+
+    static func resolvingFolders(of url: URL) -> URL {
+        url.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent)
+    }
+
+    static func copyIsStillThere(_ copy: URL, matching original: URL) -> Bool {
+        guard let copySize = try? fileSize(copy), let originalSize = try? fileSize(original) else { return false }
+        return copySize == originalSize
     }
 
     static func uniqueDestination(for name: String, in folder: URL) -> URL {
@@ -133,6 +150,7 @@ enum VaultMover {
     }
 
     private static func fileSize(_ url: URL) throws -> Int {
-        try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? -1
+        let size = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
+        return size?.intValue ?? -1
     }
 }

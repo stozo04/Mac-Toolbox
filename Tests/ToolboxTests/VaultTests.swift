@@ -83,6 +83,40 @@ final class VaultTests: XCTestCase {
         XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
     }
 
+    func testAFolderLinkIntoAPhotosLibraryIsStillRefused() async throws {
+        let originals = dir.appendingPathComponent("Photos Library.photoslibrary/originals")
+        try FileManager.default.createDirectory(at: originals, withIntermediateDirectories: true)
+        let photo = try makePhoto("managed.png", in: originals)
+        let shortcut = source.appendingPathComponent("Shortcut")
+        try FileManager.default.createSymbolicLink(at: shortcut, withDestinationURL: originals)
+        await assertMoveFails(shortcut.appendingPathComponent("managed.png"), with: .insidePhotosLibrary)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+    }
+
+    func testAMoveStoppedByLockingKeepsTheOriginal() async throws {
+        let photo = try makePhoto("kept.png")
+        let vault = vault!
+        let stopped = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await VaultMover.move(photo, into: vault)
+        }
+        do {
+            _ = try await stopped.value
+            XCTFail("A cancelled move deleted the original")
+        } catch {
+            XCTAssertEqual(error as? VaultMoveError, .interrupted)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+    }
+
+    func testOriginalIsKeptWhenTheCopyVanishesBeforeDeleting() throws {
+        let photo = try makePhoto("present.png")
+        XCTAssertFalse(VaultMover.copyIsStillThere(vault.appendingPathComponent("present.png"), matching: photo))
+        let copy = vault.appendingPathComponent("present.png")
+        try FileManager.default.copyItem(at: photo, to: copy)
+        XCTAssertTrue(VaultMover.copyIsStillThere(copy, matching: photo))
+    }
+
     func testTruncatedPhotoIsRefusedAndKept() async throws {
         let whole = try Data(contentsOf: try makePhoto("whole.png"))
         let truncated = source.appendingPathComponent("truncated.png")
@@ -218,6 +252,14 @@ final class VaultTests: XCTestCase {
         }
         try await disk.unlock(password: "second-pass")
         XCTAssertEqual(VaultLibrary.items(in: disk.location.mountPoint).map(\.name), ["secret.png"])
+
+        do {
+            try await disk.unlock(password: "wrong-pass")
+            XCTFail("A wrong password was accepted because the vault was already open")
+        } catch {
+            XCTAssertEqual(error as? VaultError, .wrongPassword)
+        }
+        XCTAssertFalse(disk.isOpen)
         disk.lockAndWait()
         XCTAssertFalse(disk.isOpen)
     }

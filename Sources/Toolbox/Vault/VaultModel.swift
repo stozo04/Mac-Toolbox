@@ -99,7 +99,7 @@ final class VaultModel {
             VaultLog.failure("Vault lock failed", error)
             disk.lockAndWait()
         }
-        if disk.exists { phase = .locked }
+        settleAfterLocking()
     }
 
     func lockImmediately() {
@@ -107,7 +107,21 @@ final class VaultModel {
         moveTask?.cancel()
         clearOpenState()
         disk.lockAndWait()
-        if disk.exists { phase = .locked }
+        settleAfterLocking()
+    }
+
+    static let stillOpenMessage = "The vault couldn't be locked because something is still using a file in it. Close it and press Lock again."
+
+    private func settleAfterLocking() {
+        guard disk.isOpen else {
+            if disk.exists { phase = .locked }
+            return
+        }
+        Log.error("Vault still open after locking", category: VaultLog.category)
+        message = Self.stillOpenMessage
+        thumbnails = VaultThumbnails(vaultRoot: root)
+        reload()
+        phase = .open
     }
 
     func changePassword(current: String, new: String, confirmation: String) async -> Bool {
@@ -181,6 +195,7 @@ final class VaultModel {
         guard let moveError = error as? VaultMoveError else { return true }
         switch moveError {
         case .copyDiffers, .unreadable, .originalKept: return true
+        case .interrupted: return false
         case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
         }
     }

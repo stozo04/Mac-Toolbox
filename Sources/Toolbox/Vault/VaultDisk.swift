@@ -68,7 +68,7 @@ struct VaultDisk {
     }
 
     func unlock(password: String) async throws {
-        if isOpen { return }
+        if isOpen { try await lock() }
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "attach", "--nobrowse",
                                                          "--mountPoint", location.mountPoint.path, location.image.path],
                                          input: Data(password.utf8))
