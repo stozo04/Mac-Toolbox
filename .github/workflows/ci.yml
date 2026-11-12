@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Version raised and release notes added (AGENTS.md, "Versioning")
@@ -32,13 +32,13 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Toolchain
         run: |
           sw_vers
           xcodebuild -version
           swift --version
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .build
           key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/CWebP/**') }}
@@ -55,10 +55,10 @@ jobs:
     env:
       ARCHS: arm64   # Apple silicon build for trying the PR; make-app.sh without ARCHS builds universal for releases
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Cache yt-dlp + ffmpeg (built by scripts/fetch-tools.sh)
         id: tools-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/tools
           key: tools-${{ runner.os }}-${{ env.ARCHS }}-${{ hashFiles('scripts/fetch-tools.sh') }}
@@ -68,7 +68,7 @@ jobs:
       - name: Build the app (release, ad-hoc signed)
         run: BUILD="${{ github.run_number }}" scripts/make-app.sh   # version from ReleaseNotes.swift, run number as build
       - name: Upload Toolbox.zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Toolbox-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || format('run{0}', github.run_number) }}
           path: dist/Toolbox.zip
@@ -87,7 +87,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install SwiftLint
         run: command -v swiftlint >/dev/null || brew install swiftlint
       - name: SwiftLint (errors fail the check, warnings are annotated)
