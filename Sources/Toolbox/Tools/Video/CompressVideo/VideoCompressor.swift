@@ -81,22 +81,32 @@ enum VideoCompressor {
                 try await job.run(progress: progress)
                 let newBytes = fileSize(output)
                 if newBytes >= originalBytes {
-                    try? FileManager.default.removeItem(at: output)
+                    discard(output)
                     return .notSmaller(originalBytes: originalBytes, newBytes: newBytes)
                 }
                 return .compressed(VideoCompressResult(url: output, originalBytes: originalBytes, newBytes: newBytes, size: size))
             } catch is CancellationError {
-                try? FileManager.default.removeItem(at: output)
+                discard(output)
                 throw CancellationError()
             } catch let error as Job.StartFailure {
-                try? FileManager.default.removeItem(at: output)
+                discard(output)
                 lastError = error.underlying
             } catch {
-                try? FileManager.default.removeItem(at: output)
+                discard(output)
                 throw error
             }
         }
         throw lastError ?? VideoCompressError.cannotWrite("")
+    }
+
+    static func discard(_ output: URL) {
+        let manager = FileManager.default
+        try? manager.removeItem(at: output)
+        let folder = output.deletingLastPathComponent()
+        let scratchPrefix = output.lastPathComponent + ".sb-"
+        for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasPrefix(scratchPrefix) {
+            try? manager.removeItem(at: folder.appendingPathComponent(name))
+        }
     }
 
     private static func fileSize(_ url: URL) -> Int64 {
@@ -129,6 +139,7 @@ enum VideoCompressor {
         private let lock = NSLock()
         private var gates: [Gate] = []
         private var isCancelled = false
+        private let settled = Gate()
 
         /// Lets a waiting pump be released from outside: a cancelled writer never asks for more samples, so it can't release itself.
         private final class Gate: @unchecked Sendable {
@@ -151,12 +162,20 @@ enum VideoCompressor {
 
         private func cancel() {
             lock.lock()
+            let first = !isCancelled
             isCancelled = true
             let waiting = gates
             lock.unlock()
+            guard first else { return }
             reader.cancelReading()
             writer.cancelWriting()
             waiting.forEach { $0.open() }
+            settled.open()
+        }
+
+        private func finishCancelling() async {
+            cancel()
+            await withCheckedContinuation { settled.hold($0) }
         }
 
         private func register(_ gate: Gate) {
@@ -283,7 +302,10 @@ enum VideoCompressor {
                 cancel()
             }
 
-            if Task.isCancelled || writer.status == .cancelled { throw CancellationError() }
+            if Task.isCancelled || writer.status == .cancelled {
+                await finishCancelling()
+                throw CancellationError()
+            }
             if reader.status == .failed {
                 writer.cancelWriting()
                 throw VideoCompressError.cannotRead(reader.error?.localizedDescription ?? "")

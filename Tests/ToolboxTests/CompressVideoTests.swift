@@ -255,6 +255,18 @@ final class CompressVideoTests: XCTestCase {
         }
     }
 
+    func testDiscardingAPartialFileAlsoRemovesItsScratchFilesAndNothingElse() throws {
+        let output = dir.appendingPathComponent("long (Compressed).mp4")
+        let leftovers = ["long (Compressed).mp4", "long (Compressed).mp4.sb-1a2b3c", "long (Compressed).mp4.sb-9z8y7x"]
+        let keep = ["long.mov", "long (Compressed) 2.mp4", "long (Compressed) 2.mp4.sb-4d5e6f", "long (Compressed).mp4.sbx"]
+        for name in leftovers + keep { try Data("x".utf8).write(to: dir.appendingPathComponent(name)) }
+
+        VideoCompressor.discard(output)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        XCTAssertEqual(left, keep.sorted())
+    }
+
     // MARK: Helpers
 
     private func compressed(_ outcome: VideoCompressOutcome, file: StaticString = #filePath, line: UInt = #line) throws -> VideoCompressResult {
