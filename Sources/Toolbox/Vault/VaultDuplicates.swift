@@ -52,22 +52,28 @@ enum VaultDuplicates {
 
     static func postID(in name: String) -> String? {
         let stem = (name as NSString).deletingPathExtension
-        return bracketedID(in: stem) ?? longNumber(in: stem)
+        return bracketed(in: stem).last(where: isNumberID) ?? longNumber(in: stem) ?? trailingYouTubeID(in: stem)
     }
 
     private static let youTubeIDLength = 11
+    private static let minimumLetterDigitSwitches = 2
     private static let numberIDLengths = 15...20
 
-    private static func bracketedID(in stem: String) -> String? {
-        stem.split(separator: "[").dropFirst().compactMap { piece -> String? in
-            guard let close = piece.firstIndex(of: "]") else { return nil }
-            let inside = String(piece[..<close])
-            return isNumberID(inside) || isYouTubeID(inside) ? inside : nil
-        }.last
+    private static func bracketed(in stem: String) -> [String] {
+        stem.split(separator: "[").dropFirst().compactMap { piece in
+            piece.firstIndex(of: "]").map { String(piece[..<$0]) }
+        }
     }
 
     private static func longNumber(in stem: String) -> String? {
         stem.split { !$0.isASCII || !$0.isNumber }.map(String.init).last(where: isNumberID)
+    }
+
+    private static func trailingYouTubeID(in stem: String) -> String? {
+        let trimmed = stem.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasSuffix("]"), let last = bracketed(in: trimmed).last, trimmed.hasSuffix("[\(last)]"),
+              isYouTubeID(last) else { return nil }
+        return last
     }
 
     private static func isNumberID(_ text: String) -> Bool {
@@ -75,11 +81,14 @@ enum VaultDuplicates {
     }
 
     private static func isYouTubeID(_ text: String) -> Bool {
-        let scalars = text.unicodeScalars
-        let allowed = scalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-") }
-        let hasNonLetter = scalars.contains { CharacterSet.decimalDigits.contains($0) || $0 == "_" || $0 == "-" }
-        let hasLetter = scalars.contains { CharacterSet.letters.contains($0) }
-        return scalars.count == youTubeIDLength && allowed && hasNonLetter && hasLetter
+        let allowed = text.count == youTubeIDLength && text.unicodeScalars.allSatisfy {
+            $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-")
+        }
+        let switches = text.split { $0 == "-" || $0 == "_" }.reduce(0) { total, piece in
+            let classes = piece.map(\.isNumber)
+            return total + zip(classes, classes.dropFirst()).filter { $0 != $1 }.count
+        }
+        return allowed && switches >= minimumLetterDigitSwitches
     }
 
     /// The keeper and every copy are still there with the same size, so trashing the others can't lose the last copy.

@@ -39,6 +39,14 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
         XCTAssertNil(VaultDuplicates.postID(in: "clip [2024-11-12].mp4"))
         XCTAssertNil(VaultDuplicates.postID(in: "Song [Official].mp4"))
         XCTAssertNil(VaultDuplicates.postID(in: "Live [Performance].mp4"))
+        XCTAssertNil(VaultDuplicates.postID(in: "Show [Nov-12-2024].mp4"))
+        XCTAssertNil(VaultDuplicates.postID(in: "Song [Remix-2024x].mp4"))
+        XCTAssertNil(VaultDuplicates.postID(in: "Talk [dQw4w9WgXcQ] part two.mp4"))
+    }
+
+    func testANumberIDWinsOverATrailingTag() {
+        XCTAssertEqual(VaultDuplicates.postID(in: "cheeky [7520655440724757782] [abc123XYZ_0].mp4"), "7520655440724757782")
+        XCTAssertEqual(VaultDuplicates.postID(in: "tiktok_7468015357786148128 [Official].mp4"), "7468015357786148128")
     }
 
     func testVideosSharingOnlyATagStayApart() {
