@@ -163,7 +163,7 @@ struct VaultDoorView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(vault.isWorking)
+            .disabled(vault.isWorking || vault.isLocking)
         }
         .textFieldStyle(.roundedBorder)
     }

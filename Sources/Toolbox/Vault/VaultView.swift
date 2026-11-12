@@ -5,12 +5,12 @@ struct VaultView: View {
 
     var body: some View {
         ZStack {
-            if vault.phase == .open || vault.phase == .opening {
+            if (vault.phase == .open || vault.phase == .opening) && !vault.isLocking {
                 VaultLibraryView()
                     .opacity(vault.phase == .open ? 1 : 0)
                     .animation(.easeOut(duration: 0.35), value: vault.phase)
             }
-            if vault.phase != .open {
+            if vault.phase != .open || vault.isLocking {
                 VaultDoorView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }

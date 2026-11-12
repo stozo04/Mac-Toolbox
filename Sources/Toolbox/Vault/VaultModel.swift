@@ -42,7 +42,7 @@ final class VaultModel {
     var totalBytes: Int64 { items.reduce(0) { $0 + $1.bytes } }
 
     func create(password: String, confirmation: String) async {
-        guard !isWorking else { return }
+        guard !isWorking, !isLocking else { return }
         message = nil
         do {
             try VaultDisk.validateNewPassword(password, confirmation: confirmation)
@@ -61,7 +61,7 @@ final class VaultModel {
     }
 
     func unlock(password: String) async {
-        guard !isWorking, !password.isEmpty else { return }
+        guard !isWorking, !isLocking, !password.isEmpty else { return }
         message = nil
         isWorking = true
         defer { isWorking = false }
