@@ -88,7 +88,7 @@ final class DownloadVideoModel {
 
     func refreshTool() {
         downloader = YtDlpLocator.makeDownloader()
-        hasFFmpeg = YtDlpLocator.findFFmpeg() != nil
+        hasFFmpeg = MediaTools.ffmpeg() != nil
         toolStatus = downloader == nil ? .missing : .ready
     }
 

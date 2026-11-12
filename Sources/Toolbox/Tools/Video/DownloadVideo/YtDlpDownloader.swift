@@ -151,16 +151,8 @@ enum YtDlpLocator {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
     }
 
-    /// yt-dlp also needs `ffprobe` next to this file (it is bundled alongside).
-    static func findFFmpeg() -> URL? {
-        firstExecutable([
-            Bundle.main.url(forResource: "ffmpeg", withExtension: nil)?.path,
-            "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg",
-        ])
-    }
-
     static func makeDownloader() -> YtDlpDownloader? {
-        findYtDlp().map { YtDlpDownloader(executable: $0, ffmpeg: findFFmpeg(), jsRuntime: findJSRuntime()) }
+        findYtDlp().map { YtDlpDownloader(executable: $0, ffmpeg: MediaTools.ffmpeg(), jsRuntime: findJSRuntime()) }
     }
 
     static func findJSRuntime(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> JSRuntime? {

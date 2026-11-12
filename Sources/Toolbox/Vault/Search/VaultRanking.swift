@@ -4,7 +4,6 @@ import VaultSearch
 struct VaultSearchHit: Equatable {
     let path: String
     let score: Double
-    let start: Double?
 }
 
 struct VaultSearchResult: Equatable {
@@ -26,10 +25,10 @@ enum VaultRanking {
 
     static func rank(query: String, vectors: VaultVectors, scores: [Float], names: [String: String]) -> VaultSearchResult {
         let meaning = Scoring.meaning(scores, vectors.modalities)
-        var best: [String: (z: Double, start: Double)] = [:]
+        var best: [String: Double] = [:]
         for row in meaning.indices {
             let path = vectors.paths[row]
-            if meaning[row] > (best[path]?.z ?? -.infinity) { best[path] = (meaning[row], vectors.starts[row]) }
+            if meaning[row] > (best[path] ?? -.infinity) { best[path] = meaning[row] }
         }
         let words = self.words(query)
         let named = Set(names.filter { matchesName(words, $0.value) }.keys)
@@ -37,9 +36,9 @@ enum VaultRanking {
         var clear: [VaultSearchHit] = []
         var possible: [VaultSearchHit] = []
         for path in Set(best.keys).union(named) {
-            let z = best[path]?.z ?? 0
+            let z = best[path] ?? 0
             let isNamed = named.contains(path)
-            let hit = VaultSearchHit(path: path, score: max(z, 0) + (isNamed ? nameBonus : 0), start: best[path]?.start)
+            let hit = VaultSearchHit(path: path, score: max(z, 0) + (isNamed ? nameBonus : 0))
             if isNamed || z >= clearGate {
                 clear.append(hit)
             } else if z >= possibleGate {
@@ -52,7 +51,7 @@ enum VaultRanking {
             let shown = Array((clear + possible).prefix(limit))
             return VaultSearchResult(hits: shown, clearCount: min(clear.count, shown.count))
         }
-        let closest = best.map { VaultSearchHit(path: $0.key, score: $0.value.z, start: $0.value.start) }
+        let closest = best.map { VaultSearchHit(path: $0.key, score: $0.value) }
             .sorted(by: isRankedBefore)
             .prefix(closestCount)
         return VaultSearchResult(hits: Array(closest), clearCount: 0, isFallback: true)

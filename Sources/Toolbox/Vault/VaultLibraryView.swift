@@ -7,6 +7,8 @@ struct VaultLibraryView: View {
     @State private var confirmingDelete: Set<VaultItem.ID> = []
     @State private var dropTargeted = false
     @State private var changingPassword = false
+    @State private var keeping: (keeper: VaultItem, group: VaultDuplicates.Group)?
+    @State private var confirmingEmptyTrash = false
 
     private static let tileMinimum: CGFloat = 150
     private static let tileMaximum: CGFloat = 230
@@ -16,7 +18,11 @@ struct VaultLibraryView: View {
         @Bindable var vault = vault
         VStack(spacing: 12) {
             header
-            if !vault.items.isEmpty { VaultSearchBar() }
+            if !vault.items.isEmpty {
+                if vault.mode == .library { VaultSearchBar() }
+                browseBar
+            }
+            if !vault.trash.isEmpty { trashBar }
             if let progress = vault.moveProgress { MoveProgressBar(progress: progress) }
             if !vault.moveFailures.isEmpty { failures }
             if let message = vault.message { banner(message) }
@@ -40,6 +46,20 @@ struct VaultLibraryView: View {
         } message: {
             Text("They're deleted for good, not moved to the Trash. This can't be undone.")
         }
+        .confirmationDialog(keepTitle, isPresented: keepDialogShown, titleVisibility: .visible) {
+            Button("Keep and Move Others to Trash", role: .destructive) {
+                guard let keeping else { return }
+                Task { await vault.keep(keeping.keeper, in: keeping.group) }
+            }
+        } message: {
+            Text("The other copies go to the vault's own Trash, where they stay encrypted. You can put them back or empty it from the Duplicates view.")
+        }
+        .confirmationDialog(emptyTrashTitle, isPresented: $confirmingEmptyTrash, titleVisibility: .visible) {
+            Button("Empty Trash", role: .destructive) { vault.emptyTrash() }
+        } message: {
+            Text("They're deleted for good. This can't be undone.")
+        }
+        .onChange(of: vault.mode) { selecting = false }
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
     }
 
@@ -77,11 +97,40 @@ struct VaultLibraryView: View {
         .controlSize(.large)
     }
 
+    private var browseBar: some View {
+        @Bindable var vault = vault
+        return HStack(spacing: 10) {
+            Picker("View", selection: $vault.mode) {
+                ForEach(VaultModel.Mode.allCases) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help("Library shows everything; Duplicates finds files that are exact copies of each other")
+            Picker("Show", selection: $vault.filter) {
+                ForEach(VaultFilter.allCases) { Text($0.tabTitle(in: vault.items)).monospacedDigit().tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            if vault.mode == .library && vault.filter == .videos && vault.query.isEmpty {
+                Picker("Order", selection: $vault.videoOrder) {
+                    ForEach(VaultVideoOrder.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("Sort videos by length")
+            }
+            Spacer()
+        }
+    }
+
     @ViewBuilder private var content: some View {
-        if !vault.query.isEmpty, let result = vault.searchResult, !vault.items.isEmpty {
+        if vault.mode == .library, !vault.query.isEmpty, let result = vault.searchResult, !vault.items.isEmpty {
             searchSummary(result)
         }
-        if vault.items.isEmpty {
+        if vault.mode == .duplicates && !vault.items.isEmpty {
+            duplicatesContent
+        } else if vault.items.isEmpty {
             VStack(spacing: 10) {
                 Image(systemName: "photo.on.rectangle.angled").font(.system(size: 44)).foregroundStyle(.secondary)
                 Text("Your vault is empty").font(.title3.weight(.semibold))
@@ -89,6 +138,9 @@ struct VaultLibraryView: View {
                     .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if vault.query.isEmpty && vault.displayedItems.isEmpty {
+            Text(vault.filter.emptyMessage).font(.title3.weight(.semibold)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
@@ -107,6 +159,93 @@ struct VaultLibraryView: View {
                 .padding(.bottom, 16)
             }
         }
+    }
+
+    @ViewBuilder private var duplicatesContent: some View {
+        if let groups = vault.visibleDuplicateGroups {
+            if groups.isEmpty {
+                Text(noDuplicatesMessage).font(.title3.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(duplicatesSummary(groups)).font(.callout).foregroundStyle(.secondary)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            ForEach(groups) { duplicateGroup($0) }
+                        }
+                        .padding(.bottom, 16)
+                    }
+                }
+            }
+        } else {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Looking for files that are exact copies…").font(.callout).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func duplicateGroup(_ group: VaultDuplicates.Group) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("\(group.copies.count) copies · \(ByteCountFormatter.string(fromByteCount: group.bytesEach, countStyle: .file)) each")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
+                      alignment: .leading, spacing: Self.spacing) {
+                ForEach(group.copies) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        VaultTile(item: item, selected: false).onTapGesture { vault.viewing = item.id }
+                        Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.name)
+                        Button("Keep This One") { keeping = (item, group) }.controlSize(.small)
+                            .disabled(vault.moveProgress != nil)
+                    }
+                }
+            }
+        }
+    }
+
+    private var trashBar: some View {
+        HStack(spacing: 10) {
+            Label(trashDescription, systemImage: "trash").font(.callout)
+            Spacer()
+            Button("Put Back All") { vault.putBackTrash() }
+            Button("Empty Trash…", role: .destructive) { confirmingEmptyTrash = true }
+        }
+        .disabled(vault.moveProgress != nil)
+        .padding(12).cardBackground(corner: 12)
+    }
+
+    private var trashDescription: String {
+        let size = ByteCountFormatter.string(fromByteCount: vault.trash.bytes, countStyle: .file)
+        return vault.trash.count == 1 ? "1 item in the vault's Trash (\(size))" : "\(vault.trash.count) items in the vault's Trash (\(size))"
+    }
+
+    private var emptyTrashTitle: String {
+        vault.trash.count == 1 ? "Delete 1 item in the vault's Trash?" : "Delete \(vault.trash.count) items in the vault's Trash?"
+    }
+
+    private var noDuplicatesMessage: String {
+        switch vault.filter {
+        case .all: "No duplicates in the vault"
+        case .images: "No duplicate images"
+        case .videos: "No duplicate videos"
+        }
+    }
+
+    private func duplicatesSummary(_ groups: [VaultDuplicates.Group]) -> String {
+        let extra = ByteCountFormatter.string(fromByteCount: groups.reduce(0) { $0 + $1.extraBytes }, countStyle: .file)
+        let sets = groups.count == 1 ? "1 set of identical files" : "\(groups.count) sets of identical files"
+        return "\(sets), \(extra) in extra copies. Pick the copy to keep; the others go to the vault's Trash."
+    }
+
+    private var keepTitle: String {
+        guard let keeping else { return "" }
+        let others = keeping.group.copies.count - 1
+        return others == 1 ? "Keep “\(keeping.keeper.name)” and move the other copy to the Trash?"
+            : "Keep “\(keeping.keeper.name)” and move the other \(others) copies to the Trash?"
+    }
+
+    private var keepDialogShown: Binding<Bool> {
+        Binding(get: { keeping != nil }, set: { if !$0 { keeping = nil } })
     }
 
     private func tiles(_ items: [VaultItem]) -> some View {
@@ -164,11 +303,7 @@ struct VaultLibraryView: View {
         .padding(12).cardBackground(corner: 12)
     }
 
-    private var summary: String {
-        let count = vault.items.count
-        let size = ByteCountFormatter.string(fromByteCount: vault.totalBytes, countStyle: .file)
-        return count == 1 ? "1 item, \(size)" : "\(count) items, \(size)"
-    }
+    private var summary: String { vault.filter.summary(of: vault.items) }
 
     private var deleteTitle: String {
         confirmingDelete.count == 1 ? "Delete 1 item?" : "Delete \(confirmingDelete.count) items?"
@@ -253,7 +388,7 @@ struct VaultTile: View {
                 if item.kind == .video {
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
-                        if let start = vault.matchStart(for: item) { Text(VaultTime.label(start)).monospacedDigit() }
+                        if let length = vault.lengthLabel(for: item) { Text(length).monospacedDigit() }
                     }
                     .font(.caption).foregroundStyle(.white)
                     .padding(.horizontal, 7).padding(.vertical, 5)

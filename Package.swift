@@ -21,6 +21,6 @@ let package = Package(
                 exclude: ["LICENSE-DigUp"],
                 linkerSettings: [.unsafeFlags(["-L\(Context.packageDirectory)/Vendor/llama/lib"])]),
         .executableTarget(name: "Toolbox", dependencies: ["CWebP", "VaultSearch"], path: "Sources/Toolbox"),
-        .testTarget(name: "ToolboxTests", dependencies: ["Toolbox", "VaultSearch"], path: "Tests/ToolboxTests"),
+        .testTarget(name: "ToolboxTests", dependencies: ["Toolbox", "VaultSearch"], path: "Tests/ToolboxTests", exclude: ["Fixtures"]),
     ]
 )

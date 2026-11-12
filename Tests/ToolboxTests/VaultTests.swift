@@ -157,6 +157,54 @@ final class VaultTests: XCTestCase {
         XCTAssertEqual(model.phase, .locked)
     }
 
+    @MainActor
+    func testDuplicatesNotKeptGoToTheVaultTrashAndComeBack() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("trash"))
+        let model = VaultModel(location: location, watchesSystem: false)
+        await model.create(password: "trash-pass", confirmation: "trash-pass")
+        model.finishOpening()
+        defer { model.lockImmediately() }
+        let photo = try makePhoto("a.png")
+        let twin = source.appendingPathComponent("b.png")
+        try FileManager.default.copyItem(at: photo, to: twin)
+
+        model.add([photo, twin])
+        try await waitUntil { model.moveProgress == nil && model.items.count == 2 }
+        model.mode = .duplicates
+        try await waitUntil { model.duplicateGroups != nil }
+        let group = try XCTUnwrap(model.visibleDuplicateGroups?.first)
+        let keeper = group.copies[0]
+
+        await model.keep(keeper, in: group)
+
+        XCTAssertEqual(model.items.map(\.name), [keeper.name])
+        XCTAssertEqual(model.trash.count, 1)
+        let privateFolder = model.root.appendingPathComponent(VaultLibrary.privateFolderName)
+        XCTAssertTrue(VaultTrash.contents(in: privateFolder).allSatisfy { $0.path.hasPrefix(model.root.path + "/") },
+                      "Trashed copies stay inside the encrypted image")
+
+        model.putBackTrash()
+        XCTAssertEqual(model.items.count, 2)
+        XCTAssertTrue(model.trash.isEmpty)
+
+        try await waitUntil { model.duplicateGroups?.first?.copies.count == 2 }
+        let again = try XCTUnwrap(model.visibleDuplicateGroups?.first)
+        await model.keep(again.copies[0], in: again)
+        model.emptyTrash()
+        XCTAssertTrue(model.trash.isEmpty)
+        XCTAssertEqual(model.items.count, 1)
+        XCTAssertTrue(VaultTrash.contents(in: privateFolder).isEmpty)
+    }
+
+    @MainActor
+    private func waitUntil(seconds: Double = 30, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("Timed out waiting") }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     func testVerifyCatchesACopyThatDiffers() async throws {
         let first = try makePhoto("a.png", red: 255)
         let second = try makePhoto("b.png", red: 10)

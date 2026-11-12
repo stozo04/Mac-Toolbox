@@ -50,6 +50,17 @@ jobs:
           key: llama-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama.cpp-no-logits.patch') }}
       - name: Build llama.cpp (Vault search)
         run: scripts/build-llama.sh
+      - name: Cache yt-dlp + ffmpeg (built by scripts/fetch-tools.sh)
+        id: tools-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/tools
+          key: tools-${{ runner.os }}-arm64-${{ hashFiles('scripts/fetch-tools.sh') }}
+      - name: Fetch and build helper tools (the Vault tests use ffmpeg)
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        env:
+          ARCHS: arm64
+        run: scripts/fetch-tools.sh
       - name: Build
         run: swift build --build-tests
       - name: Test

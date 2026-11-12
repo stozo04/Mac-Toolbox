@@ -21,7 +21,6 @@ final class VaultSearchTests: XCTestCase {
         for path in paths {
             vectors.paths.append(path)
             vectors.modalities.append(.image)
-            vectors.starts.append(0)
         }
         let scores: [Float] = [0.9] + (1...24).map { 0.30 + Float($0 % 5) * 0.01 }
         let names = Dictionary(uniqueKeysWithValues: (paths + ["birthday party.mov"]).map { ($0, $0) })
@@ -41,7 +40,6 @@ final class VaultSearchTests: XCTestCase {
         for index in 0..<40 {
             vectors.paths.append("photo\(index).jpg")
             vectors.modalities.append(.image)
-            vectors.starts.append(0)
             let matches = index < 13
             scores.append((matches ? 0.30 : 0.20) + Float(index % 4) * 0.004)
         }
@@ -55,7 +53,6 @@ final class VaultSearchTests: XCTestCase {
         for index in 0..<10 {
             vectors.paths.append("photo\(index).jpg")
             vectors.modalities.append(.image)
-            vectors.starts.append(0)
         }
         let scores = [Float](repeating: 0.3, count: 10)
         let result = VaultRanking.rank(query: "volcano", vectors: vectors, scores: scores, names: [:])
@@ -64,15 +61,13 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertEqual(result.hits.count, VaultRanking.closestCount)
     }
 
-    func testAVideoHitPointsAtItsBestMoment() {
+    func testAVideoRanksByItsBestMoment() {
         var vectors = VaultVectors()
         vectors.paths = ["clip.mov", "clip.mov", "clip.mov"] + (1...22).map { "p\($0).jpg" }
         vectors.modalities = [.image, .image, .audio] + [Modality](repeating: .image, count: 22)
-        vectors.starts = [0, 12, 30] + [Double](repeating: 0, count: 22)
         let scores: [Float] = [0.3, 0.95, 0.3] + [Float](repeating: 0.3, count: 22)
         let result = VaultRanking.rank(query: "zebra", vectors: vectors, scores: scores, names: [:])
         XCTAssertEqual(result.hits.first?.path, "clip.mov")
-        XCTAssertEqual(result.hits.first?.start, 12)
     }
 
     func testIndexKeepsVectorsAndForgetsRemovedFiles() throws {
@@ -84,6 +79,7 @@ final class VaultSearchTests: XCTestCase {
                         segments: [VaultSegment(modality: .image, start: 3, end: 6, vector: vector),
                                    VaultSegment(modality: .audio, start: 0, end: 30, vector: vector)])
         XCTAssertEqual(try index.vectors().rows, 3)
+        XCTAssertEqual(try index.pathsWithSound(), ["b.mov"])
         XCTAssertEqual(try index.files()["b.mov"], VaultIndexedFile(bytes: 20, modified: 2))
 
         try index.remove(["b.mov"])
@@ -228,43 +224,7 @@ final class VaultSearchTests: XCTestCase {
     }
 
     private func makeVideo(_ name: String, seconds: Int) async throws -> URL {
-        let url = root.appendingPathComponent(name)
-        let side = 256, fps: Int32 = 10
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: side, AVVideoHeightKey: side,
-        ])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: side,
-            kCVPixelBufferHeightKey as String: side,
-        ])
-        writer.add(input)
-        XCTAssertTrue(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-        for frame in 0..<(seconds * Int(fps)) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-            var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
-            let pixels = try XCTUnwrap(buffer)
-            CVPixelBufferLockBaseAddress(pixels, [])
-            let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(pixels)).assumingMemoryBound(to: UInt8.self)
-            let rowBytes = CVPixelBufferGetBytesPerRow(pixels)
-            for y in 0..<side {
-                for x in 0..<side {
-                    let i = y * rowBytes + x * 4
-                    base[i] = 20
-                    base[i + 1] = 20
-                    base[i + 2] = 230
-                    base[i + 3] = 255
-                }
-            }
-            CVPixelBufferUnlockBaseAddress(pixels, [])
-            adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
-        }
-        input.markAsFinished()
-        await writer.finishWriting()
-        XCTAssertEqual(writer.status, .completed)
-        return url
+        try await VaultTestMedia.video(at: root.appendingPathComponent(name), seconds: seconds)
     }
 
     @MainActor
