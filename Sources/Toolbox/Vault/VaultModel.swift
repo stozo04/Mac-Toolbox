@@ -83,6 +83,7 @@ final class VaultModel {
     private var digests: [VaultItem: Data] = [:]
     private var lengthsInFlight: Set<VaultItem> = []
     private var unreadableLengths: Set<VaultItem> = []
+    private var lengthTasks: [Task<Void, Never>] = []
     private var openGeneration = 0
     private static let duplicatePause: Duration = .milliseconds(400)
     private static let typingPause: Duration = .milliseconds(250)
@@ -270,6 +271,7 @@ final class VaultModel {
     }
 
     func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
+        guard moveTask == nil else { return }
         guard VaultDuplicates.isStillIntact(group, keeping: keeper) else {
             message = "These copies changed since they were compared. Look again before choosing."
             findDuplicates()
@@ -299,6 +301,7 @@ final class VaultModel {
     }
 
     func putBackTrash() {
+        guard moveTask == nil else { return }
         let failures = VaultTrash.putBackAll(privateFolder: privateFolder, into: root)
         for (file, error) in failures { VaultLog.failure("Vault put back failed", error, file: file) }
         if !failures.isEmpty { message = failures.count == 1 ? "1 item couldn't be put back." : "\(failures.count) items couldn't be put back." }
@@ -307,6 +310,7 @@ final class VaultModel {
     }
 
     func emptyTrash() {
+        guard moveTask == nil else { return }
         let failures = VaultTrash.empty(privateFolder: privateFolder)
         for (file, error) in failures { VaultLog.failure("Vault empty trash failed", error, file: file) }
         if !failures.isEmpty { message = failures.count == 1 ? "1 item couldn't be deleted." : "\(failures.count) items couldn't be deleted." }
@@ -323,13 +327,13 @@ final class VaultModel {
         guard !missing.isEmpty else { return }
         lengthsInFlight.formUnion(missing)
         let generation = openGeneration
-        Task {
+        lengthTasks.append(Task {
             let found = await VaultBrowse.durations(of: missing)
             guard generation == openGeneration else { return }
             lengthsInFlight.subtract(missing)
             durations.merge(found) { _, new in new }
             unreadableLengths.formUnion(missing.filter { found[$0] == nil })
-        }
+        })
     }
 
     func add(_ urls: [URL]) {
@@ -589,6 +593,8 @@ final class VaultModel {
         moveID = nil
         releasePlayer()
         openGeneration += 1
+        lengthTasks.forEach { $0.cancel() }
+        lengthTasks = []
         durations = [:]
         lengthsInFlight = []
         unreadableLengths = []

@@ -24,6 +24,7 @@ enum VaultPlayable {
     static let copyExtension = "mov"
     static let checkedExtension = "checked"
     static let failedExtension = "failed"
+    static let soundReadExtension = "sound-read"
     private static let partialPrefix = ".partial-"
     private static let stderrKept = 300
 
@@ -56,12 +57,12 @@ enum VaultPlayable {
         let copy = copyURL(for: item, privateFolder: privateFolder)
         if FileManager.default.fileExists(atPath: copy.path) { return .copy(copy) }
         guard !isSettled(item, privateFolder: privateFolder), let tools else { return .original }
-        guard let hears = await avFoundationHearsSound(item.url), !Task.isCancelled else { return .original }
+        guard let hears = await avFoundationHearsSound(item.url) else { return unanswered(item, privateFolder: privateFolder) }
         if hears {
             mark(item, privateFolder: privateFolder, as: checkedExtension)
             return .original
         }
-        guard let probe = await soundStream(item.url, tools: tools), !Task.isCancelled else { return .original }
+        guard let probe = await soundStream(item.url, tools: tools) else { return unanswered(item, privateFolder: privateFolder) }
         guard let codec = probe else {
             mark(item, privateFolder: privateFolder, as: checkedExtension)
             return .original
@@ -79,10 +80,31 @@ enum VaultPlayable {
         }
     }
 
+    /// A check that couldn't answer: nothing is remembered when it was cancelled, otherwise it counts as failed
+    /// so the file isn't probed (and re-indexed) on every pass.
+    private static func unanswered(_ item: VaultItem, privateFolder: URL) -> Outcome {
+        if !Task.isCancelled { mark(item, privateFolder: privateFolder, as: failedExtension) }
+        return .original
+    }
+
     /// True when this video has not been looked at yet. Search uses it to read a video's sound again once.
     static func needsLook(_ item: VaultItem, privateFolder: URL) -> Bool {
         item.kind == .video && !isSettled(item, privateFolder: privateFolder)
             && !FileManager.default.fileExists(atPath: copyURL(for: item, privateFolder: privateFolder).path)
+    }
+
+    /// True when search should read this video's sound again: it hasn't been looked at, or it has a playable copy
+    /// (made by the viewer, say) whose sound search hasn't read yet.
+    static func needsSoundRead(_ item: VaultItem, privateFolder: URL) -> Bool {
+        guard item.kind == .video else { return false }
+        if FileManager.default.fileExists(atPath: copyURL(for: item, privateFolder: privateFolder).path) {
+            return !FileManager.default.fileExists(atPath: record(for: item, privateFolder: privateFolder, extension: soundReadExtension).path)
+        }
+        return needsLook(item, privateFolder: privateFolder)
+    }
+
+    static func markSoundRead(_ item: VaultItem, privateFolder: URL) {
+        mark(item, privateFolder: privateFolder, as: soundReadExtension)
     }
 
     private static func isSettled(_ item: VaultItem, privateFolder: URL) -> Bool {
@@ -149,7 +171,7 @@ enum VaultPlayable {
 
     static func remove(_ items: [VaultItem], privateFolder: URL) {
         for item in items {
-            for ext in [copyExtension, checkedExtension, failedExtension] {
+            for ext in [copyExtension, checkedExtension, failedExtension, soundReadExtension] {
                 try? FileManager.default.removeItem(at: record(for: item, privateFolder: privateFolder, extension: ext))
             }
         }

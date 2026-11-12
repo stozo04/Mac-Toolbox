@@ -70,7 +70,7 @@ final class VaultSearchEngine: @unchecked Sendable {
             return (changed, silentVideos)
         }
         guard tools != nil else { return changed }
-        return changed + silentVideos.filter { VaultPlayable.needsLook($0, privateFolder: privateFolder) }
+        return changed + silentVideos.filter { VaultPlayable.needsSoundRead($0, privateFolder: privateFolder) }
     }
 
     func index(_ item: VaultItem) async throws {
@@ -185,6 +185,7 @@ final class VaultSearchEngine: @unchecked Sendable {
             do {
                 let soundSource = await VaultPlayable.url(for: item, privateFolder: privateFolder)
                 sounds = try await MediaPieces.soundtrack(of: soundSource, to: workFolder)
+                if soundSource != item.url { VaultPlayable.markSoundRead(item, privateFolder: privateFolder) }
             } catch is CancellationError {
                 throw VaultSearchError.closed
             } catch {

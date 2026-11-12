@@ -22,6 +22,7 @@ struct VaultLibraryView: View {
                 if vault.mode == .library { VaultSearchBar() }
                 browseBar
             }
+            if !vault.trash.isEmpty { trashBar }
             if let progress = vault.moveProgress { MoveProgressBar(progress: progress) }
             if !vault.moveFailures.isEmpty { failures }
             if let message = vault.message { banner(message) }
@@ -161,7 +162,6 @@ struct VaultLibraryView: View {
     }
 
     @ViewBuilder private var duplicatesContent: some View {
-        if !vault.trash.isEmpty { trashBar }
         if let groups = vault.visibleDuplicateGroups {
             if groups.isEmpty {
                 Text(noDuplicatesMessage).font(.title3.weight(.semibold)).foregroundStyle(.secondary)
@@ -196,6 +196,7 @@ struct VaultLibraryView: View {
                         VaultTile(item: item, selected: false).onTapGesture { vault.viewing = item.id }
                         Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.name)
                         Button("Keep This One") { keeping = (item, group) }.controlSize(.small)
+                            .disabled(vault.moveProgress != nil)
                     }
                 }
             }
@@ -209,6 +210,7 @@ struct VaultLibraryView: View {
             Button("Put Back All") { vault.putBackTrash() }
             Button("Empty Trash…", role: .destructive) { confirmingEmptyTrash = true }
         }
+        .disabled(vault.moveProgress != nil)
         .padding(12).cardBackground(corner: 12)
     }
 
