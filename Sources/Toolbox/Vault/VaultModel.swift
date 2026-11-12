@@ -720,9 +720,9 @@ extension VaultModel {
     func addToSearch(_ item: VaultItem) {
         guard phase == .open else { return }
         searchFailures.remove(item.id)
+        if searchEngine == nil { retrySearch() }
         searchFirst.removeAll { $0 == item.id }
         searchFirst.insert(item.id, at: 0)
-        if searchEngine == nil { return retrySearch() }
         refreshIndex()
     }
 }

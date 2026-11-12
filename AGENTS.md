@@ -34,11 +34,11 @@ swift run Toolbox
 3. Route to it from `ToolWorkspace` in `Views/ToolView.swift`.
 4. Run the app and compare against the screenshot (window-only screenshot: `screencapture -l<windowID>`; do not capture the full screen).
 
-## Versioning (every PR)
+## Versioning (every PR that touches the app)
 - The version lives in one place: `AppVersion.current` in `Sources/Toolbox/Support/ReleaseNotes.swift` (semantic versioning, `MAJOR.MINOR.PATCH`). `scripts/make-app.sh` reads it for Info.plist, and the app shows it in the bottom-right corner; clicking it opens the release history.
-- Every PR bumps it: PATCH for bug fixes and small tweaks, MINOR for a new tool or feature (resets PATCH), MAJOR only when the user says so. One bump per PR, even with several commits; if main moved on, re-bump above main's version before merging.
+- Every PR that changes anything outside `.github/` bumps it (CI-only and Dependabot workflow PRs don't touch the app and need no bump): PATCH for bug fixes and small tweaks, MINOR for a new tool or feature (resets PATCH), MAJOR only when the user says so. One bump per PR, even with several commits; if main moved on, re-bump above main's version before merging.
 - In the same PR add a `Release` at the TOP of `ReleaseNotes.all` with today's date and one plain-words line per change, tagged `.new`, `.improved`, `.fixed` or `.removed`. Write for the user, not the code ("Trim Video keeps the sound", not "fix AVAssetExportSession preset").
-- CI enforces it: the "Version bumped" job in `.github/workflows/ci.yml` runs `scripts/check-version-bump.sh`, which fails if the version is not higher than main's or the notes are missing. Run it locally before opening a PR. `ReleaseNotesTests` checks the history is ordered and matches the current version.
+- CI enforces it: the "Version bumped" job in `.github/workflows/ci.yml` runs `scripts/check-version-bump.sh`, which fails if the version is not higher than main's or the notes are missing, and passes a branch that changes only `.github/`. Run it locally before opening a PR. `ReleaseNotesTests` checks the history is ordered and matches the current version.
 - After the PR merges, tag main: `git tag vX.Y.Z && git push origin vX.Y.Z` (ask before pushing).
 
 ## Rules
