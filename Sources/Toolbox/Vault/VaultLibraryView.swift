@@ -107,7 +107,7 @@ struct VaultLibraryView: View {
             .fixedSize()
             .help("Library shows everything; Duplicates finds files that are exact copies of each other")
             Picker("Show", selection: $vault.filter) {
-                ForEach(VaultFilter.allCases) { Text($0.title).tag($0) }
+                ForEach(VaultFilter.allCases) { Text($0.tabTitle(in: vault.items)).monospacedDigit().tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -303,11 +303,7 @@ struct VaultLibraryView: View {
         .padding(12).cardBackground(corner: 12)
     }
 
-    private var summary: String {
-        let count = vault.items.count
-        let size = ByteCountFormatter.string(fromByteCount: vault.totalBytes, countStyle: .file)
-        return count == 1 ? "1 item, \(size)" : "\(count) items, \(size)"
-    }
+    private var summary: String { vault.filter.summary(of: vault.items) }
 
     private var deleteTitle: String {
         confirmingDelete.count == 1 ? "Delete 1 item?" : "Delete \(confirmingDelete.count) items?"

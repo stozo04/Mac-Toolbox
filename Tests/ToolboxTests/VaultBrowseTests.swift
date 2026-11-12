@@ -17,6 +17,16 @@ final class VaultBrowseTests: XCTestCase {
         XCTAssertEqual(VaultBrowse.arranged(items, filter: .videos, order: .newest, durations: lengths), [short, long])
     }
 
+    func testEachTabCountsItsOwnKind() {
+        let items = [photo, short, long, middle]
+        XCTAssertEqual(VaultFilter.all.tabTitle(in: items), "All (4)")
+        XCTAssertEqual(VaultFilter.images.tabTitle(in: items), "Images (1)")
+        XCTAssertEqual(VaultFilter.videos.tabTitle(in: items), "Videos (3)")
+        XCTAssertTrue(VaultFilter.videos.summary(of: items).hasPrefix("3 videos, "))
+        XCTAssertTrue(VaultFilter.images.summary(of: items).hasPrefix("1 image, "))
+        XCTAssertTrue(VaultFilter.all.summary(of: []).hasPrefix("0 items, "))
+    }
+
     func testVideosSortByLengthBothWaysWithUnreadLengthsLast() {
         let items = [unread, middle, photo, long, short]
         XCTAssertEqual(VaultBrowse.arranged(items, filter: .videos, order: .shortest, durations: lengths), [short, middle, long, unread])

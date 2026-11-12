@@ -22,6 +22,22 @@ enum VaultFilter: String, CaseIterable, Identifiable {
         }
     }
 
+    func count(in items: [VaultItem]) -> Int { items.lazy.filter(includes).count }
+
+    func tabTitle(in items: [VaultItem]) -> String { "\(title) (\(count(in: items)))" }
+
+    /// "9 items, 1.9 MB" for All, "4 images, 3 KB" for Images, "5 videos, 1.9 MB" for Videos.
+    func summary(of items: [VaultItem]) -> String {
+        let shown = items.filter(includes)
+        let size = ByteCountFormatter.string(fromByteCount: shown.reduce(0) { $0 + $1.bytes }, countStyle: .file)
+        let noun: (String, String) = switch self {
+        case .all: ("item", "items")
+        case .images: ("image", "images")
+        case .videos: ("video", "videos")
+        }
+        return "\(shown.count) \(shown.count == 1 ? noun.0 : noun.1), \(size)"
+    }
+
     func includes(_ item: VaultItem) -> Bool {
         switch self {
         case .all: true

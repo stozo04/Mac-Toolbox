@@ -97,7 +97,6 @@ final class VaultModel {
 
     var root: URL { disk.location.mountPoint }
     private var privateFolder: URL { root.appendingPathComponent(VaultLibrary.privateFolderName) }
-    var totalBytes: Int64 { items.reduce(0) { $0 + $1.bytes } }
 
     func create(password: String, confirmation: String) async {
         guard !isWorking, !isLocking else { return }
