@@ -73,6 +73,7 @@ final class VaultSearchEngine: @unchecked Sendable {
         }
         do {
             let segments = try await segments(of: item)
+            guard !segments.isEmpty else { throw EmbedderError.failed("Nothing in this file could be read.") }
             try await onQueue { [self] in
                 try checkOpen()
                 try openIndex().store(path: relativePath(of: item.url), file: Self.fingerprint(item.url), segments: segments)
@@ -169,6 +170,7 @@ final class VaultSearchEngine: @unchecked Sendable {
             try checkOpen()
             var segments: [VaultSegment] = []
             for frame in try await MediaPieces.videoFrames(of: item.url, to: workFolder) {
+                try Task.checkCancellation()
                 segments.append(try await embed(frame, as: .image))
             }
             let sounds: [MediaPiece]
@@ -181,6 +183,7 @@ final class VaultSearchEngine: @unchecked Sendable {
                 sounds = []
             }
             for sound in sounds {
+                try Task.checkCancellation()
                 segments.append(try await embed(sound, as: .audio))
             }
             return segments

@@ -120,8 +120,10 @@ final class VaultModel {
     func lock() async {
         guard !isLocking else { return }
         let engine = searchEngine
+        let indexing = indexTask
         searchEngine = nil
         beginLocking()
+        await indexing?.value
         await engine?.shutDown()
         await moveTask?.value
         clearOpenState()
