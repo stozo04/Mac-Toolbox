@@ -68,6 +68,46 @@ final class VaultTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: inside.path))
     }
 
+    func testLinksAreRefusedSoTheRealFileIsNeverLeftOutside() async throws {
+        let real = try makePhoto("real.png", in: dir)
+        let symbolic = source.appendingPathComponent("shortcut.png")
+        try FileManager.default.createSymbolicLink(at: symbolic, withDestinationURL: real)
+        await assertMoveFails(symbolic, with: .link)
+
+        let hard = source.appendingPathComponent("second-name.png")
+        try FileManager.default.linkItem(at: real, to: hard)
+        await assertMoveFails(hard, with: .link)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: real.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hard.path))
+        XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
+    }
+
+    func testTruncatedPhotoIsRefusedAndKept() async throws {
+        let whole = try Data(contentsOf: try makePhoto("whole.png"))
+        let truncated = source.appendingPathComponent("truncated.png")
+        try whole.prefix(whole.count / 2).write(to: truncated)
+        await assertMoveFails(truncated, with: .unreadable)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: truncated.path))
+        XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
+    }
+
+    @MainActor
+    func testLockingWhileTheDoorIsUnlockingKeepsTheVaultClosed() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("race"))
+        try await VaultDisk(location: location).create(password: "race-pass")
+        let model = VaultModel(location: location, watchesSystem: false)
+        XCTAssertEqual(model.phase, .locked)
+
+        let unlocking = Task { await model.unlock(password: "race-pass") }
+        try await Task.sleep(for: .milliseconds(100))
+        model.lockImmediately()
+        await unlocking.value
+
+        XCTAssertFalse(model.disk.isOpen)
+        XCTAssertEqual(model.phase, .locked)
+    }
+
     func testVerifyCatchesACopyThatDiffers() async throws {
         let first = try makePhoto("a.png", red: 255)
         let second = try makePhoto("b.png", red: 10)

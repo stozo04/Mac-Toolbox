@@ -8,6 +8,7 @@ enum VaultMoveError: LocalizedError, Equatable {
     case insidePhotosLibrary
     case notDownloaded
     case alreadyInVault
+    case link
     case copyDiffers
     case unreadable
     case originalKept(String)
@@ -18,6 +19,7 @@ enum VaultMoveError: LocalizedError, Equatable {
         case .insidePhotosLibrary: "It's inside a Photos library. Export it from Photos first, then delete it there."
         case .notDownloaded: "It's in iCloud and not downloaded to this Mac yet."
         case .alreadyInVault: "It's already in the vault."
+        case .link: "It's a link to a file stored somewhere else. Add the file itself."
         case .copyDiffers: "The copy in the vault didn't match the original, so the original was kept."
         case .unreadable: "The copy in the vault couldn't be opened, so the original was kept."
         case .originalKept(let reason): "It's in the vault, but the original couldn't be deleted: \(reason)"
@@ -34,6 +36,7 @@ struct VaultMoveFailure: Identifiable, Equatable {
 enum VaultMover {
     static let photosLibraryExtension = "photoslibrary"
     private static let chunkSize = 4 * 1024 * 1024
+    private static let decodeCheckPixels = 64
 
     static func expand(_ urls: [URL]) -> [URL] {
         urls.flatMap { url -> [URL] in
@@ -53,6 +56,7 @@ enum VaultMover {
             throw VaultMoveError.insidePhotosLibrary
         }
         guard VaultItem.kind(of: source) != nil else { throw VaultMoveError.unsupportedType }
+        if isLink(source) { throw VaultMoveError.link }
         let values = try? source.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey])
         if values?.isUbiquitousItem == true, values?.ubiquitousItemDownloadingStatus != .current {
             throw VaultMoveError.notDownloaded
@@ -97,6 +101,12 @@ enum VaultMover {
         guard await opens(copy) else { throw VaultMoveError.unreadable }
     }
 
+    static func isLink(_ url: URL) -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return false }
+        return (info.st_mode & S_IFMT) == S_IFLNK || info.st_nlink > 1
+    }
+
     static func sha256(_ url: URL) throws -> Data {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
@@ -110,8 +120,11 @@ enum VaultMover {
     static func opens(_ url: URL) async -> Bool {
         switch VaultItem.kind(of: url) {
         case .image:
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return false }
-            return CGImageSourceGetCount(source) > 0
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  CGImageSourceGetStatus(source) == .statusComplete, CGImageSourceGetCount(source) > 0 else { return false }
+            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                            kCGImageSourceThumbnailMaxPixelSize: decodeCheckPixels]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) != nil
         case .video:
             return (try? await AVURLAsset(url: url).load(.isReadable)) == true
         case nil:

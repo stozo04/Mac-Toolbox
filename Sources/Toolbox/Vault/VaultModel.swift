@@ -23,6 +23,7 @@ final class VaultModel {
     private(set) var thumbnails: VaultThumbnails?
 
     let disk: VaultDisk
+    private var lockCount = 0
     private var moveTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
@@ -44,11 +45,13 @@ final class VaultModel {
             message = error.localizedDescription
             return
         }
+        let locksBefore = lockCount
         await perform("Vault creation failed") {
             try await self.disk.create(password: password)
-            try await self.disk.unlock(password: password)
             Log.info("Vault created", category: VaultLog.category)
-            self.beginOpening()
+            self.phase = .locked
+            try await self.disk.unlock(password: password)
+            self.openUnlessLockedMeanwhile(since: locksBefore)
         }
     }
 
@@ -57,9 +60,10 @@ final class VaultModel {
         guard !password.isEmpty else { return }
         isWorking = true
         defer { isWorking = false }
+        let locksBefore = lockCount
         do {
             try await disk.unlock(password: password)
-            beginOpening()
+            openUnlessLockedMeanwhile(since: locksBefore)
         } catch VaultError.wrongPassword {
             wrongPasswordAttempts += 1
             message = VaultError.wrongPassword.localizedDescription
@@ -85,6 +89,7 @@ final class VaultModel {
     }
 
     func lock() async {
+        lockCount += 1
         moveTask?.cancel()
         await moveTask?.value
         clearOpenState()
@@ -98,6 +103,7 @@ final class VaultModel {
     }
 
     func lockImmediately() {
+        lockCount += 1
         moveTask?.cancel()
         clearOpenState()
         disk.lockAndWait()
@@ -132,7 +138,7 @@ final class VaultModel {
         moveProgress = MoveProgress(done: 0, total: files.count)
         moveTask = Task {
             for file in files {
-                if Task.isCancelled { break }
+                if Task.isCancelled || !disk.isOpen { break }
                 do {
                     _ = try await VaultMover.move(file, into: root)
                 } catch {
@@ -175,7 +181,7 @@ final class VaultModel {
         guard let moveError = error as? VaultMoveError else { return true }
         switch moveError {
         case .copyDiffers, .unreadable, .originalKept: return true
-        case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault: return false
+        case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
         }
     }
 
@@ -184,6 +190,15 @@ final class VaultModel {
         case .wrongPassword, .passwordTooShort, .passwordsDiffer: true
         default: false
         }
+    }
+
+    private func openUnlessLockedMeanwhile(since locksBefore: Int) {
+        guard lockCount == locksBefore else {
+            disk.lockAndWait()
+            Log.info("Vault locked while it was opening", category: VaultLog.category)
+            return
+        }
+        beginOpening()
     }
 
     private func beginOpening() {

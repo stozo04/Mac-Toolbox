@@ -10,10 +10,18 @@ actor VaultThumbnails {
     private static let videoFrameSecond = 1.0
 
     let folder: URL
+    private let vaultRoot: URL
+    private let requiresMountedVolume: Bool
     private var memory: [String: CGImage] = [:]
 
-    init(vaultRoot: URL) {
+    init(vaultRoot: URL, requiresMountedVolume: Bool = true) {
+        self.vaultRoot = vaultRoot
+        self.requiresMountedVolume = requiresMountedVolume
         folder = vaultRoot.appendingPathComponent(VaultLibrary.privateFolderName).appendingPathComponent("thumbs")
+    }
+
+    private var vaultIsMounted: Bool {
+        !requiresMountedVolume || (try? vaultRoot.resourceValues(forKeys: [.isVolumeKey]))?.isVolume == true
     }
 
     func image(for item: VaultItem) async -> CGImage? {
@@ -24,9 +32,9 @@ actor VaultThumbnails {
             memory[key] = stored
             return stored
         }
-        guard let made = await Self.make(for: item) else { return nil }
+        guard vaultIsMounted, let made = await Self.make(for: item), vaultIsMounted else { return nil }
         memory[key] = made
-        Self.save(made, to: file, folder: folder)
+        Self.save(made, to: file, inside: folder.deletingLastPathComponent())
         return made
     }
 
@@ -67,8 +75,10 @@ actor VaultThumbnails {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    private static func save(_ image: CGImage, to file: URL, folder: URL) {
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    private static func save(_ image: CGImage, to file: URL, inside privateFolder: URL) {
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: privateFolder, withIntermediateDirectories: false)
+        try? fileManager.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: false)
         guard let destination = CGImageDestinationCreateWithURL(file as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { return }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: jpegQuality] as CFDictionary)
         CGImageDestinationFinalize(destination)
