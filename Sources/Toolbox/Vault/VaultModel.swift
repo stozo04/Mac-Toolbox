@@ -80,6 +80,7 @@ final class VaultModel {
     private var indexAgain = false
     private(set) var searchFailures: Set<VaultItem.ID> = []
     private var searchFirst: [VaultItem.ID] = []
+    private var renamesInFlight: Set<VaultItem.ID> = []
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
@@ -668,6 +669,8 @@ extension VaultModel {
         if selection.remove(item.id) != nil { selection.insert(renamed.id) }
         if viewing == item.id { viewing = renamed.id }
         if detailing == item.id { detailing = renamed.id }
+        renamesInFlight.insert(renamed.id)
+        defer { renamesInFlight.remove(renamed.id) }
         reload()
         await thumbnails?.carryOver(from: item, to: renamed)
         do {
@@ -688,6 +691,7 @@ extension VaultModel {
         case .indexing, .ready: break
         }
         guard let engine = searchEngine else { return .off("Search is starting.") }
+        if renamesInFlight.contains(item.id) { return .checking }
         if let coverage = try? await engine.coverage(of: item) {
             return .indexed(picture: coverage.segments[.image, default: 0] > 0, sound: coverage.segments[.audio, default: 0] > 0)
         }
