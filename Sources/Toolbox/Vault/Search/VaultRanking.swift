@@ -9,11 +9,16 @@ struct VaultSearchHit: Equatable {
 
 struct VaultSearchResult: Equatable {
     var hits: [VaultSearchHit] = []
-    var strong = true
+    var clearCount = 0
+    var isFallback = false
+
+    var clearHits: ArraySlice<VaultSearchHit> { hits.prefix(clearCount) }
+    var possibleHits: ArraySlice<VaultSearchHit> { hits.dropFirst(clearCount) }
 }
 
 enum VaultRanking {
-    static let zGate = 2.0
+    static let clearGate = 2.0
+    static let possibleGate = 0.5
     static let nameBonus = 2.0
     static let limit = 60
     static let closestCount = 6
@@ -29,22 +34,28 @@ enum VaultRanking {
         let words = self.words(query)
         let named = Set(names.filter { matchesName(words, $0.value) }.keys)
 
-        var candidates = Set(best.filter { $0.value.z >= zGate }.keys)
-        candidates.formUnion(named)
-        guard !candidates.isEmpty else {
-            let closest = best.sorted { $0.value.z > $1.value.z || ($0.value.z == $1.value.z && $0.key < $1.key) }
-                .prefix(closestCount)
-                .map { VaultSearchHit(path: $0.key, score: $0.value.z, start: $0.value.start) }
-            return VaultSearchResult(hits: closest, strong: false)
+        var clear: [VaultSearchHit] = []
+        var possible: [VaultSearchHit] = []
+        for path in Set(best.keys).union(named) {
+            let z = best[path]?.z ?? 0
+            let isNamed = named.contains(path)
+            let hit = VaultSearchHit(path: path, score: max(z, 0) + (isNamed ? nameBonus : 0), start: best[path]?.start)
+            if isNamed || z >= clearGate {
+                clear.append(hit)
+            } else if z >= possibleGate {
+                possible.append(hit)
+            }
         }
-        var hits: [VaultSearchHit] = []
-        for path in candidates {
-            let meaningScore: Double = max(best[path]?.z ?? 0, 0)
-            let bonus: Double = named.contains(path) ? nameBonus : 0
-            hits.append(VaultSearchHit(path: path, score: meaningScore + bonus, start: best[path]?.start))
+        clear.sort(by: isRankedBefore)
+        possible.sort(by: isRankedBefore)
+        if !clear.isEmpty || !possible.isEmpty {
+            let shown = Array((clear + possible).prefix(limit))
+            return VaultSearchResult(hits: shown, clearCount: min(clear.count, shown.count))
         }
-        hits.sort(by: isRankedBefore)
-        return VaultSearchResult(hits: Array(hits.prefix(limit)), strong: true)
+        let closest = best.map { VaultSearchHit(path: $0.key, score: $0.value.z, start: $0.value.start) }
+            .sorted(by: isRankedBefore)
+            .prefix(closestCount)
+        return VaultSearchResult(hits: Array(closest), clearCount: 0, isFallback: true)
     }
 
     static func isRankedBefore(_ first: VaultSearchHit, _ second: VaultSearchHit) -> Bool {

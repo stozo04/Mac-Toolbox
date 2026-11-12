@@ -260,6 +260,15 @@ final class VaultModel {
         if let viewing, !visible.contains(viewing) { self.viewing = nil }
     }
 
+    var searchSections: (clear: [VaultItem], possible: [VaultItem])? {
+        guard !query.isEmpty, let searchResult else { return nil }
+        let shown = displayedItems
+        let clearPaths = Set(searchResult.clearHits.map(\.path))
+        let clear = shown.filter { clearPaths.contains(searchEngine?.relativePath(of: $0.url) ?? $0.name) }
+        let clearIDs = Set(clear.map(\.id))
+        return (clear, shown.filter { !clearIDs.contains($0.id) })
+    }
+
     func matchStart(for item: VaultItem) -> Double? {
         guard item.kind == .video, !query.isEmpty, let searchEngine, let searchResult else { return nil }
         let path = searchEngine.relativePath(of: item.url)

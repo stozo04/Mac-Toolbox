@@ -93,12 +93,15 @@ struct VaultLibraryView: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
                           spacing: Self.spacing) {
-                    ForEach(vault.displayedItems) { item in
-                        VaultTile(item: item, selected: vault.selection.contains(item.id))
-                            .onTapGesture { tap(item) }
-                            .contextMenu {
-                                Button("Delete", role: .destructive) { confirmingDelete = [item.id] }
-                            }
+                    if let sections = vault.searchSections, let result = vault.searchResult {
+                        if !sections.clear.isEmpty {
+                            Section { tiles(sections.clear) } header: { sectionHeader("Best matches") }
+                        }
+                        if !sections.possible.isEmpty {
+                            Section { tiles(sections.possible) } header: { sectionHeader(possibleTitle(result, hasClear: !sections.clear.isEmpty)) }
+                        }
+                    } else {
+                        tiles(vault.displayedItems)
                     }
                 }
                 .padding(.bottom, 16)
@@ -106,19 +109,32 @@ struct VaultLibraryView: View {
         }
     }
 
+    private func tiles(_ items: [VaultItem]) -> some View {
+        ForEach(items) { item in
+            VaultTile(item: item, selected: vault.selection.contains(item.id))
+                .onTapGesture { tap(item) }
+                .contextMenu {
+                    Button("Delete", role: .destructive) { confirmingDelete = [item.id] }
+                }
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
+    }
+
+    private func possibleTitle(_ result: VaultSearchResult, hasClear: Bool) -> String {
+        if result.isFallback { return "No close matches. These are the nearest:" }
+        return hasClear ? "Might also match" : "Might match"
+    }
+
     @ViewBuilder private func searchSummary(_ result: VaultSearchResult) -> some View {
         let count = vault.displayedItems.count
-        Group {
-            if count == 0 {
-                Text("No matches for “\(vault.query)”")
-            } else if !result.strong {
-                Text("No close matches. These are the nearest:")
-            } else {
-                Text(count == 1 ? "1 match" : "\(count) matches")
-            }
-        }
-        .font(.callout).foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Text(count == 0 ? "No matches for “\(vault.query)”" : (count == 1 ? "1 result" : "\(count) results"))
+            .font(.callout).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var failures: some View {

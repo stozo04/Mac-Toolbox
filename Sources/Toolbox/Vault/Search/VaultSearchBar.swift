@@ -61,7 +61,7 @@ struct VaultSearchBar: View {
         switch vault.searchState {
         case .indexing(let done, let total):
             HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
+                if !vault.isSearching { ProgressView().controlSize(.small) }
                 Text("Reading \(min(done + 1, total)) of \(total)…").monospacedDigit()
             }
             .font(.caption).foregroundStyle(.secondary).fixedSize()

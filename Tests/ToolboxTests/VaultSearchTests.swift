@@ -27,12 +27,27 @@ final class VaultSearchTests: XCTestCase {
         let names = Dictionary(uniqueKeysWithValues: (paths + ["birthday party.mov"]).map { ($0, $0) })
 
         let byMeaning = VaultRanking.rank(query: "a dog", vectors: vectors, scores: scores, names: names)
-        XCTAssertTrue(byMeaning.strong)
+        XCTAssertEqual(byMeaning.clearCount, 1)
         XCTAssertEqual(byMeaning.hits.map(\.path), ["dog.jpg"])
 
         let byName = VaultRanking.rank(query: "birthday", vectors: vectors, scores: scores, names: names)
         XCTAssertEqual(byName.hits.first?.path, "dog.jpg")
         XCTAssertTrue(byName.hits.contains { $0.path == "birthday party.mov" })
+    }
+
+    func testWhenManyPhotosMatchTheyAllShow() {
+        var vectors = VaultVectors()
+        var scores: [Float] = []
+        for index in 0..<40 {
+            vectors.paths.append("photo\(index).jpg")
+            vectors.modalities.append(.image)
+            vectors.starts.append(0)
+            let matches = index < 13
+            scores.append((matches ? 0.30 : 0.20) + Float(index % 4) * 0.004)
+        }
+        let result = VaultRanking.rank(query: "cell phone", vectors: vectors, scores: scores, names: [:])
+        XCTAssertEqual(Set(result.hits.map(\.path)), Set((0..<13).map { "photo\($0).jpg" }))
+        XCTAssertFalse(result.isFallback)
     }
 
     func testNothingStrongShowsTheClosestFewAsWeakMatches() {
@@ -44,7 +59,8 @@ final class VaultSearchTests: XCTestCase {
         }
         let scores = [Float](repeating: 0.3, count: 10)
         let result = VaultRanking.rank(query: "volcano", vectors: vectors, scores: scores, names: [:])
-        XCTAssertFalse(result.strong)
+        XCTAssertTrue(result.isFallback)
+        XCTAssertEqual(result.clearCount, 0)
         XCTAssertEqual(result.hits.count, VaultRanking.closestCount)
     }
 
