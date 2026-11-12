@@ -499,6 +499,7 @@ final class VaultModel {
                 searchState = .indexing(done: done, total: pending.count)
                 let item = queue.remove(at: queue.firstIndex { searchFirst.contains($0.id) } ?? 0)
                 searchFirst.removeAll { $0 == item.id }
+                guard items.contains(where: { $0.id == item.id }) else { continue }
                 do {
                     try await engine.index(item)
                     searchFailures.remove(item.id)
@@ -508,6 +509,8 @@ final class VaultModel {
                     return
                 } catch let error as VaultSearchError {
                     throw error
+                } catch where !FileManager.default.fileExists(atPath: item.url.path) {
+                    continue
                 } catch {
                     unreadable += 1
                     searchFailures.insert(item.id)
@@ -657,20 +660,22 @@ extension VaultModel {
             throw error
         }
         let renamed = VaultItem(url: target, kind: item.kind, added: item.added, bytes: item.bytes)
-        await thumbnails?.carryOver(from: item, to: renamed)
         VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
         if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
         if let digest = digests.removeValue(forKey: item) { digests[renamed] = digest }
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
+        searchFirst = searchFirst.map { $0 == item.id ? renamed.id : $0 }
         if selection.remove(item.id) != nil { selection.insert(renamed.id) }
         if viewing == item.id { viewing = renamed.id }
         if detailing == item.id { detailing = renamed.id }
+        reload()
+        await thumbnails?.carryOver(from: item, to: renamed)
         do {
             try await searchEngine?.rename(item.url, to: target)
         } catch {
             VaultLog.failure("Vault search rename failed", error, file: target)
         }
-        reload()
+        refreshIndex()
         if !query.isEmpty { runQuery() }
         return items.first { $0.id == renamed.id } ?? renamed
     }

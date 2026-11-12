@@ -197,6 +197,36 @@ final class VaultTests: XCTestCase {
     }
 
     @MainActor
+    func testRenamingKeepsTheViewerDetailsAndSelectionOnTheFile() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("rename"))
+        let model = VaultModel(location: location, watchesSystem: false)
+        await model.create(password: "rename-pass", confirmation: "rename-pass")
+        model.finishOpening()
+        defer { model.lockImmediately() }
+        model.add([try makePhoto("a.png")])
+        try await waitUntil { model.moveProgress == nil && model.items.count == 1 }
+        let photo = try XCTUnwrap(model.items.first)
+        model.viewing = photo.id
+        model.detailing = photo.id
+        model.selection = [photo.id]
+
+        let renamed = try await model.rename(photo, to: "beach")
+
+        XCTAssertEqual(model.items.map(\.name), ["beach.png"])
+        XCTAssertEqual(renamed.name, "beach.png")
+        XCTAssertEqual(model.viewing, renamed.id)
+        XCTAssertEqual(model.detailing, renamed.id)
+        XCTAssertEqual(model.selection, [renamed.id])
+        XCTAssertFalse(model.searchFailures.contains(renamed.id))
+        do {
+            _ = try await model.rename(renamed, to: "  ")
+            XCTFail("An empty name is refused")
+        } catch {
+            XCTAssertEqual(error as? VaultRenameError, .empty)
+        }
+    }
+
+    @MainActor
     private func waitUntil(seconds: Double = 30, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition() {
