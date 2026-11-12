@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppState.self) private var state
+    @Environment(VaultModel.self) private var vault
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +15,7 @@ struct RootView: View {
                     case .home: HomeView()
                     case .category(let c): CategoryView(category: c)
                     case .models: ModelsView()
+                    case .vault: VaultView()
                     case .tool(let t): ToolView(tool: t).id(t.id)
                     }
                 }
@@ -27,5 +29,8 @@ struct RootView: View {
             .padding(.horizontal, 12).padding(.bottom, 6)
         }
         .background(Theme.background)
+        .onChange(of: state.page) { old, _ in
+            if old == .vault { Task { await vault.lock() } }
+        }
     }
 }

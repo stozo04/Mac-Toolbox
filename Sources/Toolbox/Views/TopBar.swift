@@ -5,7 +5,7 @@ struct TopBar: View {
 
     private var selectedCategory: ToolCategory? {
         switch state.page {
-        case .home, .models: nil
+        case .home, .models, .vault: nil
         case .category(let c): c
         case .tool(let t): t.category
         }
@@ -26,6 +26,7 @@ struct TopBar: View {
                     pill(c.rawValue, active: selectedCategory == c) { state.page = .category(c) }
                 }
                 pill("AI Models", active: state.page == .models) { state.page = .models }
+                pill("Vault", active: state.page == .vault) { state.page = .vault }
             }
             .padding(3)
             .background(Capsule().fill(Theme.tint.opacity(0.05)))

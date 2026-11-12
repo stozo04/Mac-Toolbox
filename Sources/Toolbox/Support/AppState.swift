@@ -5,6 +5,7 @@ enum Page: Hashable {
     case home
     case category(ToolCategory)
     case models
+    case vault
     case tool(Tool)
 }
 
@@ -15,6 +16,7 @@ extension Page {
         case .home: "home"
         case .category(let c): c.rawValue
         case .models: "AI Models"
+        case .vault: "Vault"
         case .tool(let t): t.id
         }
     }
@@ -38,6 +40,8 @@ final class AppState {
             page = .tool(tool)
         } else if target == "AI Models" {
             page = .models
+        } else if target == "Vault" {
+            page = .vault
         } else if let category = ToolCategory(rawValue: target) {
             page = .category(category)
         }
