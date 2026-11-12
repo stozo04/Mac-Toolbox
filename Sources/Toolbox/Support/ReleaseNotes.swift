@@ -30,6 +30,8 @@ enum ReleaseNotes {
     static let all: [Release] = [
         Release(version: "0.7.0", date: "2026-11-12", changes: [
             .init(kind: .new, text: "Vault: show All, Images or Videos, and sort videos from shortest to longest or longest to shortest."),
+            .init(kind: .new, text: "Vault: a Duplicates view finds photos and videos that are exact copies of each other. Pick the one to keep and the others go to the Trash."),
+            .init(kind: .fixed, text: "Vault: videos with MP3 sound (common in TikTok downloads) no longer play silently, and what they say can be searched."),
             .init(kind: .improved, text: "Vault: video tiles show how long each video is."),
             .init(kind: .fixed, text: "Vault: videos always play from the beginning. Opening one from search results no longer jumps partway in, and tiles no longer show 0:00."),
         ]),

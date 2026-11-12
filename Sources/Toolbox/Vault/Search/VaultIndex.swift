@@ -115,6 +115,14 @@ final class VaultIndex {
         return out
     }
 
+    func pathsWithSound() throws -> Set<String> {
+        var paths: Set<String> = []
+        try query("SELECT DISTINCT path FROM segments WHERE modality = 'audio'") { statement in
+            paths.insert(Self.text(statement, 0))
+        }
+        return paths
+    }
+
     func meta(_ key: String) -> String? {
         var value: String?
         try? query("SELECT value FROM meta WHERE key = ?", bind: { Self.bind($0, 1, key) }) { value = Self.text($0, 0) }

@@ -8,6 +8,13 @@ import Observation
 final class VaultModel {
     enum Phase: Equatable { case setup, locked, opening, open }
 
+    enum Mode: String, CaseIterable, Identifiable {
+        case library, duplicates
+
+        var id: Self { self }
+        var title: String { self == .library ? "Library" : "Duplicates" }
+    }
+
     enum SearchState: Equatable {
         case off
         case needsModel
@@ -47,6 +54,16 @@ final class VaultModel {
     }
     var videoOrder: VaultVideoOrder = .newest
     private(set) var durations: [VaultItem: Double] = [:]
+    var mode: Mode = .library {
+        didSet {
+            guard mode != oldValue else { return }
+            if mode == .duplicates { findDuplicates() }
+            keepOnlyVisibleItemsChosen()
+        }
+    }
+    private(set) var duplicateGroups: [VaultDuplicates.Group]? {
+        didSet { keepOnlyVisibleItemsChosen() }
+    }
 
     let disk: VaultDisk
     private var lockCount = 0
@@ -59,6 +76,8 @@ final class VaultModel {
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
     private var durationTask: Task<Void, Never>?
+    private var duplicateTask: Task<Void, Never>?
+    private var digests: [VaultItem: Data] = [:]
     private static let typingPause: Duration = .milliseconds(250)
 
     init(location: VaultLocation = .standard, watchesSystem: Bool = true) {
@@ -69,6 +88,7 @@ final class VaultModel {
     }
 
     var root: URL { disk.location.mountPoint }
+    private var privateFolder: URL { root.appendingPathComponent(VaultLibrary.privateFolderName) }
     var totalBytes: Int64 { items.reduce(0) { $0 + $1.bytes } }
 
     func create(password: String, confirmation: String) async {
@@ -199,6 +219,62 @@ final class VaultModel {
         selection.formIntersection(Set(items.map(\.id)))
         if let viewing, !items.contains(where: { $0.id == viewing }) { self.viewing = nil }
         loadDurations()
+        VaultPlayable.prune(keeping: items, privateFolder: privateFolder)
+        if mode == .duplicates { findDuplicates() }
+    }
+
+    func playableURL(for item: VaultItem) async -> URL {
+        await VaultPlayable.url(for: item, privateFolder: privateFolder)
+    }
+
+    var visibleDuplicateGroups: [VaultDuplicates.Group]? {
+        duplicateGroups.map { VaultDuplicates.filtered($0, by: filter) }
+    }
+
+    private func findDuplicates() {
+        duplicateTask?.cancel()
+        let snapshot = items
+        let present = Set(snapshot)
+        let known = digests.filter { present.contains($0.key) }
+        duplicateTask = Task {
+            let (groups, found) = await Task.detached(priority: .userInitiated) {
+                var found = known
+                let groups = VaultDuplicates.groups(in: snapshot) { item in
+                    if let digest = found[item] { return digest }
+                    let digest = try VaultMover.sha256(item.url)
+                    found[item] = digest
+                    return digest
+                }
+                return (groups, found)
+            }.value
+            guard !Task.isCancelled else { return }
+            digests = found
+            duplicateGroups = groups
+        }
+    }
+
+    func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
+        await moveToTrash(VaultDuplicates.others(than: keeper, in: group))
+    }
+
+    func moveToTrash(_ doomed: [VaultItem]) async {
+        var trashed: [VaultItem] = []
+        for item in doomed {
+            do {
+                try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                trashed.append(item)
+                await thumbnails?.remove(item)
+            } catch {
+                VaultLog.failure("Vault trash failed", error, file: item.url)
+            }
+        }
+        VaultPlayable.remove(trashed, privateFolder: privateFolder)
+        let failed = doomed.count - trashed.count
+        if failed > 0 { message = failed == 1 ? "1 item couldn't be moved to the Trash." : "\(failed) items couldn't be moved to the Trash." }
+        selection.subtract(trashed.map(\.id))
+        reload()
+        await searchEngine?.remove(trashed)
+        if !query.isEmpty { runQuery() }
     }
 
     private func loadDurations() {
@@ -257,6 +333,7 @@ final class VaultModel {
             }
         }
         if failed > 0 { message = failed == 1 ? "1 item couldn't be deleted." : "\(failed) items couldn't be deleted." }
+        VaultPlayable.remove(doomed.filter { !FileManager.default.fileExists(atPath: $0.url.path) }, privateFolder: privateFolder)
         selection.subtract(ids)
         reload()
         await searchEngine?.remove(doomed.filter { !FileManager.default.fileExists(atPath: $0.url.path) })
@@ -269,6 +346,7 @@ final class VaultModel {
     }
 
     var displayedItems: [VaultItem] {
+        if mode == .duplicates { return (visibleDuplicateGroups ?? []).flatMap(\.copies) }
         guard !query.isEmpty, let searchResult else {
             return VaultBrowse.arranged(items, filter: filter, order: videoOrder, durations: durations)
         }
@@ -470,6 +548,11 @@ final class VaultModel {
         durationTask?.cancel()
         durationTask = nil
         durations = [:]
+        duplicateTask?.cancel()
+        duplicateTask = nil
+        duplicateGroups = nil
+        digests = [:]
+        mode = .library
         query = ""
         searchResult = nil
         let old = thumbnails

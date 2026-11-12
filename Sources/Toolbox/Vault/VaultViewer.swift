@@ -87,7 +87,9 @@ private struct VaultViewerContent: View {
                 let url = item.url
                 image = await Task.detached { NSImage(contentsOf: url) }.value
             case .video:
-                let made = AVPlayer(url: item.url)
+                let url = await vault.playableURL(for: item)
+                guard !Task.isCancelled else { return }
+                let made = AVPlayer(url: url)
                 player = made
                 vault.player = made
                 made.play()

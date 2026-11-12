@@ -48,8 +48,8 @@ final class VaultSearchEngine: @unchecked Sendable {
         return path.hasPrefix(base) ? String(path.dropFirst(base.count)) : url.lastPathComponent
     }
 
-    func pending(_ items: [VaultItem]) async throws -> [VaultItem] {
-        try await onQueue { [self] in
+    func pending(_ items: [VaultItem], tools: MediaTools? = MediaTools.find()) async throws -> [VaultItem] {
+        let (changed, silentVideos) = try await onQueue { [self] in
             let index = try openIndex()
             let known = try index.files()
             let current = Dictionary(items.map { (relativePath(of: $0.url), $0) }, uniquingKeysWith: { first, _ in first })
@@ -58,11 +58,22 @@ final class VaultSearchEngine: @unchecked Sendable {
                 try index.remove(Array(gone))
                 cachedVectors = nil
             }
-            return items.filter { item in
+            let changed = items.filter { item in
                 guard let stored = known[relativePath(of: item.url)] else { return true }
                 return stored != Self.fingerprint(item.url)
             }
+            let withSound = try index.pathsWithSound()
+            let changedIDs = Set(changed.map(\.id))
+            let silentVideos = items.filter {
+                $0.kind == .video && !changedIDs.contains($0.id) && !withSound.contains(relativePath(of: $0.url))
+            }
+            return (changed, silentVideos)
         }
+        var hiddenSound: [VaultItem] = []
+        for video in silentVideos where await VaultPlayable.needsCopy(video, privateFolder: privateFolder, tools: tools) {
+            hiddenSound.append(video)
+        }
+        return changed + hiddenSound
     }
 
     func index(_ item: VaultItem) async throws {
@@ -175,7 +186,8 @@ final class VaultSearchEngine: @unchecked Sendable {
             }
             let sounds: [MediaPiece]
             do {
-                sounds = try await MediaPieces.soundtrack(of: item.url, to: workFolder)
+                let soundSource = await VaultPlayable.url(for: item, privateFolder: privateFolder)
+                sounds = try await MediaPieces.soundtrack(of: soundSource, to: workFolder)
             } catch is CancellationError {
                 throw VaultSearchError.closed
             } catch {
