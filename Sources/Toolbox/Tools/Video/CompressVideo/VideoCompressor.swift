@@ -69,8 +69,6 @@ enum VideoCompressor {
         let originalBytes = fileSize(source)
 
         let output = BatchFiles.uniqueURL(in: folder, name: outputBase(for: source), ext: "mp4")
-        let scratch = try? FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: folder, create: true)
-        defer { if let scratch { try? FileManager.default.removeItem(at: scratch) } }
         var lastError: Error?
         // The first try uses the chosen encoder and keeps the file's details; the second is plain, in case the first is refused.
         for plain in [false, true] {
@@ -79,7 +77,7 @@ enum VideoCompressor {
                                   natural: natural, transform: transform, assetDuration: assetDuration,
                                   size: size, resized: resized, bitrate: bitrate, fps: fps, duration: duration,
                                   isHDR: formats.contains(where: isHDR), settings: settings,
-                                  metadata: plain ? [] : metadata, useEncoderChoice: !plain, output: output, scratch: scratch)
+                                  metadata: plain ? [] : metadata, useEncoderChoice: !plain, output: output)
                 try await job.run(progress: progress)
                 let newBytes = fileSize(output)
                 if newBytes >= originalBytes {
@@ -101,7 +99,7 @@ enum VideoCompressor {
         throw lastError ?? VideoCompressError.cannotWrite("")
     }
 
-    private static func discard(_ output: URL) {
+    static func discard(_ output: URL) {
         let manager = FileManager.default
         try? manager.removeItem(at: output)
         let folder = output.deletingLastPathComponent()
@@ -192,7 +190,7 @@ enum VideoCompressor {
              audioFormat format: (channels: Int, sampleRate: Double, bitrate: Int),
              natural: CGSize, transform: CGAffineTransform, assetDuration: CMTime,
              size: CGSize, resized: Bool, bitrate: Int, fps: Double, duration: Double, isHDR: Bool,
-             settings: VideoCompressSettings, metadata: [AVMetadataItem], useEncoderChoice: Bool, output: URL, scratch: URL?) throws {
+             settings: VideoCompressSettings, metadata: [AVMetadataItem], useEncoderChoice: Bool, output: URL) throws {
             self.duration = duration
             reader = try AVAssetReader(asset: asset)
 
@@ -231,7 +229,6 @@ enum VideoCompressor {
 
             writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
             writer.shouldOptimizeForNetworkUse = true
-            writer.directoryForTemporaryFiles = scratch
             writer.metadata = metadata
 
             // Re-rendered video is already turned upright; otherwise the frames stay as stored and the file's own rotation flag is kept.
