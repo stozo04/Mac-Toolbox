@@ -112,23 +112,41 @@ final class VaultSearchEngine: @unchecked Sendable {
         }
     }
 
+    func shutDown() async {
+        markClosed()
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                releaseEverything()
+                continuation.resume()
+            }
+        }
+    }
+
     func close() {
-        lock.lock()
-        closed = true
-        lock.unlock()
+        markClosed()
         let finished = DispatchSemaphore(value: 0)
         queue.async { [self] in
-            index?.close()
-            index = nil
-            full?.close()
-            full = nil
-            textOnly?.close()
-            textOnly = nil
-            cachedVectors = nil
-            try? FileManager.default.removeItem(at: workFolder)
+            releaseEverything()
             finished.signal()
         }
         _ = finished.wait(timeout: .now() + Self.closeTimeout)
+    }
+
+    private func markClosed() {
+        lock.lock()
+        closed = true
+        lock.unlock()
+    }
+
+    private func releaseEverything() {
+        index?.close()
+        index = nil
+        full?.close()
+        full = nil
+        textOnly?.close()
+        textOnly = nil
+        cachedVectors = nil
+        try? FileManager.default.removeItem(at: workFolder)
     }
 
     static func fingerprint(_ url: URL) -> VaultIndexedFile {

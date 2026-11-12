@@ -66,6 +66,7 @@ public enum MediaPieces {
             try writeJPEG(image, to: out)
             frames.append(MediaPiece(file: out, start: max(0, actualTime.seconds), end: duration))
         }
+        guard !frames.isEmpty || times.isEmpty else { throw EmbedderError.failed("No frame of the video could be read.") }
         for index in frames.indices.dropLast() { frames[index].end = frames[index + 1].start }
         return frames
     }
