@@ -29,6 +29,7 @@ enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
         Release(version: "0.8.1", date: "2026-11-12", changes: [
+            .init(kind: .fixed, text: "Vault: after a rename, Details acts on the renamed file, and Add to Search stays first in line when search restarts."),
             .init(kind: .improved, text: "Behind the scenes: updates to the build and test setup no longer need a new app version, so they can go out without an app release."),
         ]),
         Release(version: "0.8.0", date: "2026-11-12", changes: [

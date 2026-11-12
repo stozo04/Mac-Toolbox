@@ -2,6 +2,16 @@ import SwiftUI
 
 struct VaultDetailsSheet: View {
     @Environment(VaultModel.self) private var vault
+
+    var body: some View {
+        if let item = vault.items.first(where: { $0.id == vault.detailing }) {
+            VaultDetailsContent(item: item).id(item.id)
+        }
+    }
+}
+
+private struct VaultDetailsContent: View {
+    @Environment(VaultModel.self) private var vault
     @Environment(\.dismiss) private var dismiss
     let item: VaultItem
     @State private var name = ""

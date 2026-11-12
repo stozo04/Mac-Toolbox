@@ -62,7 +62,7 @@ struct VaultLibraryView: View {
         .onChange(of: vault.mode) { selecting = false }
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
         .sheet(isPresented: detailsShown) {
-            if let item = vault.items.first(where: { $0.id == vault.detailing }) { VaultDetailsSheet(item: item) }
+            VaultDetailsSheet()
         }
     }
 
