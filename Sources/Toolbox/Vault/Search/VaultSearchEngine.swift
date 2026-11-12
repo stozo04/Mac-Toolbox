@@ -26,7 +26,6 @@ final class VaultSearchEngine: @unchecked Sendable {
     private let queue = DispatchQueue(label: "toolbox.vault.search", qos: .utility)
     private let lock = NSLock()
     private var closed = false
-    private var cancelWork: (() -> Void)?
     private var index: VaultIndex?
     private var full: LlamaEmbedder?
     private var textOnly: LlamaEmbedder?
@@ -68,15 +67,22 @@ final class VaultSearchEngine: @unchecked Sendable {
 
     func index(_ item: VaultItem) async throws {
         try await onQueue { [self] in
-            let index = try openIndex()
-            let embedder = try fullEmbedder()
+            _ = try openIndex()
+            _ = try fullEmbedder()
             try prepareWorkFolder()
-            defer { try? FileManager.default.removeItem(at: workFolder) }
-            let segments = try embed(item, with: embedder)
-            try checkOpen()
-            try index.store(path: relativePath(of: item.url), file: Self.fingerprint(item.url), segments: segments)
-            cachedVectors = nil
         }
+        do {
+            let segments = try await segments(of: item)
+            try await onQueue { [self] in
+                try checkOpen()
+                try openIndex().store(path: relativePath(of: item.url), file: Self.fingerprint(item.url), segments: segments)
+                cachedVectors = nil
+            }
+        } catch {
+            await removeWorkFolder()
+            throw error
+        }
+        await removeWorkFolder()
     }
 
     func finishIndexing() async {
@@ -109,9 +115,7 @@ final class VaultSearchEngine: @unchecked Sendable {
     func close() {
         lock.lock()
         closed = true
-        let cancel = cancelWork
         lock.unlock()
-        cancel?()
         let finished = DispatchSemaphore(value: 0)
         queue.async { [self] in
             index?.close()
@@ -134,31 +138,51 @@ final class VaultSearchEngine: @unchecked Sendable {
         return VaultIndexedFile(bytes: bytes, modified: modified)
     }
 
-    private func embed(_ item: VaultItem, with embedder: LlamaEmbedder) throws -> [VaultSegment] {
+    private func segments(of item: VaultItem) async throws -> [VaultSegment] {
         switch item.kind {
         case .image:
-            let prepared = try MediaPieces.preparePhoto(item.url, to: workFolder)
-            let vector = try embedder.embedImage(prepared.path, budget: Self.photoBudget)
+            let vector = try await onQueue { [self] in
+                try checkOpen()
+                let prepared = try MediaPieces.preparePhoto(item.url, to: workFolder)
+                return try fullEmbedder().embedImage(prepared.path, budget: Self.photoBudget)
+            }
             return [VaultSegment(modality: .image, start: 0, end: 0, vector: vector)]
         case .video:
-            let url = item.url, folder = workFolder
-            let frames = try blocking { try await MediaPieces.videoFrames(of: url, to: folder) }
+            try checkOpen()
             var segments: [VaultSegment] = []
-            for frame in frames {
-                try checkOpen()
-                let vector = try embedder.embedImage(frame.file.path, budget: Self.frameBudget)
-                segments.append(VaultSegment(modality: .image, start: frame.start, end: frame.end, vector: vector))
-                try? FileManager.default.removeItem(at: frame.file)
+            for frame in try await MediaPieces.videoFrames(of: item.url, to: workFolder) {
+                segments.append(try await embed(frame, as: .image))
             }
-            let sounds = try blocking { try await MediaPieces.soundtrack(of: url, to: folder) }
+            let sounds: [MediaPiece]
+            do {
+                sounds = try await MediaPieces.soundtrack(of: item.url, to: workFolder)
+            } catch is CancellationError {
+                throw VaultSearchError.closed
+            } catch {
+                Log.warning("Vault video sound unreadable", category: VaultLog.category, VaultLog.details(error, file: item.url))
+                sounds = []
+            }
             for sound in sounds {
-                try checkOpen()
-                let vector = try embedder.embedAudio(sound.file.path)
-                segments.append(VaultSegment(modality: .audio, start: sound.start, end: sound.end, vector: vector))
-                try? FileManager.default.removeItem(at: sound.file)
+                segments.append(try await embed(sound, as: .audio))
             }
             return segments
         }
+    }
+
+    private func embed(_ piece: MediaPiece, as modality: Modality) async throws -> VaultSegment {
+        try await onQueue { [self] in
+            try checkOpen()
+            defer { try? FileManager.default.removeItem(at: piece.file) }
+            let embedder = try fullEmbedder()
+            let vector = modality == .image
+                ? try embedder.embedImage(piece.file.path, budget: Self.frameBudget)
+                : try embedder.embedAudio(piece.file.path)
+            return VaultSegment(modality: modality, start: piece.start, end: piece.end, vector: vector)
+        }
+    }
+
+    private func removeWorkFolder() async {
+        try? await onQueue { [self] in try? FileManager.default.removeItem(at: workFolder) }
     }
 
     private func openIndex() throws -> VaultIndex {
@@ -239,29 +263,4 @@ final class VaultSearchEngine: @unchecked Sendable {
             }
         }
     }
-
-    private func blocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
-        try checkOpen()
-        let box = ResultBox<T>()
-        let done = DispatchSemaphore(value: 0)
-        let task = Task.detached {
-            do { box.result = .success(try await operation()) } catch { box.result = .failure(error) }
-            done.signal()
-        }
-        lock.lock()
-        cancelWork = { task.cancel() }
-        let alreadyClosed = closed
-        lock.unlock()
-        if alreadyClosed { task.cancel() }
-        done.wait()
-        lock.lock()
-        cancelWork = nil
-        lock.unlock()
-        try checkOpen()
-        return try box.result!.get()
-    }
-}
-
-private final class ResultBox<T>: @unchecked Sendable {
-    var result: Result<T, Error>?
 }

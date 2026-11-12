@@ -1,3 +1,4 @@
+import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
 import VaultSearch
@@ -193,6 +194,61 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertEqual(model.displayedItems.map(\.name), ["red square.png"])
         XCTAssertEqual(model.selection, Set(model.displayedItems.map(\.id)))
         XCTAssertNil(model.viewing, "the viewer stayed on an item the search hides")
+    }
+
+    func testAVideoWithoutSoundIsIndexedByItsFramesWithTheRealModel() async throws {
+        guard let model = EmbeddingModel.locate() else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
+        let video = try await makeVideo("clip.mov", seconds: 4)
+        _ = try makePhoto("square.png", red: 20, green: 40, blue: 230)
+        let engine = VaultSearchEngine(root: root, model: model, requiresMountedVolume: false)
+        let items = VaultLibrary.items(in: root)
+        for item in try await engine.pending(items) { try await engine.index(item) }
+        let stillPending = try await engine.pending(items)
+        XCTAssertTrue(stillPending.isEmpty, "the video was not stored")
+        let names = Dictionary(uniqueKeysWithValues: items.map { (engine.relativePath(of: $0.url), $0.name) })
+        let result = try await engine.search("a solid red picture", names: names)
+        XCTAssertEqual(result.hits.first?.path, video.lastPathComponent)
+        engine.close()
+    }
+
+    private func makeVideo(_ name: String, seconds: Int) async throws -> URL {
+        let url = root.appendingPathComponent(name)
+        let side = 256, fps: Int32 = 10
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: side, AVVideoHeightKey: side,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: side,
+            kCVPixelBufferHeightKey as String: side,
+        ])
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<(seconds * Int(fps)) {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
+            let pixels = try XCTUnwrap(buffer)
+            CVPixelBufferLockBaseAddress(pixels, [])
+            let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(pixels)).assumingMemoryBound(to: UInt8.self)
+            let rowBytes = CVPixelBufferGetBytesPerRow(pixels)
+            for y in 0..<side {
+                for x in 0..<side {
+                    let i = y * rowBytes + x * 4
+                    base[i] = 20
+                    base[i + 1] = 20
+                    base[i + 2] = 230
+                    base[i + 3] = 255
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(pixels, [])
+            adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        XCTAssertEqual(writer.status, .completed)
+        return url
     }
 
     @MainActor

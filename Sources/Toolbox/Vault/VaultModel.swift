@@ -338,6 +338,8 @@ final class VaultModel {
                     try await engine.index(item)
                 } catch VaultSearchError.closed {
                     return
+                } catch is CancellationError {
+                    return
                 } catch let error as VaultSearchError {
                     throw error
                 } catch {
