@@ -69,6 +69,8 @@ enum VideoCompressor {
         let originalBytes = fileSize(source)
 
         let output = BatchFiles.uniqueURL(in: folder, name: outputBase(for: source), ext: "mp4")
+        let scratch = try? FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: folder, create: true)
+        defer { if let scratch { try? FileManager.default.removeItem(at: scratch) } }
         var lastError: Error?
         // The first try uses the chosen encoder and keeps the file's details; the second is plain, in case the first is refused.
         for plain in [false, true] {
@@ -77,26 +79,36 @@ enum VideoCompressor {
                                   natural: natural, transform: transform, assetDuration: assetDuration,
                                   size: size, resized: resized, bitrate: bitrate, fps: fps, duration: duration,
                                   isHDR: formats.contains(where: isHDR), settings: settings,
-                                  metadata: plain ? [] : metadata, useEncoderChoice: !plain, output: output)
+                                  metadata: plain ? [] : metadata, useEncoderChoice: !plain, output: output, scratch: scratch)
                 try await job.run(progress: progress)
                 let newBytes = fileSize(output)
                 if newBytes >= originalBytes {
-                    try? FileManager.default.removeItem(at: output)
+                    discard(output)
                     return .notSmaller(originalBytes: originalBytes, newBytes: newBytes)
                 }
                 return .compressed(VideoCompressResult(url: output, originalBytes: originalBytes, newBytes: newBytes, size: size))
             } catch is CancellationError {
-                try? FileManager.default.removeItem(at: output)
+                discard(output)
                 throw CancellationError()
             } catch let error as Job.StartFailure {
-                try? FileManager.default.removeItem(at: output)
+                discard(output)
                 lastError = error.underlying
             } catch {
-                try? FileManager.default.removeItem(at: output)
+                discard(output)
                 throw error
             }
         }
         throw lastError ?? VideoCompressError.cannotWrite("")
+    }
+
+    private static func discard(_ output: URL) {
+        let manager = FileManager.default
+        try? manager.removeItem(at: output)
+        let folder = output.deletingLastPathComponent()
+        let scratchPrefix = output.lastPathComponent + ".sb-"
+        for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasPrefix(scratchPrefix) {
+            try? manager.removeItem(at: folder.appendingPathComponent(name))
+        }
     }
 
     private static func fileSize(_ url: URL) -> Int64 {
@@ -129,6 +141,7 @@ enum VideoCompressor {
         private let lock = NSLock()
         private var gates: [Gate] = []
         private var isCancelled = false
+        private let settled = Gate()
 
         /// Lets a waiting pump be released from outside: a cancelled writer never asks for more samples, so it can't release itself.
         private final class Gate: @unchecked Sendable {
@@ -151,12 +164,20 @@ enum VideoCompressor {
 
         private func cancel() {
             lock.lock()
+            let first = !isCancelled
             isCancelled = true
             let waiting = gates
             lock.unlock()
+            guard first else { return }
             reader.cancelReading()
             writer.cancelWriting()
             waiting.forEach { $0.open() }
+            settled.open()
+        }
+
+        private func finishCancelling() async {
+            cancel()
+            await withCheckedContinuation { settled.hold($0) }
         }
 
         private func register(_ gate: Gate) {
@@ -171,7 +192,7 @@ enum VideoCompressor {
              audioFormat format: (channels: Int, sampleRate: Double, bitrate: Int),
              natural: CGSize, transform: CGAffineTransform, assetDuration: CMTime,
              size: CGSize, resized: Bool, bitrate: Int, fps: Double, duration: Double, isHDR: Bool,
-             settings: VideoCompressSettings, metadata: [AVMetadataItem], useEncoderChoice: Bool, output: URL) throws {
+             settings: VideoCompressSettings, metadata: [AVMetadataItem], useEncoderChoice: Bool, output: URL, scratch: URL?) throws {
             self.duration = duration
             reader = try AVAssetReader(asset: asset)
 
@@ -210,6 +231,7 @@ enum VideoCompressor {
 
             writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
             writer.shouldOptimizeForNetworkUse = true
+            writer.directoryForTemporaryFiles = scratch
             writer.metadata = metadata
 
             // Re-rendered video is already turned upright; otherwise the frames stay as stored and the file's own rotation flag is kept.
@@ -283,7 +305,10 @@ enum VideoCompressor {
                 cancel()
             }
 
-            if Task.isCancelled || writer.status == .cancelled { throw CancellationError() }
+            if Task.isCancelled || writer.status == .cancelled {
+                await finishCancelling()
+                throw CancellationError()
+            }
             if reader.status == .failed {
                 writer.cancelWriting()
                 throw VideoCompressError.cannotRead(reader.error?.localizedDescription ?? "")
