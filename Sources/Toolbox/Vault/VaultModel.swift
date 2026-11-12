@@ -85,6 +85,7 @@ final class VaultModel {
     private var downloadTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
     private var digests: [VaultItem: Data] = [:]
+    private var looks: [VaultItem: VaultLook] = [:]
     private var lengthsInFlight: Set<VaultItem> = []
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
@@ -251,18 +252,25 @@ final class VaultModel {
             guard !Task.isCancelled else { return }
             let snapshot = items
             let present = Set(snapshot)
+            let lengths = await lengthsForDuplicates(of: snapshot)
+            guard !Task.isCancelled, generation == openGeneration else { return }
+            let unlooked = VaultDuplicates.lookCandidates(in: snapshot, durations: lengths).filter { looks[$0] == nil }
+            let newLooks = await VaultLookReader.looks(of: unlooked, durations: lengths)
+            guard !Task.isCancelled, generation == openGeneration else { return }
+            looks.merge(newLooks) { _, new in new }
+            let knownLooks = looks.filter { present.contains($0.key) }
             let known = digests.filter { present.contains($0.key) }
             let stop = StopFlag()
             let (groups, found) = await withTaskCancellationHandler {
                 await Task.detached(priority: .userInitiated) {
                     var found = known
-                    let groups = VaultDuplicates.groups(in: snapshot) { item in
+                    let groups = VaultDuplicates.groups(in: snapshot, digest: { item in
                         if let digest = found[item] { return digest }
                         guard !stop.isSet else { throw CancellationError() }
                         let digest = try VaultMover.sha256(item.url)
                         found[item] = digest
                         return digest
-                    }
+                    }, durations: lengths, looks: knownLooks)
                     return (groups, found)
                 }.value
             } onCancel: { stop.set() }
@@ -271,16 +279,6 @@ final class VaultModel {
             guard !Task.isCancelled else { return }
             duplicateGroups = groups
         }
-    }
-
-    func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
-        guard moveTask == nil else { return }
-        guard VaultDuplicates.isStillIntact(group, keeping: keeper) else {
-            message = "These copies changed since they were compared. Look again before choosing."
-            findDuplicates()
-            return
-        }
-        await moveToTrash(VaultDuplicates.others(than: keeper, in: group))
     }
 
     func moveToTrash(_ doomed: [VaultItem]) async {
@@ -617,6 +615,7 @@ final class VaultModel {
         duplicateGroups = nil
         digests = [:]
         searchFailures = []
+        looks = [:]
         mode = .library
         query = ""
         searchResult = nil
@@ -651,6 +650,24 @@ final class VaultModel {
 }
 
 extension VaultModel {
+    func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
+        guard moveTask == nil else { return }
+        guard VaultDuplicates.isStillIntact(group, keeping: keeper) else {
+            message = "These copies changed since they were compared. Look again before choosing."
+            findDuplicates()
+            return
+        }
+        await moveToTrash(VaultDuplicates.others(than: keeper, in: group))
+    }
+
+    fileprivate func lengthsForDuplicates(of snapshot: [VaultItem]) async -> [VaultItem: Double] {
+        let missing = snapshot.filter { $0.kind == .video && durations[$0] == nil && !unreadableLengths.contains($0) }
+        guard !missing.isEmpty else { return durations }
+        let found = await VaultBrowse.durations(of: missing)
+        durations.merge(found) { _, new in new }
+        return durations
+    }
+
     func rename(_ item: VaultItem, to typed: String) async throws -> VaultItem {
         guard phase == .open, moveTask == nil else { return item }
         guard let target = try VaultRename.destination(for: typed, renaming: item).get() else { return item }
@@ -664,6 +681,7 @@ extension VaultModel {
         VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
         if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
         if let digest = digests.removeValue(forKey: item) { digests[renamed] = digest }
+        if let look = looks.removeValue(forKey: item) { looks[renamed] = look }
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
         searchFirst = searchFirst.map { $0 == item.id ? renamed.id : $0 }
         if selection.remove(item.id) != nil { selection.insert(renamed.id) }
