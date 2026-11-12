@@ -191,6 +191,14 @@ enum VaultPlayable {
         }
     }
 
+    static func carryOver(from old: VaultItem, to new: VaultItem, privateFolder: URL) {
+        for ext in [copyExtension, checkedExtension, failedExtension, soundReadExtension] {
+            let source = record(for: old, privateFolder: privateFolder, extension: ext)
+            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            try? FileManager.default.moveItem(at: source, to: record(for: new, privateFolder: privateFolder, extension: ext))
+        }
+    }
+
     /// Drops copies and records of videos that are gone. Unfinished copies are left alone: one may be in progress.
     static func prune(keeping items: [VaultItem], privateFolder: URL) {
         let wanted = Set(items.filter { $0.kind == .video }.map { VaultThumbnails.key(for: $0) })

@@ -36,6 +36,7 @@ final class VaultModel {
     private(set) var items: [VaultItem] = []
     var selection: Set<VaultItem.ID> = []
     var viewing: VaultItem.ID?
+    var detailing: VaultItem.ID?
     private(set) var moveProgress: MoveProgress?
     var moveFailures: [VaultMoveFailure] = []
     private(set) var thumbnails: VaultThumbnails?
@@ -77,6 +78,8 @@ final class VaultModel {
     private var searchEngine: VaultSearchEngine?
     private var indexTask: Task<Void, Never>?
     private var indexAgain = false
+    private(set) var searchFailures: Set<VaultItem.ID> = []
+    private var searchFirst: [VaultItem.ID] = []
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
@@ -465,6 +468,7 @@ final class VaultModel {
         searchEngine?.close()
         searchEngine = nil
         indexAgain = false
+        searchFirst = []
         isSearching = false
         if downloadTask == nil { searchState = .off }
     }
@@ -487,13 +491,17 @@ final class VaultModel {
     private func index(with engine: VaultSearchEngine) async {
         do {
             let pending = try await engine.pending(items)
+            var queue = pending
             var done = 0
             var unreadable = 0
-            for item in pending {
+            while !queue.isEmpty {
                 guard !Task.isCancelled, searchEngine === engine else { return }
                 searchState = .indexing(done: done, total: pending.count)
+                let item = queue.remove(at: queue.firstIndex { searchFirst.contains($0.id) } ?? 0)
+                searchFirst.removeAll { $0 == item.id }
                 do {
                     try await engine.index(item)
+                    searchFailures.remove(item.id)
                 } catch VaultSearchError.closed {
                     return
                 } catch is CancellationError {
@@ -502,6 +510,7 @@ final class VaultModel {
                     throw error
                 } catch {
                     unreadable += 1
+                    searchFailures.insert(item.id)
                     VaultLog.failure("Vault search indexing failed", error, file: item.url)
                 }
                 done += 1
@@ -585,6 +594,7 @@ final class VaultModel {
 
     private func clearOpenState() {
         viewing = nil
+        detailing = nil
         selection = []
         items = []
         moveProgress = nil
@@ -602,6 +612,7 @@ final class VaultModel {
         duplicateTask = nil
         duplicateGroups = nil
         digests = [:]
+        searchFailures = []
         mode = .library
         query = ""
         searchResult = nil
@@ -632,6 +643,60 @@ final class VaultModel {
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.lockImmediately() }
         })
+    }
+}
+
+extension VaultModel {
+    func rename(_ item: VaultItem, to typed: String) async throws -> VaultItem {
+        guard phase == .open, moveTask == nil else { return item }
+        guard let target = try VaultRename.destination(for: typed, renaming: item).get() else { return item }
+        do {
+            try VaultRename.move(item, to: target)
+        } catch {
+            VaultLog.failure("Vault rename failed", error, file: item.url)
+            throw error
+        }
+        let renamed = VaultItem(url: target, kind: item.kind, added: item.added, bytes: item.bytes)
+        await thumbnails?.carryOver(from: item, to: renamed)
+        VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
+        if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
+        if let digest = digests.removeValue(forKey: item) { digests[renamed] = digest }
+        if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
+        if selection.remove(item.id) != nil { selection.insert(renamed.id) }
+        if viewing == item.id { viewing = renamed.id }
+        if detailing == item.id { detailing = renamed.id }
+        do {
+            try await searchEngine?.rename(item.url, to: target)
+        } catch {
+            VaultLog.failure("Vault search rename failed", error, file: target)
+        }
+        reload()
+        if !query.isEmpty { runQuery() }
+        return items.first { $0.id == renamed.id } ?? renamed
+    }
+
+    func searchStatus(of item: VaultItem) async -> VaultSearchStatus {
+        switch searchState {
+        case .needsModel, .downloading: return .needsModel
+        case .failed(let reason): return .off(reason)
+        case .off: return .off("Search is starting.")
+        case .indexing, .ready: break
+        }
+        guard let engine = searchEngine else { return .off("Search is starting.") }
+        if let coverage = try? await engine.coverage(of: item) {
+            return .indexed(picture: coverage.segments[.image, default: 0] > 0, sound: coverage.segments[.audio, default: 0] > 0)
+        }
+        if indexTask != nil && !searchFailures.contains(item.id) { return .adding }
+        return searchFailures.contains(item.id) ? .failed : .notIndexed
+    }
+
+    func addToSearch(_ item: VaultItem) {
+        guard phase == .open else { return }
+        searchFailures.remove(item.id)
+        searchFirst.removeAll { $0 == item.id }
+        searchFirst.insert(item.id, at: 0)
+        if searchEngine == nil { return retrySearch() }
+        refreshIndex()
     }
 }
 

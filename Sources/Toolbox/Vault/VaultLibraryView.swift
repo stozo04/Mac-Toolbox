@@ -61,6 +61,9 @@ struct VaultLibraryView: View {
         }
         .onChange(of: vault.mode) { selecting = false }
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
+        .sheet(isPresented: detailsShown) {
+            if let item = vault.items.first(where: { $0.id == vault.detailing }) { VaultDetailsSheet(item: item) }
+        }
     }
 
     private var header: some View {
@@ -203,6 +206,10 @@ struct VaultLibraryView: View {
         }
     }
 
+    private var detailsShown: Binding<Bool> {
+        Binding(get: { vault.detailing != nil }, set: { if !$0 { vault.detailing = nil } })
+    }
+
     private var trashBar: some View {
         HStack(spacing: 10) {
             Label(trashDescription, systemImage: "trash").font(.callout)
@@ -254,6 +261,7 @@ struct VaultLibraryView: View {
                 .onTapGesture { tap(item) }
                 .contextMenu {
                     Button("Delete", role: .destructive) { confirmingDelete = [item.id] }
+                    Button("Details…") { vault.detailing = item.id }
                 }
         }
     }
