@@ -103,8 +103,22 @@ enum VaultPlayable {
         return needsLook(item, privateFolder: privateFolder)
     }
 
-    static func markSoundRead(_ item: VaultItem, privateFolder: URL) {
-        mark(item, privateFolder: privateFolder, as: soundReadExtension)
+    /// Reads a video's sound for search, from its playable copy when it has one. A read from the copy is recorded
+    /// whether it worked or not (only cancelling is not), so search tries a copy once instead of on every pass.
+    static func readSound<Piece>(of item: VaultItem, privateFolder: URL, tools: MediaTools? = MediaTools.find(),
+                                 read: (URL) async throws -> [Piece]) async throws -> [Piece] {
+        let source = await url(for: item, privateFolder: privateFolder, tools: tools)
+        guard source != item.url else { return try await read(source) }
+        do {
+            let pieces = try await read(source)
+            mark(item, privateFolder: privateFolder, as: soundReadExtension)
+            return pieces
+        } catch {
+            if !(error is CancellationError), !Task.isCancelled {
+                mark(item, privateFolder: privateFolder, as: soundReadExtension)
+            }
+            throw error
+        }
     }
 
     private static func isSettled(_ item: VaultItem, privateFolder: URL) -> Bool {

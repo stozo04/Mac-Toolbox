@@ -183,9 +183,10 @@ final class VaultSearchEngine: @unchecked Sendable {
             }
             let sounds: [MediaPiece]
             do {
-                let soundSource = await VaultPlayable.url(for: item, privateFolder: privateFolder)
-                sounds = try await MediaPieces.soundtrack(of: soundSource, to: workFolder)
-                if soundSource != item.url { VaultPlayable.markSoundRead(item, privateFolder: privateFolder) }
+                let work = workFolder
+                sounds = try await VaultPlayable.readSound(of: item, privateFolder: privateFolder) {
+                    try await MediaPieces.soundtrack(of: $0, to: work)
+                }
             } catch is CancellationError {
                 throw VaultSearchError.closed
             } catch {

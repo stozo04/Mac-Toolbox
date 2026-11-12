@@ -115,6 +115,36 @@ final class VaultPlayableTests: XCTestCase {
         XCTAssertEqual(leftovers, [copy.lastPathComponent])
     }
 
+    func testASoundReadFromTheCopyIsTriedOnceEvenWhenItFails() async throws {
+        let tools = try Self.tools()
+        let item = try placeFixture()
+        _ = await VaultPlayable.url(for: item, privateFolder: privateFolder, tools: tools)
+        XCTAssertTrue(VaultPlayable.needsSoundRead(item, privateFolder: privateFolder))
+
+        do {
+            let _: [Int] = try await VaultPlayable.readSound(of: item, privateFolder: privateFolder, tools: tools) { _ in
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            XCTFail("The read error should come through")
+        } catch {
+            XCTAssertEqual((error as? CocoaError)?.code, .fileReadCorruptFile)
+        }
+
+        XCTAssertFalse(VaultPlayable.needsSoundRead(item, privateFolder: privateFolder), "A failed read must not re-index forever")
+    }
+
+    func testACancelledSoundReadIsTriedAgain() async throws {
+        let tools = try Self.tools()
+        let item = try placeFixture()
+        _ = await VaultPlayable.url(for: item, privateFolder: privateFolder, tools: tools)
+
+        let _: [Int]? = try? await VaultPlayable.readSound(of: item, privateFolder: privateFolder, tools: tools) { _ in
+            throw CancellationError()
+        }
+
+        XCTAssertTrue(VaultPlayable.needsSoundRead(item, privateFolder: privateFolder))
+    }
+
     func testCopiesOfRemovedVideosArePruned() throws {
         let kept = try placeFixture()
         let folder = VaultPlayable.folder(in: privateFolder)
