@@ -4,11 +4,13 @@ import VaultSearch
 enum VaultSearchError: LocalizedError {
     case closed
     case notMounted
+    case modelUnavailable(String)
 
     var errorDescription: String? {
         switch self {
         case .closed: "Search stopped because the vault locked."
         case .notMounted: "The vault isn't open."
+        case .modelUnavailable(let reason): "The search model couldn't start: \(reason)"
         }
     }
 }
@@ -34,10 +36,12 @@ final class VaultSearchEngine: @unchecked Sendable {
         self.root = root
         self.model = model
         self.requiresMountedVolume = requiresMountedVolume
+        workFolder = root.appendingPathComponent(VaultLibrary.privateFolderName).appendingPathComponent(Self.workFolderPrefix + UUID().uuidString)
     }
 
     var privateFolder: URL { root.appendingPathComponent(VaultLibrary.privateFolderName) }
-    var workFolder: URL { privateFolder.appendingPathComponent("work") }
+    static let workFolderPrefix = "work-"
+    let workFolder: URL
 
     func relativePath(of url: URL) -> String {
         let base = root.standardizedFileURL.path + "/"
@@ -166,7 +170,15 @@ final class VaultSearchEngine: @unchecked Sendable {
         }
         let opened = try VaultIndex(at: privateFolder.appendingPathComponent(VaultIndex.fileName))
         index = opened
+        removeLeftoverWorkFolders()
         return opened
+    }
+
+    private func removeLeftoverWorkFolders() {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: privateFolder.path)) ?? []
+        for name in names where name.hasPrefix(Self.workFolderPrefix) && name != workFolder.lastPathComponent {
+            try? FileManager.default.removeItem(at: privateFolder.appendingPathComponent(name))
+        }
     }
 
     private func loadVectors() throws -> VaultVectors {
@@ -180,17 +192,25 @@ final class VaultSearchEngine: @unchecked Sendable {
         if let full { return full }
         textOnly?.close()
         textOnly = nil
-        let made = try LlamaEmbedder(model: model, textOnly: false)
-        full = made
-        return made
+        do {
+            let made = try LlamaEmbedder(model: model, textOnly: false)
+            full = made
+            return made
+        } catch {
+            throw VaultSearchError.modelUnavailable(error.localizedDescription)
+        }
     }
 
     private func queryEmbedder() throws -> LlamaEmbedder {
         if let full { return full }
         if let textOnly { return textOnly }
-        let made = try LlamaEmbedder(model: model, textOnly: true)
-        textOnly = made
-        return made
+        do {
+            let made = try LlamaEmbedder(model: model, textOnly: true)
+            textOnly = made
+            return made
+        } catch {
+            throw VaultSearchError.modelUnavailable(error.localizedDescription)
+        }
     }
 
     private func prepareWorkFolder() throws {

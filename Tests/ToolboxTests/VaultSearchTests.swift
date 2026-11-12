@@ -114,6 +114,32 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: engine.privateFolder.path))
     }
 
+    func testEachEngineHasItsOwnWorkFolderAndClearsOldOnes() async throws {
+        let located = EmbeddingModel.Located(text: root.appendingPathComponent("t.gguf"), media: root.appendingPathComponent("m.gguf"))
+        let leftover = root.appendingPathComponent(".toolbox/\(VaultSearchEngine.workFolderPrefix)old")
+        try FileManager.default.createDirectory(at: leftover, withIntermediateDirectories: true)
+        let first = VaultSearchEngine(root: root, model: located, requiresMountedVolume: false)
+        let second = VaultSearchEngine(root: root, model: located, requiresMountedVolume: false)
+        XCTAssertNotEqual(first.workFolder, second.workFolder)
+        _ = try await first.pending([])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: leftover.path))
+    }
+
+    func testAModelThatWontLoadStopsIndexingWithAReason() async throws {
+        _ = try makePhoto("one.png", red: 200, green: 0, blue: 0)
+        let broken = root.appendingPathComponent("broken.gguf")
+        try Data("not a model".utf8).write(to: broken)
+        let engine = VaultSearchEngine(root: root, model: EmbeddingModel.Located(text: broken, media: broken), requiresMountedVolume: false)
+        let item = try XCTUnwrap(VaultLibrary.items(in: root).first)
+        do {
+            try await engine.index(item)
+            XCTFail("A broken model indexed a file")
+        } catch VaultSearchError.modelUnavailable {
+        } catch {
+            XCTFail("Expected modelUnavailable, got \(error)")
+        }
+    }
+
     func testModelFilesAreFoundOnlyAtTheirExactSize() throws {
         let folder = root.appendingPathComponent("models")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

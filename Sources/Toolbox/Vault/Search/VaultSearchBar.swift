@@ -66,6 +66,12 @@ struct VaultSearchBar: View {
             }
             .font(.caption).foregroundStyle(.secondary).fixedSize()
             .help("New photos and videos are read once so search can find them. Search works while this runs.")
+        case .ready(let unreadable) where unreadable > 0:
+            Label(unreadable == 1 ? "1 file can't be searched" : "\(unreadable) files can't be searched",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange).fixedSize()
+                .help("These files couldn't be read for search. They're still in the vault.")
+            Button("Retry") { vault.retrySearch() }.controlSize(.small)
         case .failed(let reason):
             Label("Search unavailable", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption).foregroundStyle(.orange).fixedSize()

@@ -13,7 +13,7 @@ final class VaultModel {
         case needsModel
         case downloading(Double)
         case indexing(done: Int, total: Int)
-        case ready
+        case ready(unreadable: Int)
         case failed(String)
     }
 
@@ -322,6 +322,7 @@ final class VaultModel {
         do {
             let pending = try await engine.pending(items)
             var done = 0
+            var unreadable = 0
             for item in pending {
                 guard !Task.isCancelled, searchEngine === engine else { return }
                 searchState = .indexing(done: done, total: pending.count)
@@ -329,7 +330,10 @@ final class VaultModel {
                     try await engine.index(item)
                 } catch VaultSearchError.closed {
                     return
+                } catch let error as VaultSearchError {
+                    throw error
                 } catch {
+                    unreadable += 1
                     VaultLog.failure("Vault search indexing failed", error, file: item.url)
                 }
                 done += 1
@@ -337,7 +341,7 @@ final class VaultModel {
             }
             await engine.finishIndexing()
             guard searchEngine === engine else { return }
-            searchState = .ready
+            searchState = .ready(unreadable: unreadable)
             if !pending.isEmpty {
                 Log.info("Vault indexed", category: VaultLog.category, ["count": String(pending.count)])
             }
