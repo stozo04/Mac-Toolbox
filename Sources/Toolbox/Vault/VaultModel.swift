@@ -81,6 +81,7 @@ final class VaultModel {
     private var downloadTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
     private var digests: [VaultItem: Data] = [:]
+    private var looks: [VaultItem: VaultLook] = [:]
     private var lengthsInFlight: Set<VaultItem> = []
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
@@ -247,18 +248,25 @@ final class VaultModel {
             guard !Task.isCancelled else { return }
             let snapshot = items
             let present = Set(snapshot)
+            let lengths = await lengthsForDuplicates(of: snapshot)
+            guard !Task.isCancelled, generation == openGeneration else { return }
+            let unlooked = VaultDuplicates.lookCandidates(in: snapshot, durations: lengths).filter { looks[$0] == nil }
+            let newLooks = await VaultLookReader.looks(of: unlooked, durations: lengths)
+            guard !Task.isCancelled, generation == openGeneration else { return }
+            looks.merge(newLooks) { _, new in new }
+            let knownLooks = looks.filter { present.contains($0.key) }
             let known = digests.filter { present.contains($0.key) }
             let stop = StopFlag()
             let (groups, found) = await withTaskCancellationHandler {
                 await Task.detached(priority: .userInitiated) {
                     var found = known
-                    let groups = VaultDuplicates.groups(in: snapshot) { item in
+                    let groups = VaultDuplicates.groups(in: snapshot, digest: { item in
                         if let digest = found[item] { return digest }
                         guard !stop.isSet else { throw CancellationError() }
                         let digest = try VaultMover.sha256(item.url)
                         found[item] = digest
                         return digest
-                    }
+                    }, durations: lengths, looks: knownLooks)
                     return (groups, found)
                 }.value
             } onCancel: { stop.set() }
@@ -267,6 +275,14 @@ final class VaultModel {
             guard !Task.isCancelled else { return }
             duplicateGroups = groups
         }
+    }
+
+    private func lengthsForDuplicates(of snapshot: [VaultItem]) async -> [VaultItem: Double] {
+        let missing = snapshot.filter { $0.kind == .video && durations[$0] == nil && !unreadableLengths.contains($0) }
+        guard !missing.isEmpty else { return durations }
+        let found = await VaultBrowse.durations(of: missing)
+        durations.merge(found) { _, new in new }
+        return durations
     }
 
     func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
@@ -602,6 +618,7 @@ final class VaultModel {
         duplicateTask = nil
         duplicateGroups = nil
         digests = [:]
+        looks = [:]
         mode = .library
         query = ""
         searchResult = nil
