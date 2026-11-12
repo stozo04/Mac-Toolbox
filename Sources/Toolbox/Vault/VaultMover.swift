@@ -70,7 +70,7 @@ enum VaultMover {
         }
     }
 
-    static func move(_ source: URL, into vaultRoot: URL) async throws -> URL {
+    @concurrent static func move(_ source: URL, into vaultRoot: URL) async throws -> URL {
         try check(source, vaultRoot: vaultRoot)
         let before = try fingerprint(source)
         let destination = uniqueDestination(for: visibleName(source.lastPathComponent), in: vaultRoot)
