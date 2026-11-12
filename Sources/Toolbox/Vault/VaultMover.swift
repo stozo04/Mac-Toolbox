@@ -11,6 +11,7 @@ enum VaultMoveError: LocalizedError, Equatable {
     case link
     case copyDiffers
     case interrupted
+    case changedWhileMoving
     case unreadable
     case originalKept(String)
 
@@ -21,6 +22,7 @@ enum VaultMoveError: LocalizedError, Equatable {
         case .notDownloaded: "It's in iCloud and not downloaded to this Mac yet."
         case .alreadyInVault: "It's already in the vault."
         case .link: "It's a link to a file stored somewhere else. Add the file itself."
+        case .changedWhileMoving: "It changed while it was being moved, so the original was kept. Try again."
         case .interrupted: "Moving stopped when the vault locked, so the original was kept."
         case .copyDiffers: "The copy in the vault didn't match the original, so the original was kept."
         case .unreadable: "The copy in the vault couldn't be opened, so the original was kept."
@@ -70,16 +72,16 @@ enum VaultMover {
 
     static func move(_ source: URL, into vaultRoot: URL) async throws -> URL {
         try check(source, vaultRoot: vaultRoot)
-        let destination = uniqueDestination(for: source.lastPathComponent, in: vaultRoot)
+        let before = try fingerprint(source)
+        let destination = uniqueDestination(for: visibleName(source.lastPathComponent), in: vaultRoot)
         try FileManager.default.copyItem(at: source, to: destination)
         do {
             try await verify(copy: destination, of: source)
+            guard !Task.isCancelled, copyIsStillThere(destination, matching: source) else { throw VaultMoveError.interrupted }
+            guard try fingerprint(source) == before else { throw VaultMoveError.changedWhileMoving }
         } catch {
             try? FileManager.default.removeItem(at: destination)
             throw error
-        }
-        guard !Task.isCancelled, copyIsStillThere(destination, matching: source) else {
-            throw VaultMoveError.interrupted
         }
         do {
             try FileManager.default.removeItem(at: source)
@@ -87,6 +89,21 @@ enum VaultMover {
             throw VaultMoveError.originalKept(error.localizedDescription)
         }
         return destination
+    }
+
+    struct Fingerprint: Equatable {
+        let size: Int
+        let modified: Date?
+    }
+
+    static func fingerprint(_ url: URL) throws -> Fingerprint {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return Fingerprint(size: (attributes[.size] as? NSNumber)?.intValue ?? -1, modified: attributes[.modificationDate] as? Date)
+    }
+
+    static func visibleName(_ name: String) -> String {
+        let trimmed = String(name.drop { $0 == "." })
+        return trimmed.isEmpty ? "Untitled" : trimmed
     }
 
     static func resolvingFolders(of url: URL) -> URL {
@@ -112,10 +129,10 @@ enum VaultMover {
     }
 
     static func verify(copy: URL, of original: URL) async throws {
+        guard await opens(copy) else { throw VaultMoveError.unreadable }
         guard try fileSize(copy) == fileSize(original), try sha256(copy) == sha256(original) else {
             throw VaultMoveError.copyDiffers
         }
-        guard await opens(copy) else { throw VaultMoveError.unreadable }
     }
 
     static func isLink(_ url: URL) -> Bool {

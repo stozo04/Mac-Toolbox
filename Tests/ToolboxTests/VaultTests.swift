@@ -107,6 +107,21 @@ final class VaultTests: XCTestCase {
             XCTAssertEqual(error as? VaultMoveError, .interrupted)
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+        XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
+    }
+
+    func testAHiddenPhotoGetsAVisibleNameInTheVault() async throws {
+        let hidden = try makePhoto(".private.png")
+        let moved = try await VaultMover.move(hidden, into: vault)
+        XCTAssertEqual(moved.lastPathComponent, "private.png")
+        XCTAssertEqual(VaultLibrary.items(in: vault).map(\.name), ["private.png"])
+    }
+
+    func testFingerprintNoticesAnEditedOriginal() throws {
+        let photo = try makePhoto("edited.png")
+        let before = try VaultMover.fingerprint(photo)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: photo.path)
+        XCTAssertNotEqual(try VaultMover.fingerprint(photo), before)
     }
 
     func testOriginalIsKeptWhenTheCopyVanishesBeforeDeleting() throws {
