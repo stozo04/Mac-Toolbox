@@ -16,7 +16,10 @@ struct VaultLibraryView: View {
         @Bindable var vault = vault
         VStack(spacing: 12) {
             header
-            if !vault.items.isEmpty { VaultSearchBar() }
+            if !vault.items.isEmpty {
+                VaultSearchBar()
+                browseBar
+            }
             if let progress = vault.moveProgress { MoveProgressBar(progress: progress) }
             if !vault.moveFailures.isEmpty { failures }
             if let message = vault.message { banner(message) }
@@ -77,6 +80,27 @@ struct VaultLibraryView: View {
         .controlSize(.large)
     }
 
+    private var browseBar: some View {
+        @Bindable var vault = vault
+        return HStack(spacing: 10) {
+            Picker("Show", selection: $vault.filter) {
+                ForEach(VaultFilter.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            if vault.filter == .videos && vault.query.isEmpty {
+                Picker("Order", selection: $vault.videoOrder) {
+                    ForEach(VaultVideoOrder.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("Sort videos by length")
+            }
+            Spacer()
+        }
+    }
+
     @ViewBuilder private var content: some View {
         if !vault.query.isEmpty, let result = vault.searchResult, !vault.items.isEmpty {
             searchSummary(result)
@@ -89,6 +113,9 @@ struct VaultLibraryView: View {
                     .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if vault.query.isEmpty && vault.displayedItems.isEmpty {
+            Text(vault.filter.emptyMessage).font(.title3.weight(.semibold)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
@@ -253,7 +280,7 @@ struct VaultTile: View {
                 if item.kind == .video {
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
-                        if let start = vault.matchStart(for: item) { Text(VaultTime.label(start)).monospacedDigit() }
+                        if let length = vault.lengthLabel(for: item) { Text(length).monospacedDigit() }
                     }
                     .font(.caption).foregroundStyle(.white)
                     .padding(.horizontal, 7).padding(.vertical, 5)

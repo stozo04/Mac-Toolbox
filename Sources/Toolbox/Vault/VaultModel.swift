@@ -42,6 +42,11 @@ final class VaultModel {
         didSet { keepOnlyVisibleItemsChosen() }
     }
     private(set) var isSearching = false
+    var filter: VaultFilter = .all {
+        didSet { keepOnlyVisibleItemsChosen() }
+    }
+    var videoOrder: VaultVideoOrder = .newest
+    private(set) var durations: [VaultItem: Double] = [:]
 
     let disk: VaultDisk
     private var lockCount = 0
@@ -53,6 +58,7 @@ final class VaultModel {
     private var indexAgain = false
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
+    private var durationTask: Task<Void, Never>?
     private static let typingPause: Duration = .milliseconds(250)
 
     init(location: VaultLocation = .standard, watchesSystem: Bool = true) {
@@ -192,6 +198,20 @@ final class VaultModel {
         items = VaultLibrary.items(in: root)
         selection.formIntersection(Set(items.map(\.id)))
         if let viewing, !items.contains(where: { $0.id == viewing }) { self.viewing = nil }
+        loadDurations()
+    }
+
+    private func loadDurations() {
+        let present = Set(items)
+        durations = durations.filter { present.contains($0.key) }
+        let missing = items.filter { $0.kind == .video && durations[$0] == nil }
+        durationTask?.cancel()
+        guard !missing.isEmpty else { return }
+        durationTask = Task {
+            let found = await VaultBrowse.durations(of: missing)
+            guard !Task.isCancelled else { return }
+            durations.merge(found) { _, new in new }
+        }
     }
 
     func add(_ urls: [URL]) {
@@ -249,9 +269,16 @@ final class VaultModel {
     }
 
     var displayedItems: [VaultItem] {
-        guard !query.isEmpty, let searchResult else { return items }
+        guard !query.isEmpty, let searchResult else {
+            return VaultBrowse.arranged(items, filter: filter, order: videoOrder, durations: durations)
+        }
         let byPath = Dictionary(items.map { (searchEngine?.relativePath(of: $0.url) ?? $0.name, $0) }, uniquingKeysWith: { first, _ in first })
-        return searchResult.hits.compactMap { byPath[$0.path] }
+        let ranked = searchResult.hits.compactMap { byPath[$0.path] }
+        return VaultBrowse.arranged(ranked, filter: filter, order: .newest, durations: durations)
+    }
+
+    func lengthLabel(for item: VaultItem) -> String? {
+        VaultBrowse.lengthLabel(for: item, durations: durations)
     }
 
     private func keepOnlyVisibleItemsChosen() {
@@ -267,12 +294,6 @@ final class VaultModel {
         let clear = shown.filter { clearPaths.contains(searchEngine?.relativePath(of: $0.url) ?? $0.name) }
         let clearIDs = Set(clear.map(\.id))
         return (clear, shown.filter { !clearIDs.contains($0.id) })
-    }
-
-    func matchStart(for item: VaultItem) -> Double? {
-        guard item.kind == .video, !query.isEmpty, let searchEngine, let searchResult else { return nil }
-        let path = searchEngine.relativePath(of: item.url)
-        return searchResult.hits.first { $0.path == path }?.start
     }
 
     func downloadModel() {
@@ -446,6 +467,9 @@ final class VaultModel {
         moveTask = nil
         moveID = nil
         releasePlayer()
+        durationTask?.cancel()
+        durationTask = nil
+        durations = [:]
         query = ""
         searchResult = nil
         let old = thumbnails

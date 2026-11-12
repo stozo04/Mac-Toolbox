@@ -17,7 +17,6 @@ struct VaultIndexedFile: Equatable {
 struct VaultVectors {
     var paths: [String] = []
     var modalities: [Modality] = []
-    var starts: [Double] = []
     var matrix: [Float] = []
 
     var rows: Int { paths.count }
@@ -105,13 +104,12 @@ final class VaultIndex {
 
     func vectors(dimension: Int = LlamaEmbedder.dimension) throws -> VaultVectors {
         var out = VaultVectors()
-        try query("SELECT path, modality, start, vector FROM segments ORDER BY id") { statement in
-            let bytes = Int(sqlite3_column_bytes(statement, 3))
-            guard bytes == dimension * MemoryLayout<Float>.size, let blob = sqlite3_column_blob(statement, 3),
+        try query("SELECT path, modality, vector FROM segments ORDER BY id") { statement in
+            let bytes = Int(sqlite3_column_bytes(statement, 2))
+            guard bytes == dimension * MemoryLayout<Float>.size, let blob = sqlite3_column_blob(statement, 2),
                   let modality = Modality(rawValue: Self.text(statement, 1)) else { return }
             out.paths.append(Self.text(statement, 0))
             out.modalities.append(modality)
-            out.starts.append(sqlite3_column_double(statement, 2))
             out.matrix.append(contentsOf: UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: dimension))
         }
         return out
