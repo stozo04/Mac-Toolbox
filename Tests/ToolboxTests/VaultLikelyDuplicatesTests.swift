@@ -33,6 +33,35 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
         XCTAssertNil(VaultDuplicates.postID(in: "IMG_0001.mov"))
     }
 
+    func testTagsAndDatesInBracketsAreNotPostIDs() {
+        XCTAssertEqual(VaultDuplicates.postID(in: "Song [Official] [7468015357786148128].mp4"), "7468015357786148128")
+        XCTAssertEqual(VaultDuplicates.postID(in: "[2024-11-12] trip [dQw4w9WgXcQ].mp4"), "dQw4w9WgXcQ")
+        XCTAssertNil(VaultDuplicates.postID(in: "clip [2024-11-12].mp4"))
+        XCTAssertNil(VaultDuplicates.postID(in: "Song [Official].mp4"))
+        XCTAssertNil(VaultDuplicates.postID(in: "Live [Performance].mp4"))
+    }
+
+    func testVideosSharingOnlyATagStayApart() {
+        let first = item("Song A [Official].mp4", bytes: 10, added: 1)
+        let second = item("Song B [Official].mp4", bytes: 20, added: 2)
+
+        let groups = VaultDuplicates.groups(in: [first, second], digest: digestOfName, durations: [first: 200, second: 200.5])
+
+        XCTAssertTrue(groups.isEmpty)
+    }
+
+    func testVideoFramesAreComparedAtTheSameMomentOnly() {
+        let x: VaultLook.FrameHash = [0x5555_5555_5555_5555, 0x3333_3333_3333_3333, 0x0F0F_0F0F_0F0F_0F0F, 0x00FF_00FF_00FF_00FF]
+        let y: VaultLook.FrameHash = x.map { ~$0 }
+        let shorter = VaultLook(frames: [x, y], seconds: [1, 2.5], aspect: 1)
+        let longer = VaultLook(frames: [x, x, y], seconds: [0.25, 1, 2.5], aspect: 1)
+        let shifted = VaultLook(frames: [x, y, x], seconds: [0.25, 1, 2.5], aspect: 1)
+
+        XCTAssertTrue(shorter.resembles(longer))
+        XCTAssertFalse(shorter.resembles(shifted))
+        XCTAssertFalse(shorter.resembles(VaultLook(frames: [x], aspect: 1)))
+    }
+
     func testTheSameIDWithClearlyDifferentLengthsStaysApart() {
         let first = item("a [7468015357786148128].mp4", bytes: 10, added: 1)
         let second = item("b [7468015357786148128].mp4", bytes: 20, added: 2)
@@ -127,8 +156,9 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
         XCTAssertEqual(VaultLook.distance(frame, nudged), 30)
 
         let photo = VaultLook(frames: [frame], aspect: 1), nudgedPhoto = VaultLook(frames: [nudged], aspect: 1)
-        let video = VaultLook(frames: Array(repeating: frame, count: 5), aspect: 1)
-        let nudgedVideo = VaultLook(frames: Array(repeating: nudged, count: 5), aspect: 1)
+        let times = VaultLookReader.sampleSeconds(forDuration: 30)
+        let video = VaultLook(frames: Array(repeating: frame, count: times.count), seconds: times, aspect: 1)
+        let nudgedVideo = VaultLook(frames: Array(repeating: nudged, count: times.count), seconds: times, aspect: 1)
 
         XCTAssertFalse(photo.resembles(nudgedPhoto))
         XCTAssertTrue(video.resembles(nudgedVideo))
@@ -153,7 +183,7 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
         let named = Dictionary(uniqueKeysWithValues: looks.map { ($0.key.name, $0.value) })
 
         XCTAssertNotEqual(try Data(contentsOf: high), try Data(contentsOf: low))
-        XCTAssertEqual(named["high.mp4"]?.frames.count, 3)
+        XCTAssertEqual(named["high.mp4"]?.seconds, [0.25, 1, 2.5, 4])
         XCTAssertTrue(try XCTUnwrap(named["high.mp4"]).resembles(try XCTUnwrap(named["low.mp4"])))
         XCTAssertFalse(try XCTUnwrap(named["high.mp4"]).resembles(try XCTUnwrap(named["other.mp4"])))
 
@@ -163,13 +193,16 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
     }
 
     func testSampleTimesStayInsideShortVideos() {
-        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 30), [1, 2.5, 4, 6, 8])
-        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 3), [1, 2.5])
-        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 0.6), [0.3])
+        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 30), [0.25, 1, 2.5, 4, 6, 8])
+        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 3), [0.25, 1, 2.5])
+        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 0.6), [0.25])
+        XCTAssertEqual(VaultLookReader.sampleSeconds(forDuration: 0.2), [])
     }
 
     private func look(_ scene: VaultTestMedia.Scene) throws -> VaultLook {
-        VaultLook(frames: [VaultLookReader.hash(try VaultTestMedia.sceneImage(scene, side: 256))], aspect: 9.0 / 16.0)
+        let frame = VaultLookReader.hash(try VaultTestMedia.sceneImage(scene, side: 256))
+        let times = VaultLookReader.sampleSeconds(forDuration: 10)
+        return VaultLook(frames: Array(repeating: frame, count: times.count), seconds: times, aspect: 9.0 / 16.0)
     }
 
     private func digestOfName(_ item: VaultItem) throws -> Data { Data(item.name.utf8) }

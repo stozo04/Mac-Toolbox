@@ -55,21 +55,31 @@ enum VaultDuplicates {
         return bracketedID(in: stem) ?? longNumber(in: stem)
     }
 
-    private static let idCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
-    private static let shortestBracketedID = 8
+    private static let youTubeIDLength = 11
     private static let numberIDLengths = 15...20
 
     private static func bracketedID(in stem: String) -> String? {
-        stem.split(separator: "[").dropFirst().lazy.compactMap { piece -> String? in
+        stem.split(separator: "[").dropFirst().compactMap { piece -> String? in
             guard let close = piece.firstIndex(of: "]") else { return nil }
-            let inside = piece[..<close]
-            let isID = inside.count >= shortestBracketedID && inside.unicodeScalars.allSatisfy { $0.isASCII && idCharacters.contains($0) }
-            return isID ? String(inside) : nil
-        }.first
+            let inside = String(piece[..<close])
+            return isNumberID(inside) || isYouTubeID(inside) ? inside : nil
+        }.last
     }
 
     private static func longNumber(in stem: String) -> String? {
-        stem.split { !$0.isASCII || !$0.isNumber }.first { numberIDLengths.contains($0.count) }.map(String.init)
+        stem.split { !$0.isASCII || !$0.isNumber }.map(String.init).last(where: isNumberID)
+    }
+
+    private static func isNumberID(_ text: String) -> Bool {
+        numberIDLengths.contains(text.count) && text.allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    private static func isYouTubeID(_ text: String) -> Bool {
+        let scalars = text.unicodeScalars
+        let allowed = scalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-") }
+        let hasNonLetter = scalars.contains { CharacterSet.decimalDigits.contains($0) || $0 == "_" || $0 == "-" }
+        let hasLetter = scalars.contains { CharacterSet.letters.contains($0) }
+        return scalars.count == youTubeIDLength && allowed && hasNonLetter && hasLetter
     }
 
     /// The keeper and every copy are still there with the same size, so trashing the others can't lose the last copy.

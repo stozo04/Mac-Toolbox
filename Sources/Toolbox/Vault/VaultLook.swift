@@ -6,6 +6,7 @@ struct VaultLook: Hashable, Sendable {
     typealias FrameHash = [UInt64]
 
     let frames: [FrameHash]
+    let seconds: [Double]
     let aspect: Double
 
     static let maxFrameDistance = 40
@@ -13,12 +14,26 @@ struct VaultLook: Hashable, Sendable {
     static let maxAspectDifference = 0.06
     private static let flatBits = 24
 
+    init(frames: [FrameHash], seconds: [Double] = [], aspect: Double) {
+        self.frames = frames
+        self.seconds = seconds
+        self.aspect = aspect
+    }
+
+    var isVideo: Bool { !seconds.isEmpty }
+
     func resembles(_ other: VaultLook) -> Bool {
-        let pairs = Array(zip(frames, other.frames))
-        guard !pairs.isEmpty, abs(aspect - other.aspect) <= Self.maxAspectDifference * max(aspect, other.aspect) else { return false }
-        guard pairs.contains(where: { Self.hasDetail($0.0) && Self.hasDetail($0.1) }) else { return false }
+        guard isVideo == other.isVideo,
+              abs(aspect - other.aspect) <= Self.maxAspectDifference * max(aspect, other.aspect) else { return false }
+        let pairs = isVideo ? framesAtSameTimes(as: other) : Array(zip(frames, other.frames))
+        guard !pairs.isEmpty, pairs.contains(where: { Self.hasDetail($0.0) && Self.hasDetail($0.1) }) else { return false }
         let limit = pairs.count == 1 ? Self.maxSingleFrameDistance : Self.maxFrameDistance
         return pairs.allSatisfy { Self.distance($0.0, $0.1) <= limit }
+    }
+
+    private func framesAtSameTimes(as other: VaultLook) -> [(FrameHash, FrameHash)] {
+        let theirs = Dictionary(zip(other.seconds, other.frames), uniquingKeysWith: { first, _ in first })
+        return zip(seconds, frames).compactMap { second, frame in theirs[second].map { (frame, $0) } }
     }
 
     static func distance(_ a: FrameHash, _ b: FrameHash) -> Int {
@@ -32,7 +47,8 @@ struct VaultLook: Hashable, Sendable {
 }
 
 enum VaultLookReader {
-    static let videoSeconds: [Double] = [1, 2.5, 4, 6, 8]
+    static let videoSeconds: [Double] = [0.25, 1, 2.5, 4, 6, 8]
+    private static let endMargin = 0.05
     private static let hashSide = 16
     private static let samplePixels = 256
     private static let parallelLoads = 6
@@ -66,8 +82,7 @@ enum VaultLookReader {
     }
 
     static func sampleSeconds(forDuration duration: Double) -> [Double] {
-        let inside = videoSeconds.filter { $0 < duration }
-        return inside.isEmpty ? [duration / 2] : inside
+        videoSeconds.filter { $0 < duration - endMargin }
     }
 
     static func hash(_ image: CGImage) -> VaultLook.FrameHash {
@@ -101,15 +116,16 @@ enum VaultLookReader {
         let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
         generator.requestedTimeToleranceBefore = tolerance
         generator.requestedTimeToleranceAfter = tolerance
+        let times = sampleSeconds(forDuration: duration)
         var frames: [VaultLook.FrameHash] = []
         var shape: Double?
-        for second in sampleSeconds(forDuration: duration) {
+        for second in times {
             guard let image = try? await generator.image(at: CMTime(seconds: second, preferredTimescale: 600)).image else { return nil }
             frames.append(hash(image))
             shape = shape ?? aspect(of: image)
         }
         guard let shape else { return nil }
-        return VaultLook(frames: frames, aspect: shape)
+        return VaultLook(frames: frames, seconds: times, aspect: shape)
     }
 
     private static func imageThumbnail(_ url: URL) -> CGImage? {
