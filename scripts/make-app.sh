@@ -15,7 +15,7 @@ VERSION="${VERSION:-$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' "$ROOT/
 [ -n "$VERSION" ] || { echo "Could not read the version from ReleaseNotes.swift"; exit 1; }
 BUILD="${BUILD:-$VERSION}"   # CFBundleVersion; CI passes its run number
 IDENTITY="${SIGN_IDENTITY:--}"
-ARCH_FLAGS=(--arch arm64 --arch x86_64)
+ARCH_FLAGS=(--arch arm64)
 [ -n "${ARCHS:-}" ] && ARCH_FLAGS=($(for a in $ARCHS; do echo --arch "$a"; done))
 APP="$ROOT/dist/Toolbox.app"
 
@@ -23,8 +23,11 @@ for t in yt-dlp ffmpeg ffprobe; do
   [ -x "$TOOLS/$t" ] || { echo "Missing $TOOLS/$t. Run scripts/fetch-tools.sh first."; exit 1; }
 done
 
-echo "==> swift build (release)"
 cd "$ROOT"
+echo "==> llama.cpp (Vault search)"
+scripts/build-llama.sh
+
+echo "==> swift build (release)"
 swift build -c release "${ARCH_FLAGS[@]}"
 BIN="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)/Toolbox"
 

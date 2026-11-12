@@ -16,7 +16,11 @@ let package = Package(
                 sources: ["src", "sharpyuv"],
                 publicHeadersPath: "include",
                 cSettings: [.headerSearchPath("."), .define("NDEBUG")]),
-        .executableTarget(name: "Toolbox", dependencies: ["CWebP"], path: "Sources/Toolbox"),
-        .testTarget(name: "ToolboxTests", dependencies: ["Toolbox"], path: "Tests/ToolboxTests"),
+        .systemLibrary(name: "CLlama", path: "Sources/CLlama"),
+        .target(name: "VaultSearch", dependencies: ["CLlama"], path: "Sources/VaultSearch",
+                exclude: ["LICENSE-DigUp"],
+                linkerSettings: [.unsafeFlags(["-L\(Context.packageDirectory)/Vendor/llama/lib"])]),
+        .executableTarget(name: "Toolbox", dependencies: ["CWebP", "VaultSearch"], path: "Sources/Toolbox"),
+        .testTarget(name: "ToolboxTests", dependencies: ["Toolbox", "VaultSearch"], path: "Tests/ToolboxTests"),
     ]
 )

@@ -120,15 +120,16 @@ These 31 tools can be browsed and opened, but show a "Feature not implemented" b
 
 ## Running the preview
 
-Open Terminal in the project folder and run:
+Toolbox runs on Apple silicon Macs. Open Terminal in the project folder and run:
 
 ```
+scripts/build-llama.sh
 swift run Toolbox
 ```
 
-The first run takes a minute to build. To quit, press **⌘Q**. To open a tool straight away, add `--page`, for example `swift run Toolbox --page "Video/Trim Video"`.
+`scripts/build-llama.sh` builds llama.cpp, which the Vault's smart search runs on (it needs CMake, from Homebrew or `uv`, and takes a few minutes once). The first run takes a minute to build. To quit, press **⌘Q**. To open a tool straight away, add `--page`, for example `swift run Toolbox --page "Video/Trim Video"`.
 
-To build the packaged app (a universal `Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`.
+To build the packaged app (an Apple silicon `Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`.
 
 ## Permissions you may be asked for
 

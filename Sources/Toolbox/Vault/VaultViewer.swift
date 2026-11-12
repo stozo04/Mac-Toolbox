@@ -5,8 +5,8 @@ struct VaultViewer: View {
     @Environment(VaultModel.self) private var vault
     @FocusState private var focused: Bool
 
-    private var index: Int? { vault.items.firstIndex { $0.id == vault.viewing } }
-    private var item: VaultItem? { index.map { vault.items[$0] } }
+    private var index: Int? { vault.displayedItems.firstIndex { $0.id == vault.viewing } }
+    private var item: VaultItem? { index.map { vault.displayedItems[$0] } }
 
     var body: some View {
         ZStack {
@@ -20,7 +20,7 @@ struct VaultViewer: View {
                 HStack {
                     arrow("chevron.left", help: "Previous (←)", step: -1, shown: (index ?? 0) > 0)
                     Spacer()
-                    arrow("chevron.right", help: "Next (→)", step: 1, shown: (index ?? 0) < vault.items.count - 1)
+                    arrow("chevron.right", help: "Next (→)", step: 1, shown: (index ?? 0) < vault.displayedItems.count - 1)
                 }
                 .padding(.horizontal, 16)
             }
@@ -37,7 +37,7 @@ struct VaultViewer: View {
     private func topBar(_ item: VaultItem) -> some View {
         HStack {
             Text(item.name).font(.headline).foregroundStyle(.white).lineLimit(1)
-            Text("\((index ?? 0) + 1) of \(vault.items.count)").font(.callout).foregroundStyle(.white.opacity(0.6)).monospacedDigit()
+            Text("\((index ?? 0) + 1) of \(vault.displayedItems.count)").font(.callout).foregroundStyle(.white.opacity(0.6)).monospacedDigit()
             Spacer()
             Button { vault.viewing = nil } label: {
                 Image(systemName: "xmark").font(.title3.weight(.semibold)).foregroundStyle(.white)
@@ -88,6 +88,9 @@ private struct VaultViewerContent: View {
                 image = await Task.detached { NSImage(contentsOf: url) }.value
             case .video:
                 let made = AVPlayer(url: item.url)
+                if let start = vault.matchStart(for: item) {
+                    await made.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                }
                 player = made
                 vault.player = made
                 made.play()

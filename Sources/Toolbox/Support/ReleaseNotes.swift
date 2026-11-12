@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.5.0"
+    static let current = "0.6.0"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,13 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.6.0", date: "2026-11-12", changes: [
+            .init(kind: .new, text: "Vault smart search: describe what you're looking for, like \"beach at sunset\", and the Vault finds the photos and videos that show it."),
+            .init(kind: .new, text: "Search finds moments inside videos too, by what they show or say, and opens the video right at that moment."),
+            .init(kind: .new, text: "Search runs on your Mac with EmbeddingGemma 2. It uses DigUp's copy of the model when you have DigUp, or downloads it once."),
+            .init(kind: .improved, text: "The Vault's Lock button is red."),
+            .init(kind: .removed, text: "Toolbox now runs on Apple silicon Macs only."),
+        ]),
         Release(version: "0.5.0", date: "2026-11-12", changes: [
             .init(kind: .new, text: "Vault: a password-protected, hidden place for photos and videos. Unlock the vault door to open it."),
             .init(kind: .new, text: "Vault keeps everything in an encrypted disk image, so even in Finder it only opens with your password."),
