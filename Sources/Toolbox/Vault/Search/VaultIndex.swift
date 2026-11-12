@@ -14,6 +14,11 @@ struct VaultIndexedFile: Equatable {
     let modified: Double
 }
 
+struct VaultIndexCoverage: Equatable {
+    let file: VaultIndexedFile
+    let segments: [Modality: Int]
+}
+
 struct VaultVectors {
     var paths: [String] = []
     var modalities: [Modality] = []
@@ -100,6 +105,37 @@ final class VaultIndex {
             try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, path) }
             try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, path) }
         }
+    }
+
+    func rename(_ oldPath: String, to newPath: String) throws {
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, newPath) }
+            try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, newPath) }
+            for table in ["segments", "files"] {
+                try run("UPDATE \(table) SET path = ? WHERE path = ?") { statement in
+                    Self.bind(statement, 1, newPath)
+                    Self.bind(statement, 2, oldPath)
+                }
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    func coverage(of path: String) throws -> VaultIndexCoverage? {
+        var file: VaultIndexedFile?
+        try query("SELECT bytes, modified FROM files WHERE path = ?", bind: { Self.bind($0, 1, path) }) { statement in
+            file = VaultIndexedFile(bytes: sqlite3_column_int64(statement, 0), modified: sqlite3_column_double(statement, 1))
+        }
+        guard let file else { return nil }
+        var counts: [Modality: Int] = [:]
+        try query("SELECT modality, COUNT(*) FROM segments WHERE path = ? GROUP BY modality", bind: { Self.bind($0, 1, path) }) { statement in
+            if let modality = Modality(rawValue: Self.text(statement, 0)) { counts[modality] = Int(sqlite3_column_int(statement, 1)) }
+        }
+        return VaultIndexCoverage(file: file, segments: counts)
     }
 
     func vectors(dimension: Int = LlamaEmbedder.dimension) throws -> VaultVectors {

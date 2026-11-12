@@ -108,6 +108,21 @@ final class VaultSearchEngine: @unchecked Sendable {
         }
     }
 
+    func rename(_ oldURL: URL, to newURL: URL) async throws {
+        try await onQueue { [self] in
+            try openIndex().rename(relativePath(of: oldURL), to: relativePath(of: newURL))
+            cachedVectors = nil
+        }
+    }
+
+    func coverage(of item: VaultItem) async throws -> VaultIndexCoverage? {
+        try await onQueue { [self] in
+            guard let coverage = try openIndex().coverage(of: relativePath(of: item.url)),
+                  coverage.file == Self.fingerprint(item.url) else { return nil }
+            return coverage
+        }
+    }
+
     func search(_ text: String, names: [String: String]) async throws -> VaultSearchResult {
         try await onQueue { [self] in
             let vectors = try loadVectors()

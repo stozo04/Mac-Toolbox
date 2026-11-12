@@ -80,6 +80,17 @@ actor VaultThumbnails {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(key + ".jpg"))
     }
 
+    func carryOver(from old: VaultItem, to new: VaultItem) {
+        let oldKey = Self.key(for: old), newKey = Self.key(for: new)
+        let oldFile = folder.appendingPathComponent(oldKey + ".jpg"), newFile = folder.appendingPathComponent(newKey + ".jpg")
+        if let image = memory.removeValue(forKey: oldKey), memory[newKey] == nil { memory[newKey] = image }
+        if FileManager.default.fileExists(atPath: newFile.path) {
+            try? FileManager.default.removeItem(at: oldFile)
+        } else {
+            try? FileManager.default.moveItem(at: oldFile, to: newFile)
+        }
+    }
+
     func forget() { memory.removeAll() }
 
     static func key(for item: VaultItem) -> String {

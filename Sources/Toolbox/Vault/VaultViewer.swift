@@ -39,6 +39,13 @@ struct VaultViewer: View {
             Text(item.name).font(.headline).foregroundStyle(.white).lineLimit(1)
             Text("\((index ?? 0) + 1) of \(vault.displayedItems.count)").font(.callout).foregroundStyle(.white.opacity(0.6)).monospacedDigit()
             Spacer()
+            Button { vault.detailing = item.id } label: {
+                Image(systemName: "info").font(.title3.weight(.semibold)).foregroundStyle(.white)
+                    .frame(width: 36, height: 36).background(Circle().fill(.white.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("i", modifiers: .command)
+            .help("Details (⌘I)")
             Button { vault.viewing = nil } label: {
                 Image(systemName: "xmark").font(.title3.weight(.semibold)).foregroundStyle(.white)
                     .frame(width: 36, height: 36).background(Circle().fill(.white.opacity(0.12)))
