@@ -5,6 +5,7 @@ struct VaultLibraryView: View {
     @Environment(VaultModel.self) private var vault
     @State private var selecting = false
     @State private var confirmingDelete: Set<VaultItem.ID> = []
+    @State private var confirmingTrash: Set<VaultItem.ID> = []
     @State private var dropTargeted = false
     @State private var changingPassword = false
     @State private var keeping: (keeper: VaultItem, group: VaultDuplicates.Group)?
@@ -37,7 +38,7 @@ struct VaultLibraryView: View {
             }
         }
         .overlay { if vault.viewing != nil { VaultViewer() } }
-        .onDeleteCommand { if !vault.selection.isEmpty { confirmingDelete = vault.selection } }
+        .onDeleteCommand(perform: removeSelection)
         .confirmationDialog(deleteTitle, isPresented: deleteDialogShown, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 let ids = confirmingDelete
@@ -45,6 +46,11 @@ struct VaultLibraryView: View {
             }
         } message: {
             Text("They're deleted for good, not moved to the Trash. This can't be undone.")
+        }
+        .confirmationDialog(trashTitle, isPresented: trashDialogShown, titleVisibility: .visible) {
+            Button("Move to Trash", role: .destructive) { Task { await vault.trashChosenCopies() } }
+        } message: {
+            Text("They go to the vault's own Trash, where they stay encrypted. You can put them back or empty it from the Duplicates view.")
         }
         .confirmationDialog(keepTitle, isPresented: keepDialogShown, titleVisibility: .visible) {
             Button("Keep and Move Others to Trash", role: .destructive) {
@@ -75,10 +81,13 @@ struct VaultLibraryView: View {
             }
             Spacer()
             if selecting || !vault.selection.isEmpty {
+                Button(vault.mode == .duplicates ? "Select Extras" : "Select All", action: selectAll)
+                    .help(vault.mode == .duplicates ? "Select every copy except the largest one in each set" : "Select everything shown")
                 if !vault.selection.isEmpty {
-                    Button(role: .destructive) { confirmingDelete = vault.selection } label: {
-                        Label("Delete \(vault.selection.count)", systemImage: "trash")
+                    Button(role: .destructive, action: removeSelection) {
+                        Label(removeLabel, systemImage: "trash")
                     }
+                    .disabled(vault.mode == .duplicates && vault.moveProgress != nil)
                 }
                 Button("Done") {
                     selecting = false
@@ -199,7 +208,7 @@ struct VaultLibraryView: View {
                       alignment: .leading, spacing: Self.spacing) {
                 ForEach(group.copies) { item in
                     VStack(alignment: .leading, spacing: 6) {
-                        VaultTile(item: item, selected: false).onTapGesture { vault.viewing = item.id }
+                        VaultTile(item: item, selected: vault.selection.contains(item.id)).onTapGesture { tap(item) }
                         Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.name)
                         if group.match == .likely {
                             Text(ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
@@ -265,7 +274,7 @@ struct VaultLibraryView: View {
         let likely = groups.filter { $0.match == .likely }.count
         let sets = groups.count == 1 ? "1 set of duplicates" : "\(groups.count) sets of duplicates"
         let detail = likely == 0 ? "" : " (\(likely) likely, not byte-identical)"
-        return "\(sets)\(detail), \(extra) in extra copies. Pick the copy to keep; the others go to the vault's Trash."
+        return "\(sets)\(detail), \(extra) in extra copies. Keep one copy of a set, or select copies and move them to the vault's Trash."
     }
 
     private var keepTitle: String {
@@ -339,6 +348,41 @@ struct VaultLibraryView: View {
 
     private var deleteTitle: String {
         confirmingDelete.count == 1 ? "Delete 1 item?" : "Delete \(confirmingDelete.count) items?"
+    }
+
+    private var removeLabel: String {
+        vault.mode == .duplicates ? "Move \(vault.selection.count) to Trash" : "Delete \(vault.selection.count)"
+    }
+
+    private var trashTitle: String {
+        confirmingTrash.count == 1 ? "Move 1 copy to the vault's Trash?" : "Move \(confirmingTrash.count) copies to the vault's Trash?"
+    }
+
+    private var trashDialogShown: Binding<Bool> {
+        Binding(get: { !confirmingTrash.isEmpty }, set: { if !$0 { confirmingTrash = [] } })
+    }
+
+    private func removeSelection() {
+        guard !vault.selection.isEmpty else { return }
+        guard vault.mode == .duplicates else {
+            confirmingDelete = vault.selection
+            return
+        }
+        guard let groups = vault.visibleDuplicateGroups,
+              VaultDuplicates.groupsWithEveryCopy(of: vault.selection, in: groups).isEmpty else {
+            vault.message = "Leave at least one copy of each set unselected."
+            return
+        }
+        confirmingTrash = vault.selection
+    }
+
+    private func selectAll() {
+        selecting = true
+        if vault.mode == .duplicates {
+            vault.chooseExtraCopies()
+        } else {
+            vault.selection = Set(vault.displayedItems.map(\.id))
+        }
     }
 
     private var deleteDialogShown: Binding<Bool> {

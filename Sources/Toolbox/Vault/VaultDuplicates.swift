@@ -104,6 +104,22 @@ enum VaultDuplicates {
         group.copies.filter { $0.id != keeper.id }
     }
 
+    static func suggestedKeeper(in group: Group) -> VaultItem? {
+        group.copies.max { $0.bytes < $1.bytes }
+    }
+
+    static func extraCopies(in groups: [Group]) -> [VaultItem] {
+        groups.flatMap { group in suggestedKeeper(in: group).map { others(than: $0, in: group) } ?? [] }
+    }
+
+    static func groupsWithEveryCopy(of chosen: Set<VaultItem.ID>, in groups: [Group]) -> [Group] {
+        groups.filter { group in group.copies.allSatisfy { chosen.contains($0.id) } }
+    }
+
+    static func chosenCopies(_ chosen: Set<VaultItem.ID>, in groups: [Group]) -> [VaultItem] {
+        groups.flatMap(\.copies).filter { chosen.contains($0.id) }
+    }
+
     static func filtered(_ groups: [Group], by filter: VaultFilter) -> [Group] {
         groups.filter { group in group.copies.first.map(filter.includes) ?? false }
     }

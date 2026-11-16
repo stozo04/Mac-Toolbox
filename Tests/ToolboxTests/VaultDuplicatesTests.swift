@@ -116,6 +116,33 @@ final class VaultDuplicatesTests: XCTestCase {
         XCTAssertTrue(VaultTrash.summary(in: privateFolder).isEmpty)
     }
 
+    func testSelectExtrasKeepsTheLargestCopyOfEachSet() {
+        let small = item("small.mp4", bytes: 10, added: 1)
+        let large = item("large.mp4", bytes: 50, added: 2)
+        let alsoLarge = item("also-large.mp4", bytes: 50, added: 3)
+        let first = item("a.jpg", bytes: 4, added: 1)
+        let second = item("b.jpg", bytes: 4, added: 2)
+        let groups = [VaultDuplicates.Group(copies: [small, large, alsoLarge], match: .likely),
+                      VaultDuplicates.Group(copies: [first, second])]
+
+        let extras = VaultDuplicates.extraCopies(in: groups)
+
+        XCTAssertEqual(Set(extras.map(\.name)), ["small.mp4", "also-large.mp4", "b.jpg"])
+        XCTAssertTrue(VaultDuplicates.groupsWithEveryCopy(of: Set(extras.map(\.id)), in: groups).isEmpty)
+    }
+
+    func testChoosingEveryCopyOfASetIsCaught() {
+        let a = item("a.jpg", bytes: 4, added: 1)
+        let b = item("b.jpg", bytes: 4, added: 2)
+        let c = item("c.jpg", bytes: 8, added: 1)
+        let d = item("d.jpg", bytes: 8, added: 2)
+        let groups = [VaultDuplicates.Group(copies: [a, b]), VaultDuplicates.Group(copies: [c, d])]
+        let chosen: Set<VaultItem.ID> = [a.id, b.id, c.id]
+
+        XCTAssertEqual(VaultDuplicates.groupsWithEveryCopy(of: chosen, in: groups).map(\.id), [groups[0].id])
+        XCTAssertEqual(VaultDuplicates.chosenCopies(chosen, in: groups).map(\.name), ["a.jpg", "b.jpg", "c.jpg"])
+    }
+
     @MainActor
     func testOpeningDuplicatesClearsTheSelection() {
         let model = VaultModel(location: VaultLocation(folder: root.appendingPathComponent("unused")), watchesSystem: false)
