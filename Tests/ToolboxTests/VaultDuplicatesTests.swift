@@ -153,6 +153,17 @@ final class VaultDuplicatesTests: XCTestCase {
         XCTAssertTrue(model.selection.isEmpty)
     }
 
+    @MainActor
+    func testLeavingDuplicatesClearsTheSelection() {
+        let model = VaultModel(location: VaultLocation(folder: root.appendingPathComponent("unused")), watchesSystem: false)
+        model.mode = .duplicates
+        model.selection = ["/vault/extra copy.jpg"]
+
+        model.mode = .library
+
+        XCTAssertTrue(model.selection.isEmpty, "Copies picked for the vault Trash must not carry over to permanent delete")
+    }
+
     private func write(_ text: String, to name: String) throws {
         try Data(text.utf8).write(to: root.appendingPathComponent(name))
     }

@@ -48,7 +48,10 @@ struct VaultLibraryView: View {
             Text("They're deleted for good, not moved to the Trash. This can't be undone.")
         }
         .confirmationDialog(trashTitle, isPresented: trashDialogShown, titleVisibility: .visible) {
-            Button("Move to Trash", role: .destructive) { Task { await vault.trashChosenCopies() } }
+            Button("Move to Trash", role: .destructive) {
+                let ids = confirmingTrash
+                Task { await vault.trashChosenCopies(ids) }
+            }
         } message: {
             Text("They go to the vault's own Trash, where they stay encrypted. You can put them back or empty it from the Duplicates view.")
         }

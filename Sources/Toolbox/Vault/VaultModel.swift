@@ -58,10 +58,8 @@ final class VaultModel {
     var mode: Mode = .library {
         didSet {
             guard mode != oldValue else { return }
-            if mode == .duplicates {
-                selection = []
-                findDuplicates()
-            }
+            selection = []
+            if mode == .duplicates { findDuplicates() }
             keepOnlyVisibleItemsChosen()
         }
     }
@@ -660,9 +658,8 @@ extension VaultModel {
         await moveToTrash(VaultDuplicates.others(than: keeper, in: group))
     }
 
-    func trashChosenCopies() async {
+    func trashChosenCopies(_ chosen: Set<VaultItem.ID>) async {
         guard moveTask == nil, let groups = visibleDuplicateGroups else { return }
-        let chosen = selection
         guard VaultDuplicates.groupsWithEveryCopy(of: chosen, in: groups).isEmpty else {
             message = "Leave at least one copy of each set unselected."
             return
