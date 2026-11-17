@@ -25,4 +25,30 @@ final class MainWindowReopenerTests: XCTestCase {
     func testMinimizedMainWindowCounts() {
         XCTAssertTrue(WindowPresence.hasMainWindow([WindowPresence(canBecomeMain: false, isVisible: false, isMinimized: true)]))
     }
+
+    func testNothingIsInFlightBeforeAnOpen() {
+        XCTAssertFalse(PendingWindowOpen().isInFlight(at: Date()))
+    }
+
+    func testASecondReopenRightAfterTheFirstIsIgnored() {
+        var pending = PendingWindowOpen()
+        let start = Date()
+        pending.begin(at: start)
+        XCTAssertTrue(pending.isInFlight(at: start.addingTimeInterval(0.3)))
+    }
+
+    func testTheWindowAppearingEndsTheOpen() {
+        var pending = PendingWindowOpen()
+        let start = Date()
+        pending.begin(at: start)
+        pending.finish()
+        XCTAssertFalse(pending.isInFlight(at: start.addingTimeInterval(0.3)))
+    }
+
+    func testAnOpenThatNeverAppearsStopsBlockingAfterTheTimeout() {
+        var pending = PendingWindowOpen()
+        let start = Date()
+        pending.begin(at: start)
+        XCTAssertFalse(pending.isInFlight(at: start.addingTimeInterval(PendingWindowOpen.timeout)))
+    }
 }
