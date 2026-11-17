@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct ToolboxApp: App {
+    @NSApplicationDelegateAdaptor(MainWindowReopener.self) private var reopener
     @State private var state = AppState()
     @State private var vault = VaultModel(location: .launch())
 
@@ -13,12 +14,13 @@ struct ToolboxApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: MainWindowReopener.windowID) {
             RootView()
                 .environment(state)
                 .environment(vault)
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(state.isDark ? .dark : .light)
+                .registersMainWindowOpener(reopener)
                 .onAppear {
                     MacLaunchHooks.run()
                     NSApplication.shared.setActivationPolicy(.regular)
