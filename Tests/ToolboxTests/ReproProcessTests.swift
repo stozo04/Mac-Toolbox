@@ -230,13 +230,10 @@ final class ReproStaleResultTests: XCTestCase {
             let model = try makeColorPicker()
             model.loadPalette(from: [images.big])
             model.loadPalette(from: [images.small])
-            let newerShown = await waitOnMainUntil(seconds: 30) { model.paletteName == "small.png" }
-            if !newerShown {
-                XCTAssertEqual(model.paletteName, "big.jpg", "neither image arrived")
-                replaced += 1
-                continue
-            }
-            if await waitOnMainUntil(seconds: images.bigReadSeconds * 4 + 1, { model.paletteName == "big.jpg" }) { replaced += 1 }
+            let anyShown = await waitOnMainUntil(seconds: 30) { model.paletteName != nil }
+            XCTAssertTrue(anyShown, "neither image arrived")
+            try await Task.sleep(for: .seconds(images.bigReadSeconds * 4 + 1))
+            if model.paletteName == "big.jpg" { replaced += 1 }
         }
         XCTAssertEqual(replaced, 0, "the older image ended up shown in \(replaced) of \(rounds) rounds (reading it takes \(images.bigReadSeconds) s)")
     }
