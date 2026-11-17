@@ -216,6 +216,32 @@ final class ConvertImagesTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted(), ["one.webp", "two.webp"])
     }
 
+    @MainActor func testClearDuringARunLetsANewBatchFinishOnItsOwn() async throws {
+        let first = try (1...2).map { try makeNoisyImage(name: "First \($0)", side: 1200) }
+        let second = try (1...4).map { try makeNoisyImage(name: "Second \($0)", side: 1200) }
+        let model = ConvertImagesModel()
+        model.settings.format = .webp
+        model.add(first)
+        model.convert()
+        for _ in 0..<400 where model.items.first?.status != .converting { try await Task.sleep(for: .milliseconds(5)) }
+
+        model.clear()
+        XCTAssertFalse(model.isRunning)
+        model.add(second)
+        model.convert()
+        for _ in 0..<1000 where model.isRunning {
+            try await Task.sleep(for: .milliseconds(10))
+            model.convert()
+        }
+        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
+
+        XCTAssertEqual(model.items.count, second.count)
+        XCTAssertEqual(model.doneCount, second.count, "every image of the new batch finished before the queue went idle")
+        let folder = try XCTUnwrap(model.folder)
+        let written = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("Second") }.sorted()
+        XCTAssertEqual(written, (1...4).map { "Second \($0).webp" }, "one output per image")
+    }
+
     // MARK: Helpers
 
     private struct RGBA: Equatable { var r, g, b, a: Int }
@@ -263,14 +289,14 @@ final class ConvertImagesTests: XCTestCase {
     }
 
     /// Photographic-looking noise that compresses differently at different qualities.
-    private func makeNoisyImage(name: String) throws -> URL {
-        var bytes = [UInt8](repeating: 255, count: 96 * 96 * 4)
+    private func makeNoisyImage(name: String, side: Int = 96) throws -> URL {
+        var bytes = [UInt8](repeating: 255, count: side * side * 4)
         var seed: UInt32 = 12345
         for i in stride(from: 0, to: bytes.count, by: 4) {
             for c in 0..<3 { seed = seed &* 1664525 &+ 1013904223; bytes[i + c] = UInt8(truncatingIfNeeded: seed >> 24) }
         }
         let provider = CGDataProvider(data: Data(bytes) as CFData)!
-        let image = CGImage(width: 96, height: 96, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 384, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        let image = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider, decode: nil,
                             shouldInterpolate: false, intent: .defaultIntent)!
         let url = dir.appendingPathComponent("\(name).png")

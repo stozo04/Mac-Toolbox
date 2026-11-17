@@ -113,6 +113,38 @@ final class MuteVideoTests: XCTestCase {
         XCTAssertFalse(model.hasPending)
     }
 
+    @MainActor func testClearDuringARunLetsANewBatchFinishOnItsOwn() async throws {
+        let first = (1...3).map { dir.appendingPathComponent("First \($0).mov") }
+        let second = (1...4).map { dir.appendingPathComponent("Second \($0).mov") }
+        for url in first + second { try await makeVideoWithSound(at: url) }
+        let model = MuteVideoModel()
+        model.add(first)
+        model.mute()
+        for _ in 0..<400 where !isMuting(model.items.first?.status) { try await Task.sleep(for: .milliseconds(5)) }
+
+        model.clear()
+        XCTAssertFalse(model.isRunning)
+        model.add(second)
+        model.mute()
+        for _ in 0..<400 where model.isRunning {
+            try await Task.sleep(for: .milliseconds(10))
+            model.mute()
+        }
+        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
+
+        XCTAssertEqual(model.items.count, second.count)
+        let names = model.results.map(\.url.lastPathComponent).sorted()
+        XCTAssertEqual(names.count, second.count, "every video of the new batch finished before the queue went idle")
+        XCTAssertTrue(names.allSatisfy { $0.hasPrefix("Second") }, "\(names)")
+        let folder = try XCTUnwrap(model.folder)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted(), names,
+                       "one output per video, none from a second run racing for the same name")
+    }
+
+    private func isMuting(_ status: MuteVideoModel.Status?) -> Bool {
+        if case .muting = status { true } else { false }
+    }
+
     // MARK: Helpers
 
     private func codec(of url: URL) async throws -> UInt32 {

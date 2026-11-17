@@ -33,6 +33,7 @@ final class VideoToGifModel {
     var lengthText = "0:05.00"
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -71,6 +72,7 @@ final class VideoToGifModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -90,10 +92,12 @@ final class VideoToGifModel {
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox GIFs")
         self.folder = folder
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for id in items.filter({ $0.status == .waiting }).map(\.id) {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(id, .converting(0))
                 guard let url = items.first(where: { $0.id == id })?.url else { continue }
                 do {
@@ -110,6 +114,7 @@ final class VideoToGifModel {
                     Log.error("GIF failed", category: "gif", Log.details(error, file: url))
                 }
             }
+            guard runID == run else { return }
             isRunning = false
         }
     }
