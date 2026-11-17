@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Combine
 import Observation
 
 @MainActor @Observable
@@ -70,7 +71,10 @@ final class TrimAudioModel {
                 self.track = track
                 self.info = info
                 selection = TrimSelection(duration: info.duration)
-                player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+                let item = AVPlayerItem(asset: asset)
+                player.replaceCurrentItem(with: item)
+                try await Self.waitUntilReady(item)
+                guard !Task.isCancelled, file == url else { return }
                 applyFadePreview()
                 isLoading = false
                 loadWaveform(url, duration: info.duration)
@@ -87,6 +91,18 @@ final class TrimAudioModel {
     }
 
     func close() { reset() }
+
+    var isReadyToPlay: Bool { player.currentItem?.status == .readyToPlay }
+
+    private static func waitUntilReady(_ item: AVPlayerItem) async throws {
+        for await status in item.publisher(for: \.status).values {
+            switch status {
+            case .readyToPlay: return
+            case .failed: throw item.error ?? TrimAudioError.notAudio
+            default: continue
+            }
+        }
+    }
 
     private func reset() {
         saveTask?.cancel()
@@ -205,6 +221,7 @@ final class TrimAudioModel {
     }
 
     func playSelection() {
+        guard isReadyToPlay else { return }
         let start = selection.start
         playhead = start
         playingSelection = false

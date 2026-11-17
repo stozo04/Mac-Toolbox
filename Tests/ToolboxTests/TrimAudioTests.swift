@@ -245,7 +245,17 @@ final class TrimAudioTests: XCTestCase {
 
         XCTAssertEqual(model.file, second)
         XCTAssertEqual(model.selection.duration, 2, accuracy: 0.01)
+        XCTAssertTrue(model.isReadyToPlay, "the editor only shows once the player can seek")
+        model.playSelection()
         model.close()
+    }
+
+    @MainActor
+    func testPlaySelectionBeforeTheFileIsReadyDoesNothing() {
+        let model = TrimAudioModel()
+        XCTAssertFalse(model.isReadyToPlay)
+        model.playSelection()
+        XCTAssertFalse(model.isPlaying)
     }
 
     func testMissingEncoderIsReported() async throws {
