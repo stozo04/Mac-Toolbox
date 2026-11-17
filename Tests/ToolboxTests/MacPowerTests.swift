@@ -31,8 +31,33 @@ final class RefusingPreventer: SleepPreventer {
 }
 
 final class PowerAssertionsLiveTests: XCTestCase {
+    private static let listingTimeout: Duration = .seconds(3)
+    private static let listingPoll: Duration = .milliseconds(100)
+
     private func assertions() async throws -> String {
         try await Shell.run("/usr/bin/pmset", ["-g", "assertions"]).out
+    }
+
+    private func lines(naming reason: String, expected: Int) async throws -> [Substring] {
+        let deadline = ContinuousClock.now + Self.listingTimeout
+        var found: [Substring] = []
+        repeat {
+            found = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
+            if found.count >= expected { return found }
+            try await Task.sleep(for: Self.listingPoll)
+        } while ContinuousClock.now < deadline
+        return found
+    }
+
+    private func assertions(withoutListing reason: String) async throws -> String {
+        let deadline = ContinuousClock.now + Self.listingTimeout
+        var listing = ""
+        repeat {
+            listing = try await assertions()
+            if !listing.contains(reason) { return listing }
+            try await Task.sleep(for: Self.listingPoll)
+        } while ContinuousClock.now < deadline
+        return listing
     }
 
     /// The real IOKit assertions appear in `pmset -g assertions` while held and are gone after release.
@@ -40,12 +65,11 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let reason = "Toolbox Keep Awake \(UUID().uuidString.prefix(8))"
         let held = PowerAssertions()
         held.hold(keepDisplayOn: true, reason: reason)
-        let during = try await assertions()
-        XCTAssertTrue(during.contains(reason), "assertion should be listed while held")
-        XCTAssertTrue(during.contains("PreventUserIdleSystemSleep"))
-        XCTAssertTrue(during.contains("PreventUserIdleDisplaySleep"))
+        let during = try await lines(naming: reason, expected: 2).joined(separator: "\n")
+        XCTAssertTrue(during.contains("PreventUserIdleSystemSleep"), "system-sleep assertion should be listed while held")
+        XCTAssertTrue(during.contains("PreventUserIdleDisplaySleep"), "display-sleep assertion should be listed while held")
         held.release()
-        let after = try await assertions()
+        let after = try await assertions(withoutListing: reason)
         XCTAssertFalse(after.contains(reason), "assertion should be gone after release")
         XCTAssertFalse(held.isHeld)
     }
@@ -58,9 +82,10 @@ final class PowerAssertionsLiveTests: XCTestCase {
         held.hold(keepDisplayOn: true, reason: reason)
         held.hold(keepDisplayOn: false, reason: reason)
         defer { held.release() }
-        let lines = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
-        XCTAssertEqual(lines.count, 1, "one system-sleep assertion, the display one dropped")
-        XCTAssertTrue(lines[0].contains("PreventUserIdleSystemSleep"))
+        let listed = try await lines(naming: reason, expected: 1)
+        XCTAssertEqual(listed.count, 1, "one system-sleep assertion, the display one dropped")
+        let line = try XCTUnwrap(listed.first, "the assertion never showed up in pmset")
+        XCTAssertTrue(line.contains("PreventUserIdleSystemSleep"))
     }
 
     func testDisplayAssertionIsOptional() async throws {
@@ -68,9 +93,10 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let held = PowerAssertions()
         held.hold(keepDisplayOn: false, reason: reason)
         defer { held.release() }
-        let lines = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
-        XCTAssertEqual(lines.count, 1, "only the system-sleep assertion, so the screen may still turn off")
-        XCTAssertTrue(lines[0].contains("PreventUserIdleSystemSleep"))
+        let listed = try await lines(naming: reason, expected: 1)
+        XCTAssertEqual(listed.count, 1, "only the system-sleep assertion, so the screen may still turn off")
+        let line = try XCTUnwrap(listed.first, "the assertion never showed up in pmset")
+        XCTAssertTrue(line.contains("PreventUserIdleSystemSleep"))
     }
 }
 
