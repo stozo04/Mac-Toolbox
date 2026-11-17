@@ -17,7 +17,8 @@ enum Shell {
     }
 
     /// Cancelling the calling task stops the program.
-    static func run(_ path: String, _ arguments: [String] = [], input: Data? = nil, timeout: TimeInterval? = nil) async throws -> Result {
+    static func run(_ path: String, _ arguments: [String] = [], input: Data? = nil, timeout: TimeInterval? = nil,
+                    onOutput: (@Sendable (String) -> Void)? = nil) async throws -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -31,7 +32,11 @@ enum Shell {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Result, Error>) in
                 let outData = DataCollector(), errData = DataCollector()
-                out.fileHandleForReading.readabilityHandler = { outData.append($0.availableData) }
+                out.fileHandleForReading.readabilityHandler = { handle in
+                    let chunk = handle.availableData
+                    outData.append(chunk)
+                    onOutput?(String(bytes: chunk, encoding: .utf8) ?? "")
+                }
                 err.fileHandleForReading.readabilityHandler = { errData.append($0.availableData) }
                 process.terminationHandler = { p in
                     out.fileHandleForReading.readabilityHandler = nil
