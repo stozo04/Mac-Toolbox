@@ -36,6 +36,7 @@ final class BeautifyScreenshotModel {
 
     private var loader: Task<Void, Never>?
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -72,6 +73,7 @@ final class BeautifyScreenshotModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         selectedID = nil
         folder = nil
@@ -107,9 +109,11 @@ final class BeautifyScreenshotModel {
         self.folder = folder
         let settings = self.settings
         let work = items.filter { $0.status == .waiting }.map { (id: $0.id, url: $0.url) }
+        let run = UUID()
+        runID = run
         task = Task {
             for job in work {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(job.id, .framing)
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<BeautifyResult, Error> in
                     Result { try BeautifyScreenshot.save(source: job.url, settings: settings, into: folder) }
@@ -123,6 +127,7 @@ final class BeautifyScreenshotModel {
                     Log.error("Screenshot framing failed", category: "beautify-screenshot", Log.details(error, file: job.url))
                 }
             }
+            guard runID == run else { return }
             for i in items.indices where items[i].status == .framing { items[i].status = .waiting }
             isRunning = false
         }

@@ -34,6 +34,7 @@ final class RemoveMetadataModel {
     var settings = StripSettings()
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -76,6 +77,7 @@ final class RemoveMetadataModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -91,10 +93,12 @@ final class RemoveMetadataModel {
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Clean Photos")
         self.folder = folder
         let settings = self.settings
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for item in items where item.status == .waiting {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(item.id, .working)
                 // Decoding and encoding can be heavy; keep them off the main thread.
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<StripResult, Error> in
@@ -109,6 +113,7 @@ final class RemoveMetadataModel {
                     Log.error("Metadata removal failed", category: "remove-metadata", Log.details(error, file: item.url))
                 }
             }
+            guard runID == run else { return }
             for i in items.indices where items[i].status == .working { items[i].status = .waiting }
             isRunning = false
         }

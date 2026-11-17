@@ -45,6 +45,7 @@ final class BlurFacesModel {
 
     private var detector: Task<Void, Never>?
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .ready } }
@@ -84,6 +85,7 @@ final class BlurFacesModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         selectedID = nil
         folder = nil
@@ -137,9 +139,11 @@ final class BlurFacesModel {
         self.folder = folder
         let settings = self.settings
         let work = items.filter { $0.status == .ready }.map { (id: $0.id, url: $0.url, boxes: $0.includedBoxes) }
+        let run = UUID()
+        runID = run
         task = Task {
             for job in work {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(job.id, .blurring)
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<FaceBlurResult, Error> in
                     Result { try FaceBlur.save(source: job.url, faces: job.boxes, settings: settings, into: folder) }
@@ -153,6 +157,7 @@ final class BlurFacesModel {
                     Log.error("Face blur failed", category: "blur-faces", Log.details(error, file: job.url, ["style": settings.style.rawValue]))
                 }
             }
+            guard runID == run else { return }
             for i in items.indices where items[i].status == .blurring { items[i].status = .ready }
             isRunning = false
         }

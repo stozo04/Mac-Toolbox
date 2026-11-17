@@ -26,6 +26,7 @@ final class MuteVideoModel {
     private(set) var notice: String?
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -55,6 +56,7 @@ final class MuteVideoModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -69,10 +71,12 @@ final class MuteVideoModel {
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Muted Videos")
         self.folder = folder
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for id in items.filter({ $0.status == .waiting }).map(\.id) {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(id, .muting(0))
                 guard let url = items.first(where: { $0.id == id })?.url else { continue }
                 do {
@@ -93,6 +97,7 @@ final class MuteVideoModel {
                     Log.error("Mute failed", category: "mute", Log.details(error, file: url))
                 }
             }
+            guard runID == run else { return }
             isRunning = false
         }
     }

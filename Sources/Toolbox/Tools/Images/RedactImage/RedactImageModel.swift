@@ -62,6 +62,7 @@ final class RedactImageModel {
     var scope = Scope.thisImage
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
     private var thumbnailer: Task<Void, Never>?
 
     var hasItems: Bool { !items.isEmpty }
@@ -102,6 +103,7 @@ final class RedactImageModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         selectedID = nil
         selectedRegionID = nil
@@ -193,10 +195,12 @@ final class RedactImageModel {
         guard !targets.isEmpty else { return }
         finding = kind
         findMessage = nil
+        let run = UUID()
+        runID = run
         task = Task {
             var added = 0, images = 0, failed = 0
             for target in targets {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 let url = target.url
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<[CGRect], Error> in
                     Result { try RedactImage.find(kind, in: url) }
@@ -211,6 +215,7 @@ final class RedactImageModel {
                     Log.error("Find failed", category: "redact-image", Log.details(error, file: url, ["kind": kind.rawValue]))
                 }
             }
+            guard runID == run else { return }
             Log.info("Regions found", category: "redact-image", ["kind": kind.rawValue, "found": "\(added)", "images": "\(targets.count)"])
             if !Task.isCancelled { findMessage = summary(kind, added: added, images: images, of: targets.count, failed: failed) }
             finding = nil
@@ -246,9 +251,11 @@ final class RedactImageModel {
         self.folder = folder
         let settings = self.settings
         let work = items.filter(\.isExportable).map { (id: $0.id, url: $0.url, rects: $0.rects) }
+        let run = UUID()
+        runID = run
         task = Task {
             for job in work {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(job.id, .working)
                 // Decoding and encoding are heavy; keep them off the main thread.
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<RedactResult, Error> in
@@ -264,6 +271,7 @@ final class RedactImageModel {
                     Log.error("Redaction failed", category: "redact-image", Log.details(error, file: job.url, ["style": settings.style.rawValue]))
                 }
             }
+            guard runID == run else { return }
             for i in items.indices where items[i].status == .working { items[i].status = .ready }
             isRunning = false
         }

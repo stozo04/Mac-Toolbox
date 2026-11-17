@@ -37,6 +37,7 @@ final class RotateImagesModel {
     /// The selected photo before any change.
     private var basePreview: CGImage?
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -74,6 +75,7 @@ final class RotateImagesModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -126,10 +128,12 @@ final class RotateImagesModel {
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Rotated Images")
         self.folder = folder
         let settings = self.settings
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for item in items where item.status == .waiting {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(item.id, .rotating)
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<RotateResult, Error> in
                     Result { try ImageRotator.rotate(source: item.url, settings: settings, into: folder) }
@@ -143,6 +147,7 @@ final class RotateImagesModel {
                     Log.error("Image rotation failed", category: "rotate-images", Log.details(error, file: item.url))
                 }
             }
+            guard runID == run else { return }
             for i in items.indices where items[i].status == .rotating { items[i].status = .waiting }
             isRunning = false
         }

@@ -32,6 +32,7 @@ final class ConvertImagesModel {
     var settings = ConvertSettings()
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
     var hasPending: Bool { items.contains { $0.status == .waiting } }
@@ -62,6 +63,7 @@ final class ConvertImagesModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -77,10 +79,12 @@ final class ConvertImagesModel {
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Converted Images")
         self.folder = folder
         let settings = self.settings
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for item in items where item.status == .waiting {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(item.id, .converting)
                 // Decoding and encoding are heavy; keep them off the main thread.
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<ConvertResult, Error> in
@@ -95,6 +99,7 @@ final class ConvertImagesModel {
                     Log.error("Image conversion failed", category: "convert-images", Log.details(error, file: item.url, ["to": settings.format.ext]))
                 }
             }
+            guard runID == run else { return }
             for i in items.indices where items[i].status == .converting { items[i].status = .waiting }
             isRunning = false
         }

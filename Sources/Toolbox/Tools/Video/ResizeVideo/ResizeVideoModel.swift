@@ -40,6 +40,7 @@ final class ResizeVideoModel {
     var codec = ResizeCodec.h264
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
     /// Set while width and height change together, so a half-finished change can't match a preset.
     private var editingBoth = false
 
@@ -85,6 +86,7 @@ final class ResizeVideoModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -100,10 +102,12 @@ final class ResizeVideoModel {
         let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Videos")
         self.folder = folder
         let settings = self.settings
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for id in items.filter({ $0.status == .waiting }).map(\.id) {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 update(id, .converting(0))
                 guard let url = items.first(where: { $0.id == id })?.url else { continue }
                 do {
@@ -120,6 +124,7 @@ final class ResizeVideoModel {
                     Log.error("Resize failed", category: "resize", Log.details(error, file: url))
                 }
             }
+            guard runID == run else { return }
             isRunning = false
         }
     }

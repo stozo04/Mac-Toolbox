@@ -40,6 +40,7 @@ final class BurnInSubtitlesModel {
     var style = CaptionStyle()
 
     private var task: Task<Void, Never>?
+    private var runID = UUID()
 
     var hasItems: Bool { !items.isEmpty }
 
@@ -86,6 +87,7 @@ final class BurnInSubtitlesModel {
 
     func clear() {
         task?.cancel()
+        runID = UUID()
         items = []
         folder = nil
         notice = nil
@@ -122,10 +124,12 @@ final class BurnInSubtitlesModel {
         self.folder = folder
         let (source, style, save) = (self.source, self.style, alsoSaveSubtitles)
         let locale = Locale(identifier: languageID)
+        let run = UUID()
+        runID = run
         task = Task { [weak self] in
             guard let self else { return }
             for item in items where isReady(item) {
-                if Task.isCancelled { break }
+                if Task.isCancelled || runID != run { break }
                 let id = item.id
                 do {
                     let cues: [SubtitleCue]
@@ -154,6 +158,7 @@ final class BurnInSubtitlesModel {
                     Log.error("Burn in failed", category: "burn-in", Log.details(error, file: item.url))
                 }
             }
+            guard runID == run else { return }
             isRunning = false
         }
     }
