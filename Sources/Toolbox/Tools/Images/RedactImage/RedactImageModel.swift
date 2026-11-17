@@ -49,6 +49,10 @@ final class RedactImageModel {
         var id: String { rawValue }
     }
 
+    private let outputParent: URL?
+
+    init(outputParent: URL? = nil) { self.outputParent = outputParent }
+
     private(set) var items: [Item] = []
     private(set) var isRunning = false
     private(set) var finding: RedactFind?
@@ -80,8 +84,14 @@ final class RedactImageModel {
     }
 
     func chooseStyle(_ style: RedactStyle) {
-        settings.style = style
+        apply(style)
         styleWasChosen = true
+    }
+
+    private func apply(_ style: RedactStyle) {
+        guard settings.style != style else { return }
+        settings.style = style
+        for i in items.indices where !items[i].regions.isEmpty { reopen(i) }
     }
 
     // MARK: Queue
@@ -236,15 +246,20 @@ final class RedactImageModel {
     private func merge(_ boxes: [CGRect], into id: UUID, areText: Bool) -> Int {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return 0 }
         var added = 0
-        for box in boxes where !items[i].regions.contains(where: { RedactImage.overlaps($0.rect, box) }) {
-            items[i].regions.append(Region(rect: box, coversFoundText: areText))
-            added += 1
+        var coversFoundText = false
+        for box in boxes {
+            let covering = items[i].regions.indices.filter { RedactImage.overlaps(items[i].regions[$0].rect, box) }
+            if covering.isEmpty {
+                items[i].regions.append(Region(rect: box, coversFoundText: areText))
+                added += 1
+            } else if areText {
+                for index in covering { items[i].regions[index].coversFoundText = true }
+            }
+            coversFoundText = coversFoundText || areText
         }
-        if added > 0 {
-            reopen(i)
-            // Blurred or pixelated text and faces can sometimes be made out again; a black box cannot.
-            if !styleWasChosen { settings.style = .blackBox }
-        }
+        if added > 0 { reopen(i) }
+        // Blurred or pixelated text can sometimes be made out again; a black box cannot.
+        if (added > 0 || coversFoundText), !styleWasChosen { apply(.blackBox) }
         return added
     }
 
@@ -261,7 +276,7 @@ final class RedactImageModel {
     func export() {
         guard !isBusy, hasExportable else { return }
         let folder: URL
-        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images") } catch {
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images", in: outputParent) } catch {
             notice = error.localizedDescription
             Log.error("Output folder failed", category: "redact-image", Log.details(error))
             return

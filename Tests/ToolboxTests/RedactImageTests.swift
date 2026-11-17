@@ -254,6 +254,45 @@ final class RedactImageTests: XCTestCase {
 
     // MARK: Style
 
+    @MainActor func testTextUnderARegionDrawnByHandCountsAsFoundText() async throws {
+        let model = RedactImageModel()
+        model.add([try writeTextPage(named: "page.png")])
+        model.chooseStyle(.blur)
+        _ = model.addRegion(CGRect(x: 0, y: 0, width: 1, height: 1))
+
+        model.find(.text)
+        try await waitUntilFound(model)
+
+        XCTAssertEqual(model.selected?.regions.count, 1, "the text was already covered, so nothing is added")
+        XCTAssertEqual(model.selected?.regions.filter(\.coversFoundText).count, 1)
+        XCTAssertTrue(model.needsRecoverableTextCaution, "a blurred region drawn by hand over text is just as recoverable")
+    }
+
+    @MainActor func testTextUnderARegionDrawnByHandSwitchesAnUnchosenStyleToBlackBox() async throws {
+        let model = RedactImageModel()
+        model.add([try writeTextPage(named: "page.png")])
+        _ = model.addRegion(CGRect(x: 0, y: 0, width: 1, height: 1))
+
+        model.find(.text)
+        try await waitUntilFound(model)
+
+        XCTAssertEqual(model.settings.style, .blackBox)
+    }
+
+    @MainActor func testChangingTheStyleAfterSavingMakesTheImageExportAgain() async throws {
+        let model = RedactImageModel(outputParent: dir)
+        model.add([try writeTextPage(named: "page.png")])
+        _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+        model.export()
+        for _ in 0..<400 where model.isRunning { try await Task.sleep(nanoseconds: 25_000_000) }
+        XCTAssertEqual(model.doneCount, 1)
+
+        model.chooseStyle(.blackBox)
+
+        XCTAssertEqual(model.doneCount, 0, "the saved copy no longer matches what the preview shows")
+        XCTAssertTrue(model.hasExportable)
+    }
+
     @MainActor func testFindAndCoverSwitchesToBlackBoxUntilAStyleIsChosen() async throws {
         let model = RedactImageModel()
         model.add([try writeTextPage(named: "page.png")])
