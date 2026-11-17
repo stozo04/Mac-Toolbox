@@ -16,40 +16,6 @@ final class ReproRedactionTests: XCTestCase {
 
     private let anyBox = CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.1)
 
-    func testR1ExportToAHardLinkOfTheOriginalIsRefused() throws {
-        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
-        let link = dir.appendingPathComponent("link.pdf")
-        try FileManager.default.linkItem(at: source, to: link)
-        XCTAssertEqual(try inode(source), try inode(link), "precondition: the link and the original are one file")
-
-        XCTAssertThrowsError(try RedactPDF.export(source: source, regions: [0: [anyBox]], keepSearchable: false, to: link),
-                             "finding: a hard link to the original was accepted as the destination") { error in
-            XCTAssertEqual(error as? RedactPDFError, .wouldOverwrite)
-        }
-    }
-
-    func testR1ExportToAHardLinkLeavesTheOriginalsBytesAlone() throws {
-        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
-        let link = dir.appendingPathComponent("link.pdf")
-        try FileManager.default.linkItem(at: source, to: link)
-        let before = try Data(contentsOf: source)
-
-        _ = try? RedactPDF.export(source: source, regions: [0: [anyBox]], keepSearchable: false, to: link)
-
-        XCTAssertEqual(try Data(contentsOf: source), before, "finding: the original's bytes changed")
-    }
-
-    func testR1ExportToAHardLinkLeavesTheLinkedNameAlone() throws {
-        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
-        let link = dir.appendingPathComponent("link.pdf")
-        try FileManager.default.linkItem(at: source, to: link)
-        let before = try Data(contentsOf: source)
-
-        _ = try? RedactPDF.export(source: source, regions: [0: [anyBox]], keepSearchable: false, to: link)
-
-        XCTAssertEqual(try Data(contentsOf: link), before, "finding: the user's other name for the original now holds different bytes")
-    }
-
     func testR2aAScannedPageWithAStampedPageNumberIsStillRead() throws {
         let plain = try RedactPDF.open(try makeScannedPDF(text: "Appleseed", size: 64, stamp: nil))
         let plainFind = RedactPDF.find("Appleseed", in: plain)
@@ -174,11 +140,6 @@ final class ReproRedactionTests: XCTestCase {
     private struct Line {
         let text: String, x: CGFloat, y: CGFloat, size: CGFloat
         init(_ text: String, x: CGFloat, y: CGFloat, size: CGFloat) { (self.text, self.x, self.y, self.size) = (text, x, y, size) }
-    }
-
-    private func inode(_ url: URL) throws -> UInt64 {
-        let number = try XCTUnwrap(try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? NSNumber)
-        return number.uint64Value
     }
 
     private func darkPixels(_ image: CGImage, rows: Range<Int>) throws -> Int {

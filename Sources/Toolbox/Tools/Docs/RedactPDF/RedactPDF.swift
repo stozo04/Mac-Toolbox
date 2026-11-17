@@ -182,7 +182,7 @@ enum RedactPDF {
     /// so the original's title, author, outline and other details are not carried over. The original is never touched.
     static func export(source: URL, regions: [Int: [CGRect]], keepSearchable: Bool, to destination: URL,
                        progress: (Int) -> Void = { _ in }) throws -> RedactPDFResult {
-        guard BatchFiles.identity(source) != BatchFiles.identity(destination) else { throw RedactPDFError.wouldOverwrite }
+        guard !BatchFiles.isSameFile(source, destination) else { throw RedactPDFError.wouldOverwrite }
         let input = try open(source)
         let covered = regions.filter { $0.key >= 0 && $0.key < input.pageCount && !$0.value.isEmpty }
         guard !covered.isEmpty else { throw RedactPDFError.nothingToRedact }

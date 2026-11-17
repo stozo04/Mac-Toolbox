@@ -6,6 +6,16 @@ enum BatchFiles {
     /// A file's identity for spotting the same file added twice: /tmp and /private/tmp, or a link and its target, are one file.
     static func identity(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
 
+    static func isSameFile(_ first: URL, _ second: URL) -> Bool {
+        if identity(first) == identity(second) { return true }
+        guard let one = fileResourceIdentifier(of: first), let other = fileResourceIdentifier(of: second) else { return false }
+        return one.isEqual(other)
+    }
+
+    private static func fileResourceIdentifier(of url: URL) -> NSObjectProtocol? {
+        try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
+    }
+
     /// The videos at `url`: the file itself, or every video inside a folder (hidden files skipped).
     static func videos(in url: URL) -> [URL] {
         let isVideo = { (u: URL) in (try? u.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .movie) ?? false }

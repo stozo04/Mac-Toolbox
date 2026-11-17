@@ -155,6 +155,33 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: source), before)
     }
 
+    func testAnotherNameForTheOriginalIsRefusedAsTheDestination() throws {
+        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
+        let before = try Data(contentsOf: source)
+        let hardLink = dir.appendingPathComponent("hard-link.pdf")
+        try FileManager.default.linkItem(at: source, to: hardLink)
+        let symbolicLink = dir.appendingPathComponent("symbolic-link.pdf")
+        try FileManager.default.createSymbolicLink(at: symbolicLink, withDestinationURL: source)
+
+        for destination in [hardLink, symbolicLink] {
+            XCTAssertTrue(BatchFiles.isSameFile(source, destination), destination.lastPathComponent)
+            XCTAssertThrowsError(try RedactPDF.export(source: source, regions: [0: [CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.1)]],
+                                                      keepSearchable: false, to: destination), destination.lastPathComponent) { error in
+                XCTAssertEqual(error as? RedactPDFError, .wouldOverwrite)
+            }
+            XCTAssertEqual(try Data(contentsOf: source), before, "the original changed through \(destination.lastPathComponent)")
+            XCTAssertEqual(try Data(contentsOf: destination), before, "\(destination.lastPathComponent) no longer holds the original")
+        }
+    }
+
+    func testDifferentFilesWithTheSameBytesAreNotTheSameFile() throws {
+        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
+        let twin = dir.appendingPathComponent("twin.pdf")
+        try FileManager.default.copyItem(at: source, to: twin)
+        XCTAssertFalse(BatchFiles.isSameFile(source, twin))
+        XCTAssertFalse(BatchFiles.isSameFile(source, dir.appendingPathComponent("not-there.pdf")))
+    }
+
     func testExportingReplacesAnExistingCopyAndLeavesNoStrayFiles() throws {
         let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
         let output = dir.appendingPathComponent("out.pdf")
