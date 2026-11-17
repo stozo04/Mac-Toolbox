@@ -39,16 +39,16 @@ final class ResizeVideoTests: XCTestCase {
         XCTAssertNotEqual(l.scaleX, l.scaleY)
     }
 
-    @MainActor func testPresetsAndFieldsStayInSync() {
+    @MainActor func testPresetsAndFieldsStayInSync() throws {
         let m = ResizeVideoModel()
-        m.preset = SizePreset.all.first { $0.name == "720p" }!
+        m.preset = try XCTUnwrap(SizePreset.all.first { $0.name == "720p" })
         XCTAssertEqual([m.width, m.height], [1280, 720])
         m.width = 1000
         XCTAssertEqual(m.preset, .custom)
         m.width = 1280
         XCTAssertEqual(m.preset.name, "720p")
         // Swapping 1080 x 1920 -> 1920 x 1080 must not be disturbed by the in-between 1080 x 1080 (Square).
-        m.preset = SizePreset.all.first { $0.name == "Vertical" }!
+        m.preset = try XCTUnwrap(SizePreset.all.first { $0.name == "Vertical" })
         m.swapSize()
         XCTAssertEqual([m.width, m.height], [1920, 1080])
         XCTAssertEqual(m.preset.name, "1080p")
@@ -89,17 +89,17 @@ final class ResizeVideoTests: XCTestCase {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: out))
         let image = try await generator.image(at: CMTime(seconds: 1.5, preferredTimescale: 600)).image
         XCTAssertEqual([image.width, image.height], [360, 360])
-        XCTAssertLessThan(luma(image, x: 180, y: 10), 12, "top bar should be black")
-        XCTAssertLessThan(luma(image, x: 180, y: 350), 12, "bottom bar should be black")
-        XCTAssertGreaterThan(luma(image, x: 180, y: 180), 60, "picture should fill the middle")
+        XCTAssertLessThan(try luma(image, x: 180, y: 10), 12, "top bar should be black")
+        XCTAssertLessThan(try luma(image, x: 180, y: 350), 12, "bottom bar should be black")
+        XCTAssertGreaterThan(try luma(image, x: 180, y: 180), 60, "picture should fill the middle")
     }
 
-    private func luma(_ image: CGImage, x: Int, y: Int) -> Int {
+    private func luma(_ image: CGImage, x: Int, y: Int) throws -> Int {
         var px = [UInt8](repeating: 0, count: 4)
-        let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let ctx = try XCTUnwrap(CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.draw(image, in: CGRect(x: -x, y: -(image.height - 1 - y), width: image.width, height: image.height))
-        return Int(px[0])
+        return Int(try XCTUnwrap(px.first))
     }
 
     private func fourCharString(_ n: FourCharCode) -> String {
@@ -117,9 +117,9 @@ final class ResizeVideoTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             memset(CVPixelBufferGetBaseAddress(b), Int32(i * 2 % 256), CVPixelBufferGetDataSize(b))

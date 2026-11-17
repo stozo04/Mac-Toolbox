@@ -11,7 +11,7 @@ final class DDCTests: XCTestCase {
     func testSetPacketSplitsTheValueIntoTwoBytes() {
         let p = DDC.setPacket(vcp: 0x62, value: 0x0123)
         XCTAssertEqual(Array(p[0..<5]), [0x84, 0x03, 0x62, 0x01, 0x23])
-        XCTAssertEqual(p[5], DDC.checksum(Array(p[0..<5])))
+        XCTAssertEqual(try p.element(at: 5), DDC.checksum(Array(p[0..<5])))
     }
 
     func testFeatureCodes() {
@@ -52,10 +52,8 @@ final class DDCTests: XCTestCase {
 
 @MainActor
 final class DisplayControlModelTests: XCTestCase {
-    func testRestorePreferenceIsRemembered() {
-        let suite = "toolbox.tests.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        defer { d.removePersistentDomain(forName: suite) }
+    func testRestorePreferenceIsRemembered() throws {
+        let d = try makeScratchDefaults()
         let a = DisplayControlModel(defaults: d)
         XCTAssertFalse(a.restoreOnOpen)
         a.restoreOnOpen = true
@@ -107,7 +105,7 @@ final class DisplayControlModelTests: XCTestCase {
                 let current = try XCTUnwrap(before).current
                 let wrote = await bus.write(control, raw: UInt16(current))
                 XCTAssertTrue(wrote, "\(m.name) \(control)")
-                try await Task.sleep(for: .milliseconds(100))
+                try await pause(for: .milliseconds(100), because: "a monitor needs a moment between a DDC write and the next read")
                 let afterRead = await bus.read(control)
                 let after = try XCTUnwrap(afterRead)
                 XCTAssertEqual(after.current, current, "\(m.name) \(control) must be unchanged")

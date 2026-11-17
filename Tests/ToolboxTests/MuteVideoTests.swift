@@ -34,7 +34,7 @@ final class MuteVideoTests: XCTestCase {
         XCTAssertTrue(audio.isEmpty)
         XCTAssertEqual(video.count, 1)
         let mutedCodec = try await codec(of: result.url)
-        let mutedSize = try await video[0].load(.naturalSize)
+        let mutedSize = try await video.element(at: 0).load(.naturalSize)
         XCTAssertEqual(mutedCodec, originalCodec, "picture is copied, not re-encoded")
         XCTAssertEqual(mutedSize, CGSize(width: 160, height: 90))
         XCTAssertEqual(try Data(contentsOf: source), before, "the original is untouched")
@@ -47,7 +47,7 @@ final class MuteVideoTests: XCTestCase {
         guard case .muted(let result) = try await VideoMuter.mute(source: source, into: dir, progress: { _ in }) else {
             return XCTFail("expected a muted file")
         }
-        let t = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video)[0].load(.preferredTransform)
+        let t = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video).element(at: 0).load(.preferredTransform)
         XCTAssertEqual(MediaInspector.rotation(of: t), 90)
     }
 
@@ -104,7 +104,7 @@ final class MuteVideoTests: XCTestCase {
         XCTAssertEqual(model.items.count, 3, "the same file is not added twice")
 
         model.mute()
-        for _ in 0..<200 where model.isRunning { try await Task.sleep(for: .milliseconds(50)) }
+        try await waitUntil(timeout: .seconds(120), "every video is muted") { !model.isRunning }
         defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         XCTAssertEqual(model.results.count, 2)
@@ -120,15 +120,16 @@ final class MuteVideoTests: XCTestCase {
         let model = MuteVideoModel()
         model.add(first)
         model.mute()
-        for _ in 0..<400 where !isMuting(model.items.first?.status) { try await Task.sleep(for: .milliseconds(5)) }
+        try await waitUntil("the first video is being muted") { isMuting(model.items.first?.status) }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add(second)
         model.mute()
-        for _ in 0..<400 where model.isRunning {
-            try await Task.sleep(for: .milliseconds(10))
+        try await waitUntil(timeout: .seconds(120), "the second batch has finished") {
+            guard model.isRunning else { return true }
             model.mute()
+            return false
         }
         defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
@@ -148,8 +149,8 @@ final class MuteVideoTests: XCTestCase {
     // MARK: Helpers
 
     private func codec(of url: URL) async throws -> UInt32 {
-        let track = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)[0]
-        return try await track.load(.formatDescriptions)[0].mediaSubType.rawValue
+        let track = try await AVURLAsset(url: url).loadTracks(withMediaType: .video).element(at: 0)
+        return try await track.load(.formatDescriptions).element(at: 0).mediaSubType.rawValue
     }
 
     /// Two seconds of picture plus a two second tone, optionally turned or tagged with a location.
@@ -160,8 +161,8 @@ final class MuteVideoTests: XCTestCase {
 
         let composition = AVMutableComposition()
         let pictureAsset = AVURLAsset(url: picture), toneAsset = AVURLAsset(url: tone)  // tracks need their asset kept alive
-        let videoSource = try await pictureAsset.loadTracks(withMediaType: .video)[0]
-        let audioSource = try await toneAsset.loadTracks(withMediaType: .audio)[0]
+        let videoSource = try await pictureAsset.loadTracks(withMediaType: .video).element(at: 0)
+        let audioSource = try await toneAsset.loadTracks(withMediaType: .audio).element(at: 0)
         let v = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
         try v.insertTimeRange(CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)), of: videoSource, at: .zero)
         v.preferredTransform = CGAffineTransform(rotationAngle: rotation)
@@ -189,7 +190,7 @@ final class MuteVideoTests: XCTestCase {
                 AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1])
             let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 88200))
             buffer.frameLength = 88200
-            let samples = try XCTUnwrap(buffer.floatChannelData)[0]
+            let samples = try XCTUnwrap(buffer.floatChannelData).pointee
             for i in 0..<88200 { samples[i] = Float(sin(Double(i) * 0.1) * 0.4) }
             try file.write(from: buffer)
         }
@@ -207,9 +208,9 @@ final class MuteVideoTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<60 {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             memset(CVPixelBufferGetBaseAddress(b), Int32(i * 4 % 256), CVPixelBufferGetDataSize(b))

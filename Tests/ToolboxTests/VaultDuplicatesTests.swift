@@ -76,7 +76,7 @@ final class VaultDuplicatesTests: XCTestCase {
         try write("AAAA", to: "b.jpg")
         let items = VaultLibrary.items(in: root)
         let group = try XCTUnwrap(VaultDuplicates.groups(in: items) { try VaultMover.sha256($0.url) }.first)
-        let keeper = group.copies[0]
+        let keeper = try XCTUnwrap(group.copies.first)
         XCTAssertTrue(VaultDuplicates.isStillIntact(group, keeping: keeper))
 
         try FileManager.default.removeItem(at: keeper.url)
@@ -139,7 +139,7 @@ final class VaultDuplicatesTests: XCTestCase {
         let groups = [VaultDuplicates.Group(copies: [a, b]), VaultDuplicates.Group(copies: [c, d])]
         let chosen: Set<VaultItem.ID> = [a.id, b.id, c.id]
 
-        XCTAssertEqual(VaultDuplicates.groupsWithEveryCopy(of: chosen, in: groups).map(\.id), [groups[0].id])
+        XCTAssertEqual(VaultDuplicates.groupsWithEveryCopy(of: chosen, in: groups).map(\.id), [try XCTUnwrap(groups.first).id])
         XCTAssertEqual(VaultDuplicates.chosenCopies(chosen, in: groups).map(\.name), ["a.jpg", "b.jpg", "c.jpg"])
     }
 

@@ -123,8 +123,8 @@ final class ConvertImagesTests: XCTestCase {
         for o in 1...8 {
             let a = ImageConverter.destination(x: 0, y: 0, width: 3, height: 2, orientation: o)
             let b = ImageConverter.destination(x: 2, y: 1, width: 3, height: 2, orientation: o)
-            XCTAssertEqual([a.0, a.1], [expectedTopLeft[o]!.0, expectedTopLeft[o]!.1], "orientation \(o) top left")
-            XCTAssertEqual([b.0, b.1], [expectedBottomRight[o]!.0, expectedBottomRight[o]!.1], "orientation \(o) bottom right")
+            XCTAssertEqual([a.0, a.1], [try XCTUnwrap(expectedTopLeft[o]).0, try XCTUnwrap(expectedTopLeft[o]).1], "orientation \(o) top left")
+            XCTAssertEqual([b.0, b.1], [try XCTUnwrap(expectedBottomRight[o]).0, try XCTUnwrap(expectedBottomRight[o]).1], "orientation \(o) bottom right")
         }
     }
 
@@ -182,7 +182,7 @@ final class ConvertImagesTests: XCTestCase {
         let data = try Data(contentsOf: try ImageConverter.convert(source: source, settings: ConvertSettings(format: .webp), into: out).url)
         XCTAssertEqual(String(decoding: data[0..<4], as: UTF8.self), "RIFF")
         XCTAssertEqual(String(decoding: data[8..<12], as: UTF8.self), "WEBP")
-        XCTAssertEqual(Int(data[4]) | Int(data[5]) << 8 | Int(data[6]) << 16 | Int(data[7]) << 24, data.count - 8)
+        XCTAssertEqual(Int(try data.element(at: 4)) | Int(try data.element(at: 5)) << 8 | Int(try data.element(at: 6)) << 16 | Int(try data.element(at: 7)) << 24, data.count - 8)
     }
 
     @MainActor func testQueueFindsImagesInFoldersAndSkipsDuplicates() throws {
@@ -208,8 +208,8 @@ final class ConvertImagesTests: XCTestCase {
         defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         model.convert()
-        for _ in 0..<200 where model.isRunning || model.items.contains(where: { $0.status == .waiting || $0.status == .converting }) {
-            try await Task.sleep(for: .milliseconds(50))
+        try await waitUntil(timeout: .seconds(60), "every image is converted") {
+            !model.isRunning && !model.items.contains(where: { $0.status == .waiting || $0.status == .converting })
         }
         XCTAssertEqual(model.doneCount, 2)
         let folder = try XCTUnwrap(model.folder)
@@ -223,15 +223,16 @@ final class ConvertImagesTests: XCTestCase {
         model.settings.format = .webp
         model.add(first)
         model.convert()
-        for _ in 0..<400 where model.items.first?.status != .converting { try await Task.sleep(for: .milliseconds(5)) }
+        try await waitUntil("the first image is being converted") { model.items.first?.status == .converting }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add(second)
         model.convert()
-        for _ in 0..<1000 where model.isRunning {
-            try await Task.sleep(for: .milliseconds(10))
+        try await waitUntil(timeout: .seconds(60), "the second batch has finished") {
+            guard model.isRunning else { return true }
             model.convert()
+            return false
         }
         defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
@@ -248,8 +249,8 @@ final class ConvertImagesTests: XCTestCase {
 
     /// Four colored quadrants, optionally with a see-through top-left corner.
     private func quadrants(transparent: Bool = false) throws -> CGImage {
-        let ctx = CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         let colors: [(CGRect, CGColor)] = [
             (CGRect(x: 0, y: 24, width: 32, height: 24), CGColor(srgbRed: 1, green: 0, blue: 0, alpha: transparent ? 0 : 1)),
             (CGRect(x: 32, y: 24, width: 32, height: 24), CGColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)),
@@ -276,12 +277,12 @@ final class ConvertImagesTests: XCTestCase {
             var bytes = try rgbaBytes(image)
             ConvertedFixtures.unpremultiply(&bytes)
             let data = try bytes.withUnsafeBytes {
-                try WebPEncoder.encode(rgba: $0.baseAddress!, width: 64, height: 48, stride: 256, hasAlpha: transparent, quality: 100, lossless: true, exif: nil)
+                try WebPEncoder.encode(rgba: try XCTUnwrap($0.baseAddress), width: 64, height: 48, stride: 256, hasAlpha: transparent, quality: 100, lossless: true, exif: nil)
             }
             try data.write(to: url)
             return url
         }
-        let utType = type ?? format.utType!
+        let utType = try type ?? XCTUnwrap(format.utType)
         let writer = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, utType.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(writer, image, properties as CFDictionary)
         XCTAssertTrue(CGImageDestinationFinalize(writer), "could not write the \(format.label) fixture")
@@ -295,12 +296,12 @@ final class ConvertImagesTests: XCTestCase {
         for i in stride(from: 0, to: bytes.count, by: 4) {
             for c in 0..<3 { seed = seed &* 1664525 &+ 1013904223; bytes[i + c] = UInt8(truncatingIfNeeded: seed >> 24) }
         }
-        let provider = CGDataProvider(data: Data(bytes) as CFData)!
-        let image = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+        let image = try XCTUnwrap(CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
                             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider, decode: nil,
-                            shouldInterpolate: false, intent: .defaultIntent)!
+                            shouldInterpolate: false, intent: .defaultIntent))
         let url = dir.appendingPathComponent("\(name).png")
-        let writer = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        let writer = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(writer, image, nil)
         XCTAssertTrue(CGImageDestinationFinalize(writer))
         return url
@@ -313,7 +314,7 @@ final class ConvertImagesTests: XCTestCase {
 
     private func expectType(_ url: URL, _ format: ImageFormat, _ label: String) throws {
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil), label)
-        let expected = format == .webp ? "org.webmproject.webp" : format.utType!.identifier
+        let expected = format == .webp ? "org.webmproject.webp" : try XCTUnwrap(format.utType).identifier
         XCTAssertEqual(CGImageSourceGetType(source) as String?, expected, label)
     }
 
@@ -321,7 +322,7 @@ final class ConvertImagesTests: XCTestCase {
         var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
         try bytes.withUnsafeMutableBytes { raw in
             let ctx = try XCTUnwrap(CGContext(data: raw.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         }
         return bytes
@@ -330,12 +331,11 @@ final class ConvertImagesTests: XCTestCase {
     private func rgba(_ image: CGImage) throws -> [UInt8] { try rgbaBytes(image) }
 
     private func pixel(_ image: CGImage, _ x: Int, _ y: Int) throws -> RGBA {
-        let bytes = try rgbaBytes(image)
-        let i = (y * image.width + x) * 4
-        let a = Int(bytes[i + 3])
+        let p = try RGBAPixels(bytes: rgbaBytes(image), width: image.width, height: image.height).components(x, y)
+        let a = Int(p.a)
         // Un-premultiply so a translucent pixel reports its own color.
         func un(_ v: UInt8) -> Int { a == 0 ? 0 : min(Int(v) * 255 / a, 255) }
-        return RGBA(r: un(bytes[i]), g: un(bytes[i + 1]), b: un(bytes[i + 2]), a: a)
+        return RGBA(r: un(p.r), g: un(p.g), b: un(p.b), a: a)
     }
 
     private func expectColor(_ image: CGImage, _ x: Int, _ y: Int, _ rgb: (Int, Int, Int), _ label: String, tolerance: Int = 40) throws {

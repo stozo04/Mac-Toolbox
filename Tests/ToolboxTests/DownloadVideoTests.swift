@@ -115,10 +115,10 @@ final class DownloadVideoTests: XCTestCase {
         let model = DownloadVideoModel(downloader: Fake(), saveFolder: FileManager.default.temporaryDirectory)
         model.linkText = "https://good.example.com/1 https://bad.example.com/2"
         model.start()
-        while model.isRunning { try await Task.sleep(nanoseconds: 20_000_000) }
+        try await waitUntil(timeout: .seconds(30), "the downloads have finished") { !model.isRunning }
         XCTAssertEqual(model.items.count, 2)
-        guard case .done = model.items[0].state else { return XCTFail("first should be done") }
-        XCTAssertEqual(model.items[1].state, .failed("Video unavailable"))
+        guard case .done = try XCTUnwrap(model.items.first).state else { return XCTFail("first should be done") }
+        XCTAssertEqual(try model.items.element(at: 1).state, .failed("Video unavailable"))
         XCTAssertEqual(model.finishedCount, 1)
     }
 
@@ -136,7 +136,7 @@ final class DownloadVideoTests: XCTestCase {
         let model = DownloadVideoModel(downloader: Fake(), saveFolder: folder, trash: { trashed.files.append($0) })
         model.linkText = "https://good.example.com/1 https://bad.example.com/2"
         model.start()
-        while model.isRunning { try await Task.sleep(nanoseconds: 20_000_000) }
+        try await waitUntil(timeout: .seconds(30), "the downloads have finished") { !model.isRunning }
 
         model.clearFinished()
 
@@ -203,7 +203,7 @@ final class YtDlpConcurrencyTests: XCTestCase {
             for i in 0..<8 {
                 group.addTask {
                     for _ in 0..<25 {
-                        _ = try await downloader.download(url: URL(string: "https://example.com/\(i)")!,
+                        _ = try await downloader.download(url: try XCTUnwrap(URL(string: "https://example.com/\(i)")),
                                                           options: DownloadOptions(), into: dir) { _ in }
                     }
                     return 25

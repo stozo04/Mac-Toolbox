@@ -249,7 +249,7 @@ final class RotateImagesTests: XCTestCase {
         }
         return try bytes.withUnsafeMutableBytes { raw in
             let ctx = try XCTUnwrap(CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
             return try XCTUnwrap(ctx.makeImage())
         }
     }
@@ -257,15 +257,10 @@ final class RotateImagesTests: XCTestCase {
     /// The colors at the middle of the four quarters: top left, top right, bottom left, bottom right.
     private func corners(of image: CGImage) throws -> [Color] {
         let (w, h) = (image.width, image.height)
-        var bytes = [UInt8](repeating: 0, count: w * h * 4)
-        try bytes.withUnsafeMutableBytes { raw in
-            let ctx = try XCTUnwrap(CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        }
+        let pixels = try RGBAPixels(image, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), alpha: .premultipliedLast)
         func color(_ x: Int, _ y: Int) throws -> Color {
-            let i = (y * w + x) * 4
-            let p = (Int(bytes[i]), Int(bytes[i + 1]), Int(bytes[i + 2]))
+            let found = try pixels.components(x, y)
+            let p = (Int(found.r), Int(found.g), Int(found.b))
             let all: [Color] = [.red, .green, .blue, .yellow]
             let best = all.min { distance(p, rgb($0)) < distance(p, rgb($1)) }
             return try XCTUnwrap(best)
