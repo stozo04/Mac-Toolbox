@@ -95,12 +95,9 @@ final class TrimAudioModel {
     var isReadyToPlay: Bool { player.currentItem?.status == .readyToPlay }
 
     private static func waitUntilReady(_ item: AVPlayerItem) async throws {
-        for await status in item.publisher(for: \.status).values {
-            switch status {
-            case .readyToPlay: return
-            case .failed: throw item.error ?? TrimAudioError.notAudio
-            default: continue
-            }
+        let settled = item.publisher(for: \.status, options: [.initial, .new]).first { $0 != .unknown }
+        for await status in settled.values where status == .failed {
+            throw item.error ?? TrimAudioError.notAudio
         }
     }
 
