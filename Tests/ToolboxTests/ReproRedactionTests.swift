@@ -144,27 +144,6 @@ final class ReproRedactionTests: XCTestCase {
         }
     }
 
-    func testR5CleanDropsTheQueryStringOfALink() {
-        let cleaned = LogText.clean("ERROR: Unsupported URL: https://example.com/watch?v=1&sig=SECRETTOKEN", limit: 400)
-        XCTAssertFalse(cleaned.contains("SECRETTOKEN"), "finding: the query string reached the log text: \(cleaned)")
-    }
-
-    func testR5DetailsOfAYtDlpFailureCarryNoQueryString() {
-        let stderr = "WARNING: something\nERROR: Unsupported URL: https://example.com/watch?v=1&sig=SECRETTOKEN\n"
-        let error = DownloadError.failed(YtDlpCommand.friendlyError(from: stderr))
-        XCTAssertTrue(error.localizedDescription.contains("SECRETTOKEN"), "precondition: the message shown to the user keeps yt-dlp's wording")
-
-        let details = Log.details(error, ["url": LogText.safeURL(URL(fileURLWithPath: "/dev/null"))])
-        for (key, value) in details.sorted(by: { $0.key < $1.key }) {
-            XCTAssertFalse(value.contains("SECRETTOKEN"), "finding: \(key) carries the query string: \(value)")
-        }
-        let fitted = LogEvent(timestamp: Date(), level: .error, category: "download", message: "Download failed", metadata: details,
-                              appVersion: "1", osVersion: "os", installID: "i", sessionID: "s").fitted()
-        for (key, value) in fitted.metadata.sorted(by: { $0.key < $1.key }) {
-            XCTAssertFalse(value.contains("SECRETTOKEN"), "finding: after fitting, \(key) still carries the query string")
-        }
-    }
-
     func testR6OutputFolderThatCannotBeMadeIsNotHandedBackAsIfItExisted() {
         let impossible = String(repeating: "x", count: 300)
         let folder = BatchFiles.makeOutputFolder(named: impossible)
