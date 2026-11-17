@@ -1,7 +1,7 @@
 import XCTest
 @testable import Toolbox
 
-private final class MemorySink: LogSink, @unchecked Sendable {
+final class MemorySink: LogSink, @unchecked Sendable {
     let minimumLevel: LogLevel
     private let lock = NSLock()
     private var _events: [LogEvent] = []

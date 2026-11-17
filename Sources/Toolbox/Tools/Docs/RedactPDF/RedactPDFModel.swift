@@ -19,6 +19,7 @@ final class RedactPDFModel {
     struct Saved: Equatable {
         let url: URL
         let bytes: Int64
+        let leftUncovered: [RedactPDFLeftover]
     }
 
     static let zoomLevels: [CGFloat] = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
@@ -43,6 +44,7 @@ final class RedactPDFModel {
     /// The page at the top of the view, which the scroll view keeps up to date and the list can change.
     var currentPage: Int?
     var query = ""
+    private(set) var redactedQueries: [String] = []
     var keepSearchable = true {
         didSet { if keepSearchable != oldValue { saved = nil } }
     }
@@ -113,6 +115,7 @@ final class RedactPDFModel {
         notice = nil
         findMessage = nil
         query = ""
+        redactedQueries = []
         zoomIndex = Self.fitZoom
         pictures.removeAllObjects()
     }
@@ -190,21 +193,27 @@ final class RedactPDFModel {
         let id = documentID
         task = Task { [weak self] in
             // Searching reads the whole file, and a scanned page has to be read by Vision first: not on the main thread.
-            let found = await Task.detached(priority: .userInitiated) { () -> RedactPDFFind? in
-                guard let document = try? RedactPDF.open(url) else { return nil }
-                return RedactPDF.find(text, in: document)
+            let found = await Task.detached(priority: .userInitiated) { () -> Result<RedactPDFFind, Error> in
+                Result { RedactPDF.find(text, in: try RedactPDF.open(url)) }
             }.value
             guard let self, !Task.isCancelled, id == documentID else { return }
-            finish(find: found, for: text)
+            finish(find: found, for: text, in: url)
         }
     }
 
-    private func finish(find: RedactPDFFind?, for text: String) {
+    private func finish(find outcome: Result<RedactPDFFind, Error>, for text: String, in url: URL) {
         isFinding = false
-        guard let find else {
+        let find: RedactPDFFind
+        switch outcome {
+        case .success(let found): find = found
+        case .failure(let error):
             findMessage = "The PDF could not be searched."
-            Log.error("Find failed", category: "redact-pdf", ["pages": "\(pageSizes.count)", "search_length": "\(text.count)"])
+            Log.error("Find failed", category: "redact-pdf",
+                      Log.details(error, file: url, ["pages": "\(pageSizes.count)", "search_length": "\(text.count)"]))
             return
+        }
+        if !find.matches.isEmpty, !redactedQueries.contains(where: { $0.caseInsensitiveCompare(text) == .orderedSame }) {
+            redactedQueries.append(text)
         }
         var added = 0
         var pages = Set<Int>()
@@ -214,23 +223,42 @@ final class RedactPDFModel {
             added += 1
         }
         if added > 0 { changed() }
-        findMessage = Self.summary(matches: find.matches.count, added: added, pages: pages.count, scanned: find.scannedPages, text: text)
-        Log.info("Matches covered", category: "redact-pdf", ["found": "\(find.matches.count)", "added": "\(added)", "scanned": "\(find.scannedPages)"])
+        findMessage = Self.summary(matches: find.matches.count, added: added, pages: pages.count, scanned: find.scannedPages,
+                                   unreadable: find.unreadablePages, text: text)
+        Log.info("Matches covered", category: "redact-pdf", ["found": "\(find.matches.count)", "added": "\(added)", "scanned": "\(find.scannedPages)",
+                                                             "unreadable": "\(find.unreadablePages.count)"])
     }
 
-    nonisolated static func summary(matches: Int, added: Int, pages: Int, scanned: Int, text: String) -> String {
+    nonisolated static func summary(matches: Int, added: Int, pages: Int, scanned: Int, unreadable: [Int] = [], text: String) -> String {
         var message: String
         if matches == 0 {
-            message = "No matches for “\(text)”."
+            message = unreadable.isEmpty ? "No matches for “\(text)”." : "No matches for “\(text)” on the pages that could be searched."
         } else if added == 0 {
             message = "Every match is already covered."
         } else {
             message = "Covered \(added) match\(added == 1 ? "" : "es") on \(pages) page\(pages == 1 ? "" : "s")."
         }
         if scanned > 0 {
-            message += " \(scanned) scanned page\(scanned == 1 ? " was" : "s were") read, which can miss words, so check \(scanned == 1 ? "it" : "them")."
+            message += " \(scanned) page\(scanned == 1 ? " has" : "s have") pictures or notes that were read as images, which can miss words, so check \(scanned == 1 ? "it" : "them")."
         }
+        if !unreadable.isEmpty { message += " " + unsearchedNote(unreadable) }
         return message
+    }
+
+    private nonisolated static let mostPagesNamed = 5
+
+    private nonisolated static func unsearchedNote(_ pages: [Int]) -> String {
+        let numbers = pages.map { "\($0 + 1)" }
+        guard let last = numbers.last else { return "" }
+        if numbers.count == 1 { return "Page \(last) could not be searched, so check it yourself." }
+        guard numbers.count <= mostPagesNamed else { return "\(numbers.count) pages could not be searched, so check them yourself." }
+        return "Pages \(numbers.dropLast().joined(separator: ", ")) and \(last) could not be searched, so check them yourself."
+    }
+
+    nonisolated static func leftUncoveredNote(_ leftovers: [RedactPDFLeftover]) -> String? {
+        guard !leftovers.isEmpty else { return nil }
+        let counts = leftovers.map { "“\($0.query)” \($0.matches) time\($0.matches == 1 ? "" : "s")" }
+        return "Still in the copy where it was left uncovered: \(counts.joined(separator: ", "))."
     }
 
     // MARK: Exporting
@@ -243,7 +271,11 @@ final class RedactPDFModel {
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         panel.nameFieldStringValue = url.deletingPathExtension().lastPathComponent + " (redacted).pdf"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
+        export(to: destination)
+    }
 
+    func export(to destination: URL) {
+        guard let url, !regions.isEmpty, !isBusy else { return }
         isExporting = true
         exportedPages = 0
         saved = nil
@@ -251,12 +283,13 @@ final class RedactPDFModel {
         var boxes: [Int: [CGRect]] = [:]
         for region in regions { boxes[region.page, default: []].append(region.rect) }
         let searchable = keepSearchable
+        let queries = redactedQueries
         let count = regions.count
         task = Task { [weak self] in
             // Drawing, reading and encoding every page is heavy; keep it off the main thread.
             let outcome = await Task.detached(priority: .userInitiated) { () -> Result<RedactPDFResult, Error> in
                 Result {
-                    try RedactPDF.export(source: url, regions: boxes, keepSearchable: searchable, to: destination) { done in
+                    try RedactPDF.export(source: url, regions: boxes, keepSearchable: searchable, to: destination, searchedFor: queries) { done in
                         Task { @MainActor in self?.exportedPages = done }
                     }
                 }
@@ -264,9 +297,10 @@ final class RedactPDFModel {
             guard let self else { return }
             switch outcome {
             case .success(let result):
-                saved = Saved(url: result.url, bytes: result.bytes)
+                saved = Saved(url: result.url, bytes: result.bytes, leftUncovered: result.leftUncovered)
                 Log.info("PDF redacted", category: "redact-pdf", ["pages": "\(result.pages)", "redactedPages": "\(result.redactedPages)",
-                                                                  "regions": "\(count)", "searchable": "\(searchable)"])
+                                                                  "regions": "\(count)", "searchable": "\(searchable)",
+                                                                  "leftUncovered": "\(result.leftUncovered.reduce(0) { $0 + $1.matches })"])
             case .failure(let error):
                 notice = error.localizedDescription
                 Log.error("Redaction failed", category: "redact-pdf", Log.details(error, file: url))

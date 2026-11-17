@@ -224,6 +224,9 @@ struct RedactPDFView: View {
                 Spacer(minLength: 0)
                 RevealButton { model.reveal(saved.url) }
             }
+            if let note = RedactPDFModel.leftUncoveredNote(saved.leftUncovered) {
+                Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         } else if model.isExporting {
             Text("Writing page \(min(model.exportedPages + 1, model.pageCount)) of \(model.pageCount)…").font(.caption).foregroundStyle(.secondary)
         } else if let notice = model.notice {
