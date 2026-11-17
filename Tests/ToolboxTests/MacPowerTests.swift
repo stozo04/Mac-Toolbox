@@ -38,12 +38,12 @@ final class PowerAssertionsLiveTests: XCTestCase {
         try await Shell.run("/usr/bin/pmset", ["-g", "assertions"]).out
     }
 
-    private func lines(naming reason: String, expected: Int) async throws -> [Substring] {
+    private func lines(naming reason: String, settlingOn expected: Int) async throws -> [Substring] {
         let deadline = ContinuousClock.now + Self.listingTimeout
         var found: [Substring] = []
         repeat {
             found = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
-            if found.count >= expected { return found }
+            if found.count == expected { return found }
             try await Task.sleep(for: Self.listingPoll)
         } while ContinuousClock.now < deadline
         return found
@@ -65,7 +65,7 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let reason = "Toolbox Keep Awake \(UUID().uuidString.prefix(8))"
         let held = PowerAssertions()
         held.hold(keepDisplayOn: true, reason: reason)
-        let during = try await lines(naming: reason, expected: 2).joined(separator: "\n")
+        let during = try await lines(naming: reason, settlingOn: 2).joined(separator: "\n")
         XCTAssertTrue(during.contains("PreventUserIdleSystemSleep"), "system-sleep assertion should be listed while held")
         XCTAssertTrue(during.contains("PreventUserIdleDisplaySleep"), "display-sleep assertion should be listed while held")
         held.release()
@@ -82,7 +82,7 @@ final class PowerAssertionsLiveTests: XCTestCase {
         held.hold(keepDisplayOn: true, reason: reason)
         held.hold(keepDisplayOn: false, reason: reason)
         defer { held.release() }
-        let listed = try await lines(naming: reason, expected: 1)
+        let listed = try await lines(naming: reason, settlingOn: 1)
         XCTAssertEqual(listed.count, 1, "one system-sleep assertion, the display one dropped")
         let line = try XCTUnwrap(listed.first, "the assertion never showed up in pmset")
         XCTAssertTrue(line.contains("PreventUserIdleSystemSleep"))
@@ -93,7 +93,7 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let held = PowerAssertions()
         held.hold(keepDisplayOn: false, reason: reason)
         defer { held.release() }
-        let listed = try await lines(naming: reason, expected: 1)
+        let listed = try await lines(naming: reason, settlingOn: 1)
         XCTAssertEqual(listed.count, 1, "only the system-sleep assertion, so the screen may still turn off")
         let line = try XCTUnwrap(listed.first, "the assertion never showed up in pmset")
         XCTAssertTrue(line.contains("PreventUserIdleSystemSleep"))
