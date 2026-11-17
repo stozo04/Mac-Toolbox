@@ -18,11 +18,11 @@ struct TrimAudioJob: Equatable, Sendable {
     let source: URL
     let start: Double
     let end: Double
-    let bitDepth: Int
+    let sample: SourceSampleFormat
     let settings: TrimAudioSettings
 
     var length: Double { max(end - start, 0) }
-    var plan: TrimAudioPlan { TrimAudioPlan(sourceExtension: source.pathExtension, bitDepth: bitDepth, settings: settings) }
+    var plan: TrimAudioPlan { TrimAudioPlan(sourceExtension: source.pathExtension, sample: sample, settings: settings) }
 }
 
 struct TrimAudioResult: Equatable, Sendable {

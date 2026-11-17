@@ -22,6 +22,7 @@ final class TrimAudioModel {
     private(set) var playhead: Double = 0
     private(set) var isPlaying = false
     private(set) var peaks: [Float] = []
+    private(set) var waveformFailed = false
     private(set) var loadError: String?
     private(set) var isLoading = false
     private(set) var saveState = SaveState.idle
@@ -30,6 +31,7 @@ final class TrimAudioModel {
     let player = AVPlayer()
     private var track: AVAssetTrack?
     private var playingSelection = false
+    private var loadTask: Task<Void, Never>?
     private var waveformTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     private var timeObserver: Any?
@@ -39,7 +41,7 @@ final class TrimAudioModel {
     var canSave: Bool { hasClip && !isSaving && (!selection.isWholeClip || !settings.fades.isOff || settings.format != .original) }
     var fadeSeconds: (fadeIn: Double, fadeOut: Double) { settings.fades.seconds(within: selection.length) }
     var plan: TrimAudioPlan? {
-        file.map { TrimAudioPlan(sourceExtension: $0.pathExtension, bitDepth: info?.bitDepth ?? 0, settings: settings) }
+        file.map { TrimAudioPlan(sourceExtension: $0.pathExtension, sample: info?.sample ?? SourceSampleFormat(), settings: settings) }
     }
 
     var detail: String {
@@ -59,12 +61,13 @@ final class TrimAudioModel {
         reset()
         isLoading = true
         file = url
-        Task {
+        loadTask = Task {
             let asset = AVURLAsset(url: url)
             do {
                 let info = try await AudioWaveform.info(of: url)
-                track = try await asset.loadTracks(withMediaType: .audio).first
-                guard file == url else { return }
+                let track = try await asset.loadTracks(withMediaType: .audio).first
+                guard !Task.isCancelled, file == url else { return }
+                self.track = track
                 self.info = info
                 selection = TrimSelection(duration: info.duration)
                 player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
@@ -74,7 +77,7 @@ final class TrimAudioModel {
                 Log.info("Trim audio opened", category: Self.logCategory,
                          ["seconds": String(Int(info.duration)), "extension": url.pathExtension.lowercased()])
             } catch {
-                guard file == url else { return }
+                guard !Task.isCancelled, file == url else { return }
                 file = nil
                 isLoading = false
                 loadError = (error as? TrimAudioError)?.localizedDescription ?? "This file can't be opened as audio."
@@ -87,6 +90,7 @@ final class TrimAudioModel {
 
     private func reset() {
         saveTask?.cancel()
+        loadTask?.cancel()
         waveformTask?.cancel()
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -98,6 +102,7 @@ final class TrimAudioModel {
         isPlaying = false
         playingSelection = false
         peaks = []
+        waveformFailed = false
         loadError = nil
         saveState = .idle
     }
@@ -111,6 +116,7 @@ final class TrimAudioModel {
                 if !Task.isCancelled && file == url { self.peaks = peaks }
             } catch is CancellationError {
             } catch {
+                if file == url { waveformFailed = true }
                 Log.warning("Trim audio waveform failed", category: Self.logCategory, Log.details(error, file: url))
             }
         }
@@ -199,7 +205,18 @@ final class TrimAudioModel {
     }
 
     func playSelection() {
-        seek(to: selection.start)
+        let start = selection.start
+        playhead = start
+        playingSelection = false
+        player.pause()
+        player.seek(to: time(start), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            guard finished else { return }
+            Task { @MainActor in self?.startSelectionPlayback(from: start) }
+        }
+    }
+
+    private func startSelectionPlayback(from start: Double) {
+        guard selection.start == start else { return }
         playingSelection = true
         player.play()
     }
@@ -223,7 +240,8 @@ final class TrimAudioModel {
         guard canSave, let file else { return }
         player.pause()
         saveState = .saving(0)
-        let job = TrimAudioJob(source: file, start: selection.start, end: selection.end, bitDepth: info?.bitDepth ?? 0, settings: settings)
+        let job = TrimAudioJob(source: file, start: selection.start, end: selection.end,
+                               sample: info?.sample ?? SourceSampleFormat(), settings: settings)
         let folder = BatchFiles.makeOutputFolder(named: Self.outputFolderName)
         saveTask = Task { [weak self] in
             guard let self else { return }

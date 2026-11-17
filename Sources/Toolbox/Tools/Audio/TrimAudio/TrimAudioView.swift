@@ -218,7 +218,13 @@ private struct WaveformTimeline: View {
             .coordinateSpace(name: "wave")
         }
         .padding(.horizontal, handleWidth)
-        .overlay { if model.peaks.isEmpty { ProgressView().controlSize(.small) } }
+        .overlay {
+            if model.waveformFailed {
+                Text("The waveform can't be drawn for this file, but it can still be trimmed.").font(.caption).foregroundStyle(.secondary)
+            } else if model.peaks.isEmpty {
+                ProgressView().controlSize(.small)
+            }
+        }
     }
 
     private func waveform(size: CGSize) -> some View {

@@ -17,7 +17,7 @@ final class TrimAudioTests: XCTestCase {
     // MARK: Plan
 
     func testSameFormatWithoutFadesIsCopiedAsIs() {
-        let plan = TrimAudioPlan(sourceExtension: "MP3", bitDepth: 0, settings: .init())
+        let plan = TrimAudioPlan(sourceExtension: "MP3", sample: .init(bitDepth: 0), settings: .init())
         XCTAssertTrue(plan.copiesAsIs)
         XCTAssertTrue(plan.keepsSoundUnchanged)
         XCTAssertEqual(plan.fileExtension, "mp3")
@@ -25,16 +25,36 @@ final class TrimAudioTests: XCTestCase {
     }
 
     func testLosslessFormatsAreRewrittenSoTheCutIsSampleExact() {
-        let plan = TrimAudioPlan(sourceExtension: "WAV", bitDepth: 24, settings: .init())
+        let plan = TrimAudioPlan(sourceExtension: "WAV", sample: .init(bitDepth: 24), settings: .init())
         XCTAssertFalse(plan.copiesAsIs)
         XCTAssertTrue(plan.keepsSoundUnchanged)
         XCTAssertEqual(plan.fileExtension, "wav")
         XCTAssertEqual(plan.codecArguments, ["-c:a", "pcm_s24le"])
     }
 
+    func testFloatPCMStaysFloat() {
+        let wav = TrimAudioPlan(sourceExtension: "wav", sample: .init(bitDepth: 32, isFloat: true), settings: .init())
+        let aiff = TrimAudioPlan(sourceExtension: "aiff", sample: .init(bitDepth: 64, isFloat: true), settings: .init(format: .aiff))
+        XCTAssertEqual(wav.codecArguments, ["-c:a", "pcm_f32le"])
+        XCTAssertTrue(wav.keepsSoundUnchanged)
+        XCTAssertEqual(aiff.codecArguments, ["-c:a", "pcm_f64be"])
+    }
+
+    func testAppleLosslessStaysLossless() {
+        let alac = SourceSampleFormat(bitDepth: 16, isAppleLossless: true)
+        let untouched = TrimAudioPlan(sourceExtension: "m4a", sample: alac, settings: .init())
+        let faded = TrimAudioPlan(sourceExtension: "m4a", sample: alac, settings: .init(fades: .init(fadeIn: .one)))
+        let asAAC = TrimAudioPlan(sourceExtension: "m4a", sample: alac, settings: .init(format: .m4a))
+        XCTAssertFalse(untouched.copiesAsIs, "ALAC packets are too long for an exact cut, so it is rewritten")
+        XCTAssertTrue(untouched.keepsSoundUnchanged)
+        XCTAssertEqual(untouched.codecArguments, ["-c:a", "alac"])
+        XCTAssertEqual(faded.codecArguments, ["-c:a", "alac"])
+        XCTAssertEqual(asAAC.codecArguments, ["-c:a", "aac", "-b:a", TrimAudioPlan.aacBitrate], "choosing M4A (AAC) still means AAC")
+    }
+
     func testFadesReencodeInTheSourceFormat() {
         let settings = TrimAudioSettings(format: .original, fades: .init(fadeIn: .one))
-        let plan = TrimAudioPlan(sourceExtension: "flac", bitDepth: 24, settings: settings)
+        let plan = TrimAudioPlan(sourceExtension: "flac", sample: .init(bitDepth: 24), settings: settings)
         XCTAssertFalse(plan.copiesAsIs)
         XCTAssertEqual(plan.fileExtension, "flac")
         XCTAssertEqual(plan.codecArguments, ["-c:a", "flac"])
@@ -42,16 +62,16 @@ final class TrimAudioTests: XCTestCase {
 
     func testFadesOnAFormatToolboxCannotWriteFallBackToM4A() {
         let settings = TrimAudioSettings(format: .original, fades: .init(fadeOut: .two))
-        let plan = TrimAudioPlan(sourceExtension: "ogg", bitDepth: 0, settings: settings)
+        let plan = TrimAudioPlan(sourceExtension: "ogg", sample: .init(bitDepth: 0), settings: settings)
         XCTAssertEqual(plan.fileExtension, "m4a")
         XCTAssertEqual(plan.codecArguments, ["-c:a", "aac", "-b:a", TrimAudioPlan.aacBitrate])
     }
 
     func testPCMKeepsHighResolution() {
-        let wav24 = TrimAudioPlan(sourceExtension: "wav", bitDepth: 24, settings: .init(format: .wav))
-        let wav16 = TrimAudioPlan(sourceExtension: "mp3", bitDepth: 0, settings: .init(format: .wav))
-        let aiff24 = TrimAudioPlan(sourceExtension: "aif", bitDepth: 24, settings: .init(format: .aiff))
-        let wav32 = TrimAudioPlan(sourceExtension: "wav", bitDepth: 32, settings: .init(format: .wav))
+        let wav24 = TrimAudioPlan(sourceExtension: "wav", sample: .init(bitDepth: 24), settings: .init(format: .wav))
+        let wav16 = TrimAudioPlan(sourceExtension: "mp3", sample: .init(bitDepth: 0), settings: .init(format: .wav))
+        let aiff24 = TrimAudioPlan(sourceExtension: "aif", sample: .init(bitDepth: 24), settings: .init(format: .aiff))
+        let wav32 = TrimAudioPlan(sourceExtension: "wav", sample: .init(bitDepth: 32), settings: .init(format: .wav))
         XCTAssertEqual(wav24.codecArguments, ["-c:a", "pcm_s24le"])
         XCTAssertEqual(wav16.codecArguments, ["-c:a", "pcm_s16le"])
         XCTAssertEqual(aiff24.codecArguments, ["-c:a", "pcm_s24be"])
@@ -60,7 +80,7 @@ final class TrimAudioTests: XCTestCase {
     }
 
     func testChosenFormatAlwaysReencodes() {
-        let plan = TrimAudioPlan(sourceExtension: "mp3", bitDepth: 0, settings: .init(format: .mp3))
+        let plan = TrimAudioPlan(sourceExtension: "mp3", sample: .init(bitDepth: 0), settings: .init(format: .mp3))
         XCTAssertFalse(plan.copiesAsIs)
         XCTAssertEqual(plan.codecArguments, ["-c:a", "libmp3lame", "-b:a", TrimAudioPlan.mp3Bitrate])
     }
@@ -81,7 +101,7 @@ final class TrimAudioTests: XCTestCase {
     }
 
     func testArgumentsSeekTheInputAndKeepOnlyTheFirstSoundtrack() {
-        let job = TrimAudioJob(source: URL(fileURLWithPath: "/tmp/Song.mp3"), start: 1.5, end: 4, bitDepth: 0, settings: .init())
+        let job = TrimAudioJob(source: URL(fileURLWithPath: "/tmp/Song.mp3"), start: 1.5, end: 4, sample: .init(bitDepth: 0), settings: .init())
         let arguments = AudioTrimmer.arguments(for: job, output: URL(fileURLWithPath: "/tmp/out.mp3"))
         let input = try? XCTUnwrap(arguments.firstIndex(of: "-i"))
         XCTAssertEqual(arguments[(input ?? 0) - 2...(input ?? 0) + 3], ["-ss", "1.500", "-i", "/tmp/Song.mp3", "-t", "2.500"])
@@ -105,7 +125,7 @@ final class TrimAudioTests: XCTestCase {
         let info = try await AudioWaveform.info(of: source)
         XCTAssertEqual(info.duration, toneSeconds, accuracy: 0.01)
         XCTAssertEqual(info.channels, 2)
-        XCTAssertEqual(info.bitDepth, 16)
+        XCTAssertEqual(info.sample, SourceSampleFormat(bitDepth: 16))
         XCTAssertEqual(info.summary, "44.1 kHz · Stereo")
 
         let peaks = try await AudioWaveform.peaks(of: source, duration: info.duration, count: 40)
@@ -130,7 +150,7 @@ final class TrimAudioTests: XCTestCase {
         let source = dir.appendingPathComponent("Tone.wav")
         try makeTone(at: source)
         let before = try Data(contentsOf: source)
-        let job = TrimAudioJob(source: source, start: 1, end: 3, bitDepth: 16, settings: .init())
+        let job = TrimAudioJob(source: source, start: 1, end: 3, sample: .init(bitDepth: 16), settings: .init())
 
         let result = try await AudioTrimmer.trim(job, into: dir, ffmpeg: ffmpeg) { _ in }
 
@@ -151,10 +171,10 @@ final class TrimAudioTests: XCTestCase {
         let ffmpeg = try ExtractAudioTests.ffmpegWithMP3()
         let tone = dir.appendingPathComponent("Tone.wav")
         try makeTone(at: tone)
-        let mp3 = try await AudioTrimmer.trim(TrimAudioJob(source: tone, start: 0, end: toneSeconds, bitDepth: 16, settings: .init(format: .mp3)),
+        let mp3 = try await AudioTrimmer.trim(TrimAudioJob(source: tone, start: 0, end: toneSeconds, sample: .init(bitDepth: 16), settings: .init(format: .mp3)),
                                               into: dir, ffmpeg: ffmpeg) { _ in }
 
-        let result = try await AudioTrimmer.trim(TrimAudioJob(source: mp3.url, start: 1, end: 3, bitDepth: 0, settings: .init()),
+        let result = try await AudioTrimmer.trim(TrimAudioJob(source: mp3.url, start: 1, end: 3, sample: .init(bitDepth: 0), settings: .init()),
                                                  into: dir, ffmpeg: ffmpeg) { _ in }
 
         XCTAssertTrue(result.copiedAsIs)
@@ -168,7 +188,7 @@ final class TrimAudioTests: XCTestCase {
         let source = dir.appendingPathComponent("Tone.wav")
         try makeTone(at: source)
         let settings = TrimAudioSettings(format: .mp3, fades: .init(fadeIn: .one, fadeOut: .one))
-        let job = TrimAudioJob(source: source, start: 0.5, end: 3.5, bitDepth: 16, settings: settings)
+        let job = TrimAudioJob(source: source, start: 0.5, end: 3.5, sample: .init(bitDepth: 16), settings: settings)
 
         let result = try await AudioTrimmer.trim(job, into: dir, ffmpeg: ffmpeg) { _ in }
 
@@ -185,8 +205,51 @@ final class TrimAudioTests: XCTestCase {
         XCTAssertLessThan(end, middle * 0.2, "fades out to silence")
     }
 
+    func testFloatAndAppleLosslessSourcesAreRecognisedAndKept() async throws {
+        let ffmpeg = try ExtractAudioTests.ffmpegWithMP3()
+        let tone = dir.appendingPathComponent("Tone.wav")
+        try makeTone(at: tone)
+        let float = dir.appendingPathComponent("Float.wav"), alac = dir.appendingPathComponent("Lossless.m4a")
+        for (output, codec) in [(float, "pcm_f32le"), (alac, "alac")] {
+            let made = try await Shell.run(ffmpeg.path, ["-nostdin", "-v", "error", "-i", tone.path, "-c:a", codec, "-y", output.path])
+            XCTAssertTrue(made.succeeded, made.err)
+        }
+
+        let floatInfo = try await AudioWaveform.info(of: float)
+        let alacInfo = try await AudioWaveform.info(of: alac)
+        XCTAssertTrue(floatInfo.sample.isFloat)
+        XCTAssertTrue(alacInfo.sample.isAppleLossless)
+
+        let trimmed = try await AudioTrimmer.trim(TrimAudioJob(source: float, start: 1, end: 3, sample: floatInfo.sample, settings: .init()),
+                                                  into: dir, ffmpeg: ffmpeg) { _ in }
+        let trimmedInfo = try await AudioWaveform.info(of: trimmed.url)
+        XCTAssertEqual(trimmedInfo.sample, floatInfo.sample)
+
+        let faded = try await AudioTrimmer.trim(TrimAudioJob(source: alac, start: 1, end: 3, sample: alacInfo.sample,
+                                                             settings: .init(fades: .init(fadeIn: .one))), into: dir, ffmpeg: ffmpeg) { _ in }
+        let fadedInfo = try await AudioWaveform.info(of: faded.url)
+        XCTAssertTrue(fadedInfo.sample.isAppleLossless)
+    }
+
+    @MainActor
+    func testOpeningASecondFileWhileTheFirstLoadsKeepsTheSecond() async throws {
+        let first = dir.appendingPathComponent("First.wav"), second = dir.appendingPathComponent("Second.wav")
+        try makeTone(at: first)
+        try makeTone(at: second, seconds: 2)
+        let model = TrimAudioModel()
+
+        model.load(first)
+        model.load(second)
+        for _ in 0..<100 where model.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(model.file, second)
+        XCTAssertEqual(model.selection.duration, 2, accuracy: 0.01)
+        model.close()
+    }
+
     func testMissingEncoderIsReported() async throws {
-        let job = TrimAudioJob(source: dir.appendingPathComponent("Tone.wav"), start: 0, end: 1, bitDepth: 16, settings: .init())
+        let job = TrimAudioJob(source: dir.appendingPathComponent("Tone.wav"), start: 0, end: 1, sample: .init(bitDepth: 16), settings: .init())
         do {
             _ = try await AudioTrimmer.trim(job, into: dir, ffmpeg: nil) { _ in }
             XCTFail("expected an error")
@@ -197,11 +260,11 @@ final class TrimAudioTests: XCTestCase {
 
     // MARK: Helpers
 
-    private func makeTone(at url: URL) throws {
+    private func makeTone(at url: URL, seconds: Double? = nil) throws {
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 2,
                                        AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
         let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
-        let frames = AVAudioFrameCount(sampleRate * toneSeconds)
+        let frames = AVAudioFrameCount(sampleRate * (seconds ?? toneSeconds))
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames))
         buffer.frameLength = frames
         for channel in 0..<2 {

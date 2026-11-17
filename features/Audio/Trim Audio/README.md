@@ -15,7 +15,7 @@ Built. Code in `Sources/Toolbox/Tools/Audio/TrimAudio/`, routed through `ToolInp
 - Drag the handles on the waveform, click to move the playhead, type a start or end time, or set either to the playhead. Space plays; Play Selection plays only the part that will be kept.
 - Fade in and fade out (Off to 10 s), drawn on the waveform and heard while playing (an `AVAudioMix` volume ramp). Fades never run past the selection.
 - Save As: Same as Original, MP3 (320 kbps), M4A (AAC 256 kbps), WAV, FLAC or AIFF. Saved by the bundled ffmpeg (`AudioTrimmer`) into a dated "Toolbox Trimmed Audio" folder in Downloads as "<name> (Trimmed).<ext>".
-- Same as Original with no fades keeps the sound exactly: compressed files (MP3, AAC...) are copied packet for packet; WAV, AIFF and FLAC are rewritten losslessly at the same bit depth so the cut lands on the exact sample.
+- Same as Original with no fades keeps the sound exactly: compressed files (MP3, AAC...) are copied packet for packet; WAV, AIFF, FLAC and Apple Lossless are rewritten losslessly (same bit depth, float stays float, ALAC stays ALAC, also when fading) so the cut lands on the exact sample.
 
 ## Implementation notes for an agent
 - `TrimAudioPlan` decides copy versus encode; `AudioTrimmer.arguments` builds the ffmpeg call (input seek, first soundtrack only, `afade` filters). Both are covered by `TrimAudioTests`.

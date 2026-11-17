@@ -4,7 +4,7 @@ struct AudioSourceInfo: Equatable, Sendable {
     let duration: Double
     let sampleRate: Double
     let channels: Int
-    let bitDepth: Int
+    let sample: SourceSampleFormat
 
     var summary: String {
         let rate = sampleRate > 0 ? "\((sampleRate / 1000).formatted(.number.precision(.fractionLength(0...1)))) kHz" : nil
@@ -29,8 +29,12 @@ enum AudioWaveform {
         guard duration.isFinite, duration > 0 else { throw TrimAudioError.notAudio }
         let stream = try await track.load(.formatDescriptions).first
             .flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }
+        let sample = SourceSampleFormat(bitDepth: Int(stream?.mBitsPerChannel ?? 0),
+                                        isFloat: (stream?.mFormatFlags ?? 0) & kAudioFormatFlagIsFloat != 0
+                                            && stream?.mFormatID == kAudioFormatLinearPCM,
+                                        isAppleLossless: stream?.mFormatID == kAudioFormatAppleLossless)
         return AudioSourceInfo(duration: duration, sampleRate: stream?.mSampleRate ?? 0,
-                               channels: Int(stream?.mChannelsPerFrame ?? 0), bitDepth: Int(stream?.mBitsPerChannel ?? 0))
+                               channels: Int(stream?.mChannelsPerFrame ?? 0), sample: sample)
     }
 
     static func peaks(of url: URL, duration: Double, count: Int = barCount) async throws -> [Float] {

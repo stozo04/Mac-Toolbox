@@ -46,24 +46,38 @@ enum AudioContainer: Equatable, Sendable {
         }
     }
 
-    var isLossless: Bool { self == .wav || self == .aiff || self == .flac }
-
-    func encoderArguments(bitDepth: Int) -> [String] {
+    func isLossless(for sample: SourceSampleFormat) -> Bool {
         switch self {
-        case .mp3: ["-c:a", "libmp3lame", "-b:a", TrimAudioPlan.mp3Bitrate]
-        case .m4a: ["-c:a", "aac", "-b:a", TrimAudioPlan.aacBitrate]
-        case .wav: ["-c:a", "pcm_s\(Self.pcmBits(bitDepth))le"]
-        case .aiff: ["-c:a", "pcm_s\(Self.pcmBits(bitDepth))be"]
-        case .flac: ["-c:a", "flac"]
+        case .wav, .aiff, .flac: true
+        case .m4a: sample.isAppleLossless
+        case .mp3: false
         }
     }
 
-    private static func pcmBits(_ bitDepth: Int) -> Int {
-        switch bitDepth {
+    func encoderArguments(for sample: SourceSampleFormat) -> [String] {
+        switch self {
+        case .mp3: ["-c:a", "libmp3lame", "-b:a", TrimAudioPlan.mp3Bitrate]
+        case .m4a: sample.isAppleLossless ? ["-c:a", "alac"] : ["-c:a", "aac", "-b:a", TrimAudioPlan.aacBitrate]
+        case .wav: ["-c:a", sample.pcmCodec(endian: "le")]
+        case .aiff: ["-c:a", sample.pcmCodec(endian: "be")]
+        case .flac: ["-c:a", "flac"]
+        }
+    }
+}
+
+struct SourceSampleFormat: Equatable, Sendable {
+    var bitDepth = 0
+    var isFloat = false
+    var isAppleLossless = false
+
+    func pcmCodec(endian: String) -> String {
+        if isFloat { return "pcm_f\(bitDepth > 32 ? 64 : 32)\(endian)" }
+        let bits = switch bitDepth {
         case 25...: 32
         case 17...24: 24
         default: 16
         }
+        return "pcm_s\(bits)\(endian)"
     }
 }
 
@@ -108,11 +122,11 @@ struct TrimAudioPlan: Equatable, Sendable {
     let copiesAsIs: Bool
     let keepsSoundUnchanged: Bool
 
-    init(sourceExtension: String, bitDepth: Int, settings: TrimAudioSettings) {
+    init(sourceExtension: String, sample: SourceSampleFormat, settings: TrimAudioSettings) {
         let sourceExtension = sourceExtension.lowercased()
         let sourceContainer = AudioContainer(fileExtension: sourceExtension)
         let untouched = settings.format == .original && settings.fades.isOff
-        if untouched && !sourceExtension.isEmpty && !(sourceContainer?.isLossless ?? false) {
+        if untouched && !sourceExtension.isEmpty && !(sourceContainer?.isLossless(for: sample) ?? false) {
             fileExtension = sourceExtension
             codecArguments = ["-c:a", "copy"]
             copiesAsIs = true
@@ -120,8 +134,9 @@ struct TrimAudioPlan: Equatable, Sendable {
             return
         }
         let container = settings.format.container ?? sourceContainer ?? Self.fallback
+        let target = settings.format == .original ? sample : SourceSampleFormat(bitDepth: sample.bitDepth, isFloat: sample.isFloat)
         fileExtension = container.fileExtension
-        codecArguments = container.encoderArguments(bitDepth: bitDepth)
+        codecArguments = container.encoderArguments(for: target)
         copiesAsIs = false
         keepsSoundUnchanged = untouched
     }
