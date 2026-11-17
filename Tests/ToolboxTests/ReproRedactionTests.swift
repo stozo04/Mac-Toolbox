@@ -37,6 +37,16 @@ final class ReproRedactionTests: XCTestCase {
         _ = try? RedactPDF.export(source: source, regions: [0: [anyBox]], keepSearchable: false, to: link)
 
         XCTAssertEqual(try Data(contentsOf: source), before, "finding: the original's bytes changed")
+    }
+
+    func testR1ExportToAHardLinkLeavesTheLinkedNameAlone() throws {
+        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
+        let link = dir.appendingPathComponent("link.pdf")
+        try FileManager.default.linkItem(at: source, to: link)
+        let before = try Data(contentsOf: source)
+
+        _ = try? RedactPDF.export(source: source, regions: [0: [anyBox]], keepSearchable: false, to: link)
+
         XCTAssertEqual(try Data(contentsOf: link), before, "finding: the user's other name for the original now holds different bytes")
     }
 
@@ -64,6 +74,9 @@ final class ReproRedactionTests: XCTestCase {
         XCTAssertTrue(RedactPDF.hasText(page), "precondition: the page has its own text")
         let picture = try XCTUnwrap(RedactPDF.render(page, pixelWidth: 612))
         XCTAssertGreaterThan(try darkPixels(picture, rows: 432..<492), 30, "precondition: the annotation's words are drawn on the page")
+
+        let control = RedactPDF.find("Zanzibar", in: try RedactPDF.open(try makeAnnotatedPDF(secret: "Zanzibar", pageText: nil)))
+        XCTAssertFalse(control.matches.isEmpty, "precondition: on a page with no text of its own, Vision reads the annotation's words")
 
         let found = RedactPDF.find("Zanzibar", in: document)
         XCTAssertFalse(found.matches.isEmpty, "finding: a word shown on the page by an annotation was not found")
@@ -102,7 +115,7 @@ final class ReproRedactionTests: XCTestCase {
 
             let after = RedactPDF.find("Appleseed", in: try RedactPDF.open(output))
             XCTAssertTrue(after.matches.isEmpty,
-                          "finding (searchable \(searchable)): the copy was kept although searching it still finds the word \(after.matches.count) time(s)")
+                          "finding (searchable \(searchable)): the copy was kept although searching it still finds the word \(after.matches.count) time(s), pages read by Vision: \(after.scannedPages)")
         }
     }
 
@@ -244,10 +257,10 @@ final class ReproRedactionTests: XCTestCase {
         return url
     }
 
-    private func makeAnnotatedPDF(secret: String) throws -> URL {
+    private func makeAnnotatedPDF(secret: String, pageText: String? = "Second page text") throws -> URL {
         let data = try pdfData([
             { context in self.draw(Line("Jane Appleseed", x: 72, y: 600, size: 28), in: context) },
-            { context in self.draw(Line("Second page text", x: 72, y: 600, size: 28), in: context) },
+            { context in if let pageText { self.draw(Line(pageText, x: 72, y: 600, size: 28), in: context) } },
         ])
         let document = try XCTUnwrap(PDFDocument(data: data))
         let page = try XCTUnwrap(document.page(at: 1))
