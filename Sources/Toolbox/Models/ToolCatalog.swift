@@ -75,7 +75,7 @@ enum ToolCatalog {
              input: drop("Audio", "Drop audio to choose the part you want to keep.", "waveform")),
         Tool(name: "Extract Audio", category: .audio, symbol: "film.stack",
              tagline: "Save the soundtrack of a video as an audio file.",
-             input: drop("a Video", "Drop a video to pull the audio from.", "film")),
+             input: .extractAudio),
         Tool(name: "Convert Audio", category: .audio, symbol: "arrow.triangle.2.circlepath",
              tagline: "Change audio files to MP3, M4A, WAV, FLAC or AIFF.",
              input: drop("Audio", "Drop audio files to convert.", "waveform")),
