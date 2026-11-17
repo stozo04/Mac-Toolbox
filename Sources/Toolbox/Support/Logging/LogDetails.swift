@@ -17,7 +17,7 @@ enum LogText {
     static func withoutLinkSecrets(_ text: String) -> String {
         let options: String.CompareOptions = [.regularExpression, .caseInsensitive]
         return text
-            .replacingOccurrences(of: "(https?://)[^/\\s\"'<>@]*@", with: "$1", options: options)
+            .replacingOccurrences(of: "(https?://)[^/?#\\s\"'<>@]*@", with: "$1", options: options)
             .replacingOccurrences(of: "(https?://[^\\s\"'<>?#]*)[?#][^\\s\"'<>]*?([.,;:!?)\\]]*)(?=[\\s\"'<>]|$)", with: "$1$2", options: options)
     }
 

@@ -94,6 +94,8 @@ final class LoggingTests: XCTestCase {
                        "link \"https://example.com/a\" and 'https://example.com/c'")
         XCTAssertEqual(LogText.clean("https://user:SECRET@example.com/private/file.mp4", limit: 400), "https://example.com/private/file.mp4")
         XCTAssertEqual(LogText.clean("https://example.com/user@home/file", limit: 400), "https://example.com/user@home/file")
+        XCTAssertEqual(LogText.clean("https://example.com?mail=jane@other.example", limit: 400), "https://example.com")
+        XCTAssertEqual(LogText.clean("https://example.com#jane@other.example", limit: 400), "https://example.com")
     }
 
     func testCleanLeavesTextWithoutALinkQueryAlone() {
