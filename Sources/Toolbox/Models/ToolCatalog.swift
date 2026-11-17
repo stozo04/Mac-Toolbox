@@ -72,7 +72,7 @@ enum ToolCatalog {
              input: .live(symbol: "mic", idle: "Ready to record.", action: "Start Recording")),
         Tool(name: "Trim Audio", category: .audio, symbol: "scissors",
              tagline: "Cut a song or recording down to the part you want.",
-             input: drop("Audio", "Drop audio to choose the part you want to keep.", "waveform")),
+             input: .trimAudio),
         Tool(name: "Extract Audio", category: .audio, symbol: "film.stack",
              tagline: "Save the soundtrack of a video as an audio file.",
              input: .extractAudio),

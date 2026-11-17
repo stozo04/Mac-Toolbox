@@ -148,7 +148,7 @@ struct TrimVideoView: View {
 }
 
 /// A text field that shows a time and applies it on Return or when focus leaves.
-private struct TimeField: View {
+struct TimeField: View {
     let value: Double
     let set: (Double) -> Void
     @State private var text = ""

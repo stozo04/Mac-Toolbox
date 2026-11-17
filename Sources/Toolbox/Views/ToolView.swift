@@ -102,6 +102,8 @@ struct ToolWorkspace: View {
             MediaInfoView()
         case .extractAudio:
             ExtractAudioView()
+        case .trimAudio:
+            TrimAudioView()
         case .mac(let tool):
             MacToolView(tool: tool)
         case .videoToGif:

@@ -52,6 +52,8 @@ enum ToolInput: Hashable {
     case mediaInfo
     /// Queue of videos whose soundtrack is saved as M4A, MP3, WAV or AIFF (Extract Audio).
     case extractAudio
+    /// One audio file cut to the part you keep, with optional fades, saved as the same format, MP3, M4A, WAV, FLAC or AIFF (Trim Audio).
+    case trimAudio
     /// One of the Mac category's native tools (Keep Awake, Hidden Settings...).
     case mac(MacTool)
     /// No input file; the tool acts live (Keep Awake...).
