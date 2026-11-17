@@ -5,9 +5,9 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-enum FaceBlurError: LocalizedError, CustomNSError {
+enum FaceBlurError: LocalizedError, CustomNSError, Equatable {
     case unreadable
-    case detectionFailed
+    case detectionFailed(underlying: NSError? = nil)
     case saveFailed(underlying: NSError? = nil)
 
     var errorDescription: String? {
@@ -19,7 +19,10 @@ enum FaceBlurError: LocalizedError, CustomNSError {
     }
 
     var errorUserInfo: [String: Any] {
-        if case .saveFailed(let underlying?) = self { [NSUnderlyingErrorKey: underlying] } else { [:] }
+        switch self {
+        case .detectionFailed(let underlying?), .saveFailed(let underlying?): [NSUnderlyingErrorKey: underlying]
+        default: [:]
+        }
     }
 }
 
@@ -66,7 +69,7 @@ enum FaceBlur {
             let tag = CGImagePropertyOrientation(rawValue: UInt32(orientation(of: reader))) ?? .up
             try VNImageRequestHandler(cgImage: image, orientation: tag, options: [:]).perform([request])
         } catch {
-            throw FaceBlurError.detectionFailed
+            throw FaceBlurError.detectionFailed(underlying: error as NSError)
         }
         return (request.results ?? []).map(\.boundingBox)
     }

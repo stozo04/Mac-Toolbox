@@ -5,10 +5,10 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-enum RedactError: LocalizedError {
+enum RedactError: LocalizedError, CustomNSError, Equatable {
     case unreadable
     case animated
-    case findFailed
+    case findFailed(underlying: NSError? = nil)
     case saveFailed
     case notClean
 
@@ -20,6 +20,10 @@ enum RedactError: LocalizedError {
         case .saveFailed: "The image could not be saved with its regions covered."
         case .notClean: "The details could not be removed from this image, so no copy was saved."
         }
+    }
+
+    var errorUserInfo: [String: Any] {
+        if case .findFailed(let underlying?) = self { [NSUnderlyingErrorKey: underlying] } else { [:] }
     }
 }
 
@@ -211,7 +215,7 @@ enum RedactImage {
         request.recognitionLevel = .accurate
         // Addresses, emails and numbers are not words; "correcting" them would hide the wrong thing.
         request.usesLanguageCorrection = false
-        do { try VNImageRequestHandler(cgImage: image, options: [:]).perform([request]) } catch { throw RedactError.findFailed }
+        do { try VNImageRequestHandler(cgImage: image, options: [:]).perform([request]) } catch { throw RedactError.findFailed(underlying: error as NSError) }
         let (w, h) = (CGFloat(image.width), CGFloat(image.height))
         return (request.results ?? []).compactMap { line in
             guard let text = line.topCandidates(1).first?.string else { return nil }

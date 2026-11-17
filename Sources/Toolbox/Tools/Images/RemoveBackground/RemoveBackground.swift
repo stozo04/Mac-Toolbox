@@ -6,10 +6,10 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-enum RemoveBackgroundError: LocalizedError {
+enum RemoveBackgroundError: LocalizedError, CustomNSError, Equatable {
     case unreadable
     case noSubject
-    case detectionFailed
+    case detectionFailed(underlying: NSError? = nil)
     case renderFailed
     case saveFailed
 
@@ -21,6 +21,10 @@ enum RemoveBackgroundError: LocalizedError {
         case .renderFailed: "The cutout could not be made."
         case .saveFailed: "The cutout could not be saved."
         }
+    }
+
+    var errorUserInfo: [String: Any] {
+        if case .detectionFailed(let underlying?) = self { [NSUnderlyingErrorKey: underlying] } else { [:] }
     }
 }
 
@@ -80,13 +84,13 @@ enum RemoveBackground {
     static func subjectMask(in image: CGImage) throws -> CIImage {
         let request = VNGenerateForegroundInstanceMaskRequest()
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        do { try handler.perform([request]) } catch { throw RemoveBackgroundError.detectionFailed }
+        do { try handler.perform([request]) } catch { throw RemoveBackgroundError.detectionFailed(underlying: error as NSError) }
         guard let observation = request.results?.first, !observation.allInstances.isEmpty else { throw RemoveBackgroundError.noSubject }
         let buffer: CVPixelBuffer
         do {
             buffer = try observation.generateScaledMaskForImage(forInstances: observation.allInstances, from: handler)
         } catch {
-            throw RemoveBackgroundError.detectionFailed
+            throw RemoveBackgroundError.detectionFailed(underlying: error as NSError)
         }
         let mask = CIImage(cvPixelBuffer: buffer)
         let (w, h) = (CGFloat(image.width), CGFloat(image.height))

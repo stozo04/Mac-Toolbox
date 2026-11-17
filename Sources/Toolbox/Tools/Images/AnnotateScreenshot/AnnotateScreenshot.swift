@@ -617,7 +617,7 @@ enum AnnotateFormat: String, CaseIterable, Identifiable {
     var type: UTType { self == .png ? .png : .jpeg }
 }
 
-enum AnnotateError: LocalizedError, CustomNSError {
+enum AnnotateError: LocalizedError, CustomNSError, Equatable {
     case unreadable
     case encodeFailed
     case saveFailed(underlying: NSError? = nil)
