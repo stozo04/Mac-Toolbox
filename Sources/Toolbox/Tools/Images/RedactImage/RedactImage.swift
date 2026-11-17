@@ -290,7 +290,7 @@ enum RedactImage {
     // MARK: Saving
 
     /// A new copy of the image with `regions` covered, in the image's own format, upright and at full size. The original is never touched.
-    /// The covered pixels are replaced in the copy, so nothing underneath can be recovered.
+    /// The covered pixels are replaced in the copy. Only Black Box leaves nothing of them: blurred or pixelated small text can sometimes be worked out again.
     static func save(source: URL, regions: [CGRect], settings: RedactSettings, into folder: URL) throws -> RedactResult {
         guard let reader = CGImageSourceCreateWithURL(source as CFURL, nil), CGImageSourceGetCount(reader) > 0,
               let type = CGImageSourceGetType(reader).flatMap({ UTType($0 as String) }),

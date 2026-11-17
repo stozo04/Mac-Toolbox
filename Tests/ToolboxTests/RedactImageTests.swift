@@ -252,7 +252,62 @@ final class RedactImageTests: XCTestCase {
         XCTAssertTrue(lines.allSatisfy { CGRect(x: 0, y: 0, width: 1, height: 1).contains($0) })
     }
 
+    // MARK: Style
+
+    @MainActor func testFindAndCoverSwitchesToBlackBoxUntilAStyleIsChosen() async throws {
+        let model = RedactImageModel()
+        model.add([try writeTextPage(named: "page.png")])
+        XCTAssertEqual(model.settings.style, .blur)
+        _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+        XCTAssertEqual(model.settings.style, .blur, "a region drawn by hand keeps the style")
+        XCTAssertFalse(model.needsRecoverableTextCaution)
+
+        model.find(.text)
+        try await waitUntilFound(model)
+        XCTAssertEqual(model.selected?.regions.filter(\.coversFoundText).count, 3)
+        XCTAssertEqual(model.settings.style, .blackBox)
+        XCTAssertFalse(model.needsRecoverableTextCaution)
+
+        model.chooseStyle(.pixelate)
+        XCTAssertTrue(model.needsRecoverableTextCaution)
+        model.chooseStyle(.blackBox)
+        XCTAssertFalse(model.needsRecoverableTextCaution)
+        model.chooseStyle(.blur)
+        XCTAssertTrue(model.needsRecoverableTextCaution)
+
+        model.clearRegions()
+        XCTAssertFalse(model.needsRecoverableTextCaution, "with no found text left there is nothing to warn about")
+        model.find(.sensitive)
+        try await waitUntilFound(model)
+        XCTAssertEqual(model.selected?.regions.count, 1)
+        XCTAssertEqual(model.settings.style, .blur, "a style the user picked is not changed behind their back")
+        XCTAssertTrue(model.needsRecoverableTextCaution)
+    }
+
+    @MainActor func testAFindThatAddsNothingLeavesTheStyleAlone() async throws {
+        let model = RedactImageModel()
+        let wall = dir.appendingPathComponent("wall.png")
+        try write(try image(160, 120) { _, _ in (128, 128, 128) }, type: .png, to: wall)
+        model.add([wall])
+
+        model.find(.text)
+        try await waitUntilFound(model)
+        XCTAssertEqual(model.selected?.regions, [])
+        XCTAssertEqual(model.settings.style, .blur)
+    }
+
     // MARK: Helpers
+
+    private func writeTextPage(named name: String) throws -> URL {
+        let url = dir.appendingPathComponent(name)
+        try write(try textPage(["Meeting notes for Monday", "Email jane.doe@example.com", "Thanks and see you there"]), type: .png, to: url)
+        return url
+    }
+
+    @MainActor private func waitUntilFound(_ model: RedactImageModel) async throws {
+        for _ in 0..<400 where model.finding != nil { try await Task.sleep(nanoseconds: 25_000_000) }
+        XCTAssertNil(model.finding, "the search never finished")
+    }
 
     private func assertRect(_ r: CGRect, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(r.minX, x, accuracy: 1e-9, file: file, line: line)

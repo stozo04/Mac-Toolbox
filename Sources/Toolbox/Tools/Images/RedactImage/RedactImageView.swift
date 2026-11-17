@@ -219,9 +219,13 @@ struct RedactImageView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Cover with").font(.callout)
-                Picker("", selection: $model.settings.style) {
+                Picker("", selection: Binding(get: { model.settings.style }, set: { model.chooseStyle($0) })) {
                     ForEach(RedactStyle.allCases) { Text($0.label).tag($0) }
                 }.labelsHidden().pickerStyle(.segmented)
+                if model.needsRecoverableTextCaution {
+                    Label("Blurred or pixelated text can sometimes be recovered. Black Box cannot.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.yellow).fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(.vertical, 8)
             Divider()

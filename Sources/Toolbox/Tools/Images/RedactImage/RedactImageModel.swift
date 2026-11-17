@@ -17,6 +17,7 @@ final class RedactImageModel {
         let id = UUID()
         /// Normalized to the upright image, origin at the top left.
         var rect: CGRect
+        var coversFoundText = false
     }
 
     struct Item: Identifiable {
@@ -59,6 +60,7 @@ final class RedactImageModel {
     var selectedRegionID: UUID?
 
     var settings = RedactSettings()
+    private(set) var styleWasChosen = false
     var scope = Scope.thisImage
 
     private var task: Task<Void, Never>?
@@ -73,6 +75,14 @@ final class RedactImageModel {
     /// Images with nothing covered, which Export leaves out.
     var untouchedCount: Int { items.filter { $0.regions.isEmpty }.count }
     var regionCount: Int { items.reduce(0) { $0 + $1.regions.count } }
+    var needsRecoverableTextCaution: Bool {
+        settings.style != .blackBox && items.contains { $0.regions.contains(where: \.coversFoundText) }
+    }
+
+    func chooseStyle(_ style: RedactStyle) {
+        settings.style = style
+        styleWasChosen = true
+    }
 
     // MARK: Queue
 
@@ -207,7 +217,7 @@ final class RedactImageModel {
                 }.value
                 switch outcome {
                 case .success(let boxes):
-                    let n = merge(boxes, into: target.id)
+                    let n = merge(boxes, into: target.id, areText: kind != .faces)
                     added += n
                     if n > 0 { images += 1 }
                 case .failure(let error):
@@ -223,14 +233,18 @@ final class RedactImageModel {
     }
 
     /// Adds the boxes that are not already covered. Returns how many were added.
-    private func merge(_ boxes: [CGRect], into id: UUID) -> Int {
+    private func merge(_ boxes: [CGRect], into id: UUID, areText: Bool) -> Int {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return 0 }
         var added = 0
         for box in boxes where !items[i].regions.contains(where: { RedactImage.overlaps($0.rect, box) }) {
-            items[i].regions.append(Region(rect: box))
+            items[i].regions.append(Region(rect: box, coversFoundText: areText))
             added += 1
         }
-        if added > 0 { reopen(i) }
+        if added > 0 {
+            reopen(i)
+            // Blurred or pixelated text and faces can sometimes be made out again; a black box cannot.
+            if !styleWasChosen { settings.style = .blackBox }
+        }
         return added
     }
 
