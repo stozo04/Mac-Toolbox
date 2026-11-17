@@ -107,6 +107,17 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertTrue(RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(scan.page(at: 0))))
     }
 
+    func testAPageWithAnInlineImageIsRead() throws {
+        let text = "BT /F1 14 Tf 72 700 Td (A page of ordinary words that PDFKit can search) Tj ET"
+        let inlineImage = " q 40 0 0 40 100 100 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \u{7F} EI Q"
+        let plain = try RedactPDF.open(try writeHandMadePDF(content: text))
+        let withImage = try RedactPDF.open(try writeHandMadePDF(content: text + inlineImage))
+
+        XCTAssertTrue(RedactPDF.hasText(try XCTUnwrap(plain.page(at: 0))), "the hand-made page must have a text layer")
+        XCTAssertFalse(RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(plain.page(at: 0))))
+        XCTAssertTrue(RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(withImage.page(at: 0))))
+    }
+
     func testAPageThatCannotBeReadIsReportedAndItsTextLayerIsStillSearched() throws {
         struct VisionIsDown: Error {}
         let document = try RedactPDF.open(try makeAnnotatedPDF(note: "Zanzibar"))
@@ -584,7 +595,6 @@ final class RedactPDFTests: XCTestCase {
         CTLineDraw(text, context)
     }
 
-    /// Letter-size pages that each print a long line of real text, then whatever `pages` draws.
     private func makeDrawnPDF(pages: [(CGContext) -> Void]) throws -> URL {
         let data = NSMutableData()
         var media = CGRect(x: 0, y: 0, width: 612, height: 792)
@@ -602,7 +612,29 @@ final class RedactPDFTests: XCTestCase {
         return url
     }
 
-    /// Two pages of real text; the second also has a free-text note that says `note`.
+    private func writeHandMadePDF(content: String) throws -> URL {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            "<< /Length \(content.utf8.count) >>\nstream\n\(content)\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        var file = "%PDF-1.4\n"
+        var offsets: [Int] = []
+        for (number, body) in objects.enumerated() {
+            offsets.append(file.utf8.count)
+            file += "\(number + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let table = file.utf8.count
+        file += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for offset in offsets { file += String(format: "%010d 00000 n \n", offset) }
+        file += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(table)\n%%EOF\n"
+        let url = dir.appendingPathComponent("hand-made-\(UUID()).pdf")
+        try Data(file.utf8).write(to: url)
+        return url
+    }
+
     private func makeAnnotatedPDF(note text: String) throws -> URL {
         let document = try XCTUnwrap(PDFDocument(url: try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)],
                                                                           [Line("Second page text", x: 72, y: 600, size: 28)]])))

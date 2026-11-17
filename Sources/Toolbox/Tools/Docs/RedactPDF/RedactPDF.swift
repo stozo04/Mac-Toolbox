@@ -206,8 +206,8 @@ enum RedactPDF {
         !hasText(page) || page.annotations.contains { $0.type != "Link" } || paintsPicturesOrCurves(page)
     }
 
-    /// Images and forms (Do), inline images (BI), shadings (sh) and curves (c, v, y), which is how text turned into outlines is drawn.
-    private static let pictureOperators = ["Do", "BI", "sh", "c", "v", "y"]
+    /// Images and forms (Do), inline images (BI, ID, EI), shadings (sh) and curves (c, v, y), which is how text turned into outlines is drawn.
+    private static let pictureOperators = ["Do", "BI", "ID", "EI", "sh", "c", "v", "y"]
 
     private static func paintsPicturesOrCurves(_ page: PDFPage) -> Bool {
         guard let reference = page.pageRef, let operators = CGPDFOperatorTableCreate() else { return true }
@@ -216,14 +216,16 @@ enum RedactPDF {
             CGPDFOperatorTableSetCallback(operators, name) { _, found in found?.assumingMemoryBound(to: Bool.self).pointee = true }
         }
         var found = false
-        withUnsafeMutablePointer(to: &found) { flag in
+        let parsed = withUnsafeMutablePointer(to: &found) { flag in
             let content = CGPDFContentStreamCreateWithPage(reference)
             let scanner = CGPDFScannerCreate(content, operators, flag)
-            CGPDFScannerScan(scanner)
-            CGPDFScannerRelease(scanner)
-            CGPDFContentStreamRelease(content)
+            defer {
+                CGPDFScannerRelease(scanner)
+                CGPDFContentStreamRelease(content)
+            }
+            return CGPDFScannerScan(scanner)
         }
-        return found
+        return found || !parsed
     }
 
     private static func recognizedLines(on page: PDFPage, recognize: TextRecognizer) throws -> [VNRecognizedTextObservation] {
@@ -334,7 +336,7 @@ enum RedactPDF {
         pdf.beginPDFPage(nil)
         pdf.draw(picture, in: media)
         // Read from the picture with the boxes already in it, so what they hide cannot come back as text.
-        if searchable { DocumentScanner.drawInvisibleText(DocumentScanner.recognizeText(in: readable), in: media, context: pdf) }
+        if searchable { DocumentScanner.drawInvisibleText(DocumentScanner.recognizeText(in: readable, logCategory: "redact-pdf"), in: media, context: pdf) }
         pdf.endPDFPage()
         pdf.closePDF()
         guard let owner = PDFDocument(data: data as Data), let flat = owner.page(at: 0) else { throw RedactPDFError.pageFailed }
