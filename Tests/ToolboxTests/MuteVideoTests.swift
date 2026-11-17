@@ -104,8 +104,8 @@ final class MuteVideoTests: XCTestCase {
         XCTAssertEqual(model.items.count, 3, "the same file is not added twice")
 
         model.mute()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "every video is muted") { !model.isRunning }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         XCTAssertEqual(model.results.count, 2)
         XCTAssertEqual(model.items.last?.status, .silent)
@@ -120,18 +120,19 @@ final class MuteVideoTests: XCTestCase {
         let model = MuteVideoModel()
         model.add(first)
         model.mute()
+        removeAfterTest(model.folder)
         try await waitUntil("the first video is being muted") { isMuting(model.items.first?.status) }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add(second)
         model.mute()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the second batch has finished") {
             guard model.isRunning else { return true }
             model.mute()
             return false
         }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         XCTAssertEqual(model.items.count, second.count)
         let names = model.results.map(\.url.lastPathComponent).sorted()

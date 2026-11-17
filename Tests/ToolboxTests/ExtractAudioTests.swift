@@ -251,14 +251,15 @@ final class ExtractAudioTests: XCTestCase {
         model.settings = .init(format: .wav)
         model.add([long])
         model.extract()
+        removeAfterTest(model.folder)
         try await waitUntil("the first file is being extracted") { isExtracting(model.items.first?.status) }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add([short])
         model.extract()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         XCTAssertEqual(model.items.count, 1)
         XCTAssertEqual(model.results.map(\.url.lastPathComponent), ["Short.wav"])
@@ -274,8 +275,8 @@ final class ExtractAudioTests: XCTestCase {
         XCTAssertEqual(model.items.count, 1)
 
         model.extract()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
         XCTAssertTrue(try XCTUnwrap(model.items.first).isFailed)
         XCTAssertTrue(model.hasPending, "a failed video can be tried again")
 
@@ -283,6 +284,7 @@ final class ExtractAudioTests: XCTestCase {
         try FileManager.default.removeItem(at: broken)
         try FileManager.default.moveItem(at: dir.appendingPathComponent("Fixed.mov"), to: broken)
         model.extract()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
         XCTAssertEqual(model.results.count, 1)
     }
@@ -324,8 +326,8 @@ final class ExtractAudioTests: XCTestCase {
         XCTAssertEqual(model.items.count, 3, "the same file is not added twice")
 
         model.extract()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         XCTAssertEqual(model.results.map(\.url.lastPathComponent), ["One.wav", "Two.wav"])
         XCTAssertEqual(model.items.last?.status, .noSoundtrack)

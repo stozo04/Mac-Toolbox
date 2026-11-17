@@ -598,7 +598,7 @@ final class AnnotateScreenshotTests: XCTestCase {
         // The picture is shown at 856/900 of its size, 22 points in from the left and centered from the top.
         let scale = 856.0 / 900
         let top = 36 + 150 * scale, bottom = 36 + 300 * scale
-        func light(_ y: CGFloat) throws -> CGFloat { try XCTUnwrap(try XCTUnwrap(rep.colorAt(x: Int(450 * k), y: Int(y * k))).usingColorSpace(.sRGB)).redComponent }
+        func light(_ y: CGFloat) throws -> CGFloat { try XCTUnwrap(rep.colorAt(x: Int(450 * k), y: Int(y * k))?.usingColorSpace(.sRGB)).redComponent }
         XCTAssertLessThan(try light(bottom + 3), try light(top - 3), "below the mark is darker than above it")
     }
 

@@ -205,9 +205,9 @@ final class ConvertImagesTests: XCTestCase {
         model.add([try makeImage(format: .jpg, name: "one"), try makeImage(format: .heic, name: "two"), dir.appendingPathComponent("bad.txt")])
         try "x".write(to: dir.appendingPathComponent("bad.txt"), atomically: true, encoding: .utf8)
         model.add([dir.appendingPathComponent("bad.txt")])
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         model.convert()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(60), "every image is converted") {
             !model.isRunning && !model.items.contains(where: { $0.status == .waiting || $0.status == .converting })
         }
@@ -223,18 +223,19 @@ final class ConvertImagesTests: XCTestCase {
         model.settings.format = .webp
         model.add(first)
         model.convert()
+        removeAfterTest(model.folder)
         try await waitUntil("the first image is being converted") { model.items.first?.status == .converting }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add(second)
         model.convert()
+        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(60), "the second batch has finished") {
             guard model.isRunning else { return true }
             model.convert()
             return false
         }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
 
         XCTAssertEqual(model.items.count, second.count)
         XCTAssertEqual(model.doneCount, second.count, "every image of the new batch finished before the queue went idle")

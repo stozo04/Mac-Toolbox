@@ -2,11 +2,12 @@ import AppKit
 import AVFoundation
 import XCTest
 
-struct TestSupportFailure: LocalizedError {
-    let errorDescription: String?
+struct TestSupportFailure: LocalizedError, CustomStringConvertible {
+    let description: String
+    var errorDescription: String? { description }
 
     init(_ message: String, file: StaticString, line: UInt) {
-        errorDescription = "\(message) (\(URL(fileURLWithPath: "\(file)").lastPathComponent):\(line))"
+        description = "\(message) (\(URL(fileURLWithPath: "\(file)").lastPathComponent):\(line))"
     }
 }
 
@@ -14,7 +15,7 @@ func missingTools(_ message: String, file: StaticString = #filePath, line: UInt 
     ProcessInfo.processInfo.environment["CI"] == "true" ? TestSupportFailure(message, file: file, line: line) : XCTSkip(message)
 }
 
-private let pollInterval = Duration.milliseconds(5)
+private let pollInterval = Duration.milliseconds(1)
 
 @MainActor
 func waitUntil(timeout: Duration = .seconds(10), _ what: String, file: StaticString = #filePath, line: UInt = #line,
@@ -62,6 +63,11 @@ extension XCTestCase {
         }
         addTeardownBlock { defaults.removePersistentDomain(forName: domain) }
         return defaults
+    }
+
+    func removeAfterTest(_ url: URL?) {
+        guard let url else { return }
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
     }
 
     func makeScratchPasteboard() -> NSPasteboard {
