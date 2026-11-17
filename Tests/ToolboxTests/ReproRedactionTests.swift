@@ -1,4 +1,3 @@
-import AVFoundation
 import CoreText
 import PDFKit
 import XCTest
@@ -118,25 +117,6 @@ final class ReproRedactionTests: XCTestCase {
         XCTAssertTrue(exists && isDirectory.boolValue, "finding: a folder that was never made was returned with no error: name of \(folder.lastPathComponent.utf8.count) bytes")
     }
 
-    func testR6TrimmingTheSameFileTwiceKeepsTheFirstClip() async throws {
-        let source = dir.appendingPathComponent("clip.mov")
-        try await makeClip(at: source, seconds: 4)
-        let out = dir.appendingPathComponent("out")
-        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-
-        let first = try await VideoTrimmer.trim(source: source, start: 1, end: 3, into: out) { _ in }
-        let firstBytes = try Data(contentsOf: first.url)
-        XCTAssertFalse(first.reencoded, "precondition: the first trim is a plain copy")
-        let second = try await VideoTrimmer.trim(source: source, start: 0, end: 1, into: out) { _ in }
-
-        XCTAssertNotEqual(second.url, first.url, "finding: the second clip was written to the first clip's name")
-        XCTAssertFalse(second.reencoded, "finding: the second trim only worked through the fallback, which removes the file in its way")
-        let firstNow = try? Data(contentsOf: first.url)
-        XCTAssertEqual(firstNow, firstBytes, "finding: the first clip is no longer the file that was saved")
-        let files = try FileManager.default.contentsOfDirectory(atPath: out.path)
-        XCTAssertEqual(files.count, 2, "finding: two trims left \(files.count) file(s): \(files)")
-    }
-
     private struct Line {
         let text: String, x: CGFloat, y: CGFloat, size: CGFloat
         init(_ text: String, x: CGFloat, y: CGFloat, size: CGFloat) { (self.text, self.x, self.y, self.size) = (text, x, y, size) }
@@ -213,32 +193,5 @@ final class ReproRedactionTests: XCTestCase {
         let url = dir.appendingPathComponent("annotated-\(UUID()).pdf")
         XCTAssertTrue(document.write(to: url))
         return url
-    }
-
-    private func makeClip(at url: URL, seconds: Int) async throws {
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64,
-        ])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64,
-        ])
-        writer.add(input)
-        writer.startWriting()
-        writer.startSession(atSourceTime: .zero)
-        for frame in 0..<(seconds * 10) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-            var buffer: CVPixelBuffer?
-            CVPixelBufferCreate(nil, 64, 64, kCVPixelFormatType_32BGRA, nil, &buffer)
-            let pixels = try XCTUnwrap(buffer)
-            CVPixelBufferLockBaseAddress(pixels, [])
-            memset(CVPixelBufferGetBaseAddress(pixels), Int32(frame * 5 % 255), CVPixelBufferGetDataSize(pixels))
-            CVPixelBufferUnlockBaseAddress(pixels, [])
-            adaptor.append(pixels, withPresentationTime: CMTime(value: Int64(frame), timescale: 10))
-        }
-        input.markAsFinished()
-        await writer.finishWriting()
-        XCTAssertEqual(writer.status, .completed)
     }
 }

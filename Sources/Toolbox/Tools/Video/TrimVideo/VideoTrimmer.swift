@@ -29,8 +29,8 @@ enum VideoTrimmer {
         }
     }
 
-    static func outputName(for source: URL, ext: String) -> String {
-        source.deletingPathExtension().lastPathComponent + " (Trimmed)." + ext
+    static func outputBase(for source: URL) -> String {
+        source.deletingPathExtension().lastPathComponent + " (Trimmed)"
     }
 
     /// Copies the streams without re-encoding; if the format does not allow it, re-encodes at the highest quality.
@@ -41,7 +41,7 @@ enum VideoTrimmer {
         let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
                                 end: CMTime(seconds: end, preferredTimescale: 600))
         let (type, ext) = outputType(forExtension: source.pathExtension)
-        let output = folder.appendingPathComponent(outputName(for: source, ext: ext))
+        let output = BatchFiles.uniqueURL(in: folder, name: outputBase(for: source), ext: ext)
 
         do {
             try await export(asset, preset: AVAssetExportPresetPassthrough, type: type, range: range, to: output, progress: progress)
