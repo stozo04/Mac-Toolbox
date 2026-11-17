@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.1"
+    static let current = "0.11.3"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,17 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.11.3", date: "2026-11-17", changes: [
+            .init(kind: .fixed, text: "Redact PDF: Find & Redact now also reads scanned pages that have a page number on them, and words shown in notes and pictures."),
+            .init(kind: .fixed, text: "Redact PDF: if a page could not be searched, the result names the page so you can check it yourself."),
+            .init(kind: .improved, text: "Redact PDF: the copy is searched again for the words you covered, and you are told how often one is still there where you left it uncovered."),
+            .init(kind: .fixed, text: "Redact PDF: a copy can no longer be saved over the original through a hard link or another name for the same file."),
+            .init(kind: .improved, text: "Redact Image: Find & Cover uses Black Box unless you picked a style, and warns when you blur or pixelate found text, which can sometimes be undone."),
+            .init(kind: .fixed, text: "Trim Video: trimming the same video twice no longer replaces the first clip."),
+            .init(kind: .fixed, text: "If the output folder in Downloads cannot be created, tools now say so once instead of failing every file."),
+            .init(kind: .fixed, text: "Wi-Fi Password & QR and Annotate Screenshot now tell you when the QR code or the dragged image could not be saved."),
+            .init(kind: .fixed, text: "Behind the scenes: error reports no longer include the part of a web link after the question mark."),
+        ]),
         Release(version: "0.11.1", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Behind the scenes: the Keep Awake checks wait for macOS to list a new sleep block, so an automatic check no longer stops all the others."),
         ]),
