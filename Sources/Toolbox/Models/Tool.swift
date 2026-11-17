@@ -50,6 +50,8 @@ enum ToolInput: Hashable {
     case muteVideo
     /// List of files with codec, track and metadata details (Media Info).
     case mediaInfo
+    /// Queue of videos whose soundtrack is saved as M4A, MP3, WAV or AIFF (Extract Audio).
+    case extractAudio
     /// One of the Mac category's native tools (Keep Awake, Hidden Settings...).
     case mac(MacTool)
     /// No input file; the tool acts live (Keep Awake...).

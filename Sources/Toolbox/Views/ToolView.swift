@@ -100,6 +100,8 @@ struct ToolWorkspace: View {
             MuteVideoView()
         case .mediaInfo:
             MediaInfoView()
+        case .extractAudio:
+            ExtractAudioView()
         case .mac(let tool):
             MacToolView(tool: tool)
         case .videoToGif:
