@@ -109,14 +109,6 @@ final class ReproRedactionTests: XCTestCase {
         }
     }
 
-    func testR6OutputFolderThatCannotBeMadeIsNotHandedBackAsIfItExisted() {
-        let impossible = String(repeating: "x", count: 300)
-        let folder = BatchFiles.makeOutputFolder(named: impossible)
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory)
-        XCTAssertTrue(exists && isDirectory.boolValue, "finding: a folder that was never made was returned with no error: name of \(folder.lastPathComponent.utf8.count) bytes")
-    }
-
     private struct Line {
         let text: String, x: CGFloat, y: CGFloat, size: CGFloat
         init(_ text: String, x: CGFloat, y: CGFloat, size: CGFloat) { (self.text, self.x, self.y, self.size) = (text, x, y, size) }

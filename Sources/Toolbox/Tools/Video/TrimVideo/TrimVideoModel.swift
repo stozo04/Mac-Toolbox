@@ -170,11 +170,11 @@ final class TrimVideoModel {
         player.pause()
         saveState = .saving(0)
         let (start, end) = (selection.start, selection.end)
-        let folder = Self.makeFolder()
-        self.folder = folder
         saveTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let folder = try BatchFiles.makeOutputFolder(named: "Toolbox Videos")
+                self.folder = folder
                 let result = try await VideoTrimmer.trim(source: file, start: start, end: end, into: folder) { p in
                     Task { @MainActor in
                         if case .saving = self.saveState { self.saveState = .saving(p) }
@@ -195,17 +195,6 @@ final class TrimVideoModel {
 
     func reveal() {
         if case .done(let url, _) = saveState { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-    }
-
-    /// A new dated folder in Downloads for each trim, e.g. "Toolbox Videos 2026-10-26 14.30.05".
-    private static func makeFolder() -> URL {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let dir = downloads.appendingPathComponent("Toolbox Videos \(f.string(from: Date()))")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
     }
 }
 

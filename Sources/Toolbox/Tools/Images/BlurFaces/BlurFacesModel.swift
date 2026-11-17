@@ -134,8 +134,13 @@ final class BlurFacesModel {
     /// Saves a copy of every ready photo with its included faces hidden, into one new dated folder in Downloads.
     func blur() {
         guard !isRunning, hasPending, !isDetecting else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Blurred Photos") } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "blur-faces", Log.details(error))
+            return
+        }
         isRunning = true
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Blurred Photos")
         self.folder = folder
         let settings = self.settings
         let work = items.filter { $0.status == .ready }.map { (id: $0.id, url: $0.url, boxes: $0.includedBoxes) }

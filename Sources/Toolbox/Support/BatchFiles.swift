@@ -1,6 +1,17 @@
 import Foundation
 import UniformTypeIdentifiers
 
+struct OutputFolderError: LocalizedError, CustomNSError {
+    let parentName: String
+    let underlying: Error
+
+    var errorDescription: String? {
+        "Couldn't create the output folder in “\(parentName)”. Check that Toolbox is allowed to save files there, and that the disk is not full."
+    }
+
+    var errorUserInfo: [String: Any] { [NSUnderlyingErrorKey: underlying as NSError] }
+}
+
 /// Helpers for tools that convert a queue of videos into a dated folder in Downloads.
 enum BatchFiles {
     /// A file's identity for spotting the same file added twice: /tmp and /private/tmp, or a link and its target, are one file.
@@ -38,14 +49,18 @@ enum BatchFiles {
         return (walker?.compactMap { $0 as? URL } ?? []).filter(isImage).sorted { $0.path < $1.path }
     }
 
-    /// A new dated folder in Downloads, e.g. "Toolbox GIFs 2026-10-26 14.30.05".
-    static func makeOutputFolder(named prefix: String) -> URL {
+    /// A new dated folder in Downloads (or in `parent`), e.g. "Toolbox GIFs 2026-10-26 14.30.05".
+    static func makeOutputFolder(named prefix: String, in parent: URL? = nil) throws -> URL {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let dir = downloads.appendingPathComponent("\(prefix) \(f.string(from: Date()))")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let parent = parent ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let dir = parent.appendingPathComponent("\(prefix) \(f.string(from: Date()))")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            throw OutputFolderError(parentName: parent.lastPathComponent, underlying: error)
+        }
         return dir
     }
 

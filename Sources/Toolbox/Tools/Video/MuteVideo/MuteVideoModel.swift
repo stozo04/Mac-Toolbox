@@ -67,9 +67,14 @@ final class MuteVideoModel {
 
     func mute() {
         guard !isRunning, hasPending else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Muted Videos") } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "mute", Log.details(error))
+            return
+        }
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Muted Videos")
         self.folder = folder
         let run = UUID()
         runID = run

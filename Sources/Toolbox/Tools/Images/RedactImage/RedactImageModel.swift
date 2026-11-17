@@ -246,8 +246,13 @@ final class RedactImageModel {
     /// Saves a copy of every image that has regions, with them covered, into one new dated folder in Downloads.
     func export() {
         guard !isBusy, hasExportable else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images") } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "redact-image", Log.details(error))
+            return
+        }
         isRunning = true
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images")
         self.folder = folder
         let settings = self.settings
         let work = items.filter(\.isExportable).map { (id: $0.id, url: $0.url, rects: $0.rects) }

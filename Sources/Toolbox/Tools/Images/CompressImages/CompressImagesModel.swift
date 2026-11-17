@@ -80,9 +80,14 @@ final class CompressImagesModel {
 
     func compress() {
         guard !isRunning, hasPending else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Compressed Images") } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "compress-images", Log.details(error))
+            return
+        }
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Compressed Images")
         self.folder = folder
         let settings = self.settings
         let run = UUID()
