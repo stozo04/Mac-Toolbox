@@ -28,8 +28,51 @@ final class VaultWriteGate: @unchecked Sendable {
     }
 }
 
+struct VaultThumbnailMemory {
+    let byteLimit: Int
+    private var images: [String: CGImage] = [:]
+    private var leastRecentFirst: [String] = []
+    private(set) var bytes = 0
+
+    init(byteLimit: Int) { self.byteLimit = byteLimit }
+
+    var count: Int { images.count }
+
+    static func bytes(of image: CGImage) -> Int { image.bytesPerRow * image.height }
+
+    mutating func image(for key: String) -> CGImage? {
+        guard let image = images[key] else { return nil }
+        leastRecentFirst.removeAll { $0 == key }
+        leastRecentFirst.append(key)
+        return image
+    }
+
+    mutating func keep(_ image: CGImage, for key: String) {
+        remove(key)
+        images[key] = image
+        leastRecentFirst.append(key)
+        bytes += Self.bytes(of: image)
+        while bytes > byteLimit, let oldest = leastRecentFirst.first, oldest != key { remove(oldest) }
+    }
+
+    @discardableResult
+    mutating func remove(_ key: String) -> CGImage? {
+        guard let image = images.removeValue(forKey: key) else { return nil }
+        leastRecentFirst.removeAll { $0 == key }
+        bytes -= Self.bytes(of: image)
+        return image
+    }
+
+    mutating func removeAll() {
+        images = [:]
+        leastRecentFirst = []
+        bytes = 0
+    }
+}
+
 actor VaultThumbnails {
     static let maxPixels = 480
+    static let memoryByteLimit = 64 * 1024 * 1024
     private static let jpegQuality = 0.8
     private static let videoFrameSecond = 1.0
 
@@ -37,13 +80,17 @@ actor VaultThumbnails {
     nonisolated let gate = VaultWriteGate()
     private let vaultRoot: URL
     private let requiresMountedVolume: Bool
-    private var memory: [String: CGImage] = [:]
+    private var memory: VaultThumbnailMemory
 
-    init(vaultRoot: URL, requiresMountedVolume: Bool = true) {
+    init(vaultRoot: URL, requiresMountedVolume: Bool = true, memoryByteLimit: Int = VaultThumbnails.memoryByteLimit) {
         self.vaultRoot = vaultRoot
         self.requiresMountedVolume = requiresMountedVolume
+        memory = VaultThumbnailMemory(byteLimit: memoryByteLimit)
         folder = vaultRoot.appendingPathComponent(VaultLibrary.privateFolderName).appendingPathComponent("thumbs")
     }
+
+    var memoryCount: Int { memory.count }
+    var memoryBytes: Int { memory.bytes }
 
     private var vaultIsMounted: Bool {
         !requiresMountedVolume || Self.isMountedVolume(vaultRoot.path)
@@ -55,14 +102,15 @@ actor VaultThumbnails {
 
     func image(for item: VaultItem) async -> CGImage? {
         let key = Self.key(for: item)
-        if let cached = memory[key] { return cached }
+        if let cached = memory.image(for: key) { return cached }
+        guard !Task.isCancelled else { return nil }
         let file = folder.appendingPathComponent(key + ".jpg")
         if let stored = Self.load(file) {
-            memory[key] = stored
+            memory.keep(stored, for: key)
             return stored
         }
         guard !gate.isClosed, vaultIsMounted, let made = await Self.make(for: item) else { return nil }
-        memory[key] = made
+        memory.keep(made, for: key)
         let privateFolder = folder.deletingLastPathComponent()
         let mounted = { [requiresMountedVolume, rootPath = vaultRoot.path] in
             !requiresMountedVolume || Self.isMountedVolume(rootPath)
@@ -76,14 +124,14 @@ actor VaultThumbnails {
 
     func remove(_ item: VaultItem) {
         let key = Self.key(for: item)
-        memory[key] = nil
+        memory.remove(key)
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(key + ".jpg"))
     }
 
     func carryOver(from old: VaultItem, to new: VaultItem) {
         let oldKey = Self.key(for: old), newKey = Self.key(for: new)
         let oldFile = folder.appendingPathComponent(oldKey + ".jpg"), newFile = folder.appendingPathComponent(newKey + ".jpg")
-        if let image = memory.removeValue(forKey: oldKey), memory[newKey] == nil { memory[newKey] = image }
+        if let image = memory.remove(oldKey), memory.image(for: newKey) == nil { memory.keep(image, for: newKey) }
         if FileManager.default.fileExists(atPath: newFile.path) {
             try? FileManager.default.removeItem(at: oldFile)
         } else {

@@ -308,6 +308,67 @@ final class VaultTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".toolbox").path))
     }
 
+    func testThumbnailMemoryDropsTheLeastRecentlyShownPastItsLimit() async throws {
+        let photos = try (0..<8).map { try makePhoto("tile-\($0).png", in: vault) }
+        let items = VaultLibrary.items(in: vault)
+        XCTAssertEqual(items.count, photos.count)
+        let probe = VaultThumbnails(vaultRoot: vault, requiresMountedVolume: false)
+        let probed = await probe.image(for: try XCTUnwrap(items.first))
+        let oneThumbnail = VaultThumbnailMemory.bytes(of: try XCTUnwrap(probed))
+        let thumbnails = VaultThumbnails(vaultRoot: vault, requiresMountedVolume: false, memoryByteLimit: oneThumbnail * 3)
+
+        var shown: [CGImage] = []
+        for item in items {
+            let image = await thumbnails.image(for: item)
+            shown.append(try XCTUnwrap(image))
+        }
+
+        let held = await thumbnails.memoryCount
+        let heldBytes = await thumbnails.memoryBytes
+        XCTAssertEqual(held, 3, "\(items.count) thumbnails were shown and \(held) are still in memory")
+        XCTAssertEqual(heldBytes, oneThumbnail * 3)
+        let newestAgain = await thumbnails.image(for: try XCTUnwrap(items.last))
+        XCTAssertTrue(newestAgain === shown.last, "the thumbnail shown last was dropped")
+    }
+
+    func testThumbnailMemoryKeepsWhatWasJustLookedAt() throws {
+        let image = try XCTUnwrap(CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 16,
+                                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage())
+        let cost = VaultThumbnailMemory.bytes(of: image)
+        var memory = VaultThumbnailMemory(byteLimit: cost * 2)
+        memory.keep(image, for: "first")
+        memory.keep(image, for: "second")
+        XCTAssertNotNil(memory.image(for: "first"))
+
+        memory.keep(image, for: "third")
+
+        XCTAssertNotNil(memory.image(for: "first"))
+        XCTAssertNil(memory.image(for: "second"))
+        XCTAssertNotNil(memory.remove("third"))
+        XCTAssertEqual(memory.bytes, cost)
+        memory.removeAll()
+        XCTAssertEqual(memory.bytes, 0)
+        XCTAssertEqual(memory.count, 0)
+    }
+
+    func testAThumbnailRequestCancelledBeforeItStartsDecodesNothing() async throws {
+        _ = try makePhoto("scrolled-past.png", in: vault)
+        let item = try XCTUnwrap(VaultLibrary.items(in: vault).first)
+        let thumbnails = VaultThumbnails(vaultRoot: vault, requiresMountedVolume: false)
+
+        let request = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await thumbnails.image(for: item)
+        }
+        let image = await request.value
+
+        let held = await thumbnails.memoryCount
+        let folder = await thumbnails.folder
+        XCTAssertNil(image)
+        XCTAssertEqual(held, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), "a cancelled request still wrote a thumbnail")
+    }
+
     func testNewestItemsComeFirst() {
         let old = VaultItem(url: URL(fileURLWithPath: "/v/old.png"), kind: .image, added: Date(timeIntervalSince1970: 1), bytes: 1)
         let new = VaultItem(url: URL(fileURLWithPath: "/v/new.png"), kind: .image, added: Date(timeIntervalSince1970: 2), bytes: 1)
