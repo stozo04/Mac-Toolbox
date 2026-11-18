@@ -192,7 +192,7 @@ final class ConvertImagesTests: XCTestCase {
         try FileManager.default.copyItem(at: png, to: sub.appendingPathComponent("one.png"))
         try FileManager.default.copyItem(at: png, to: sub.appendingPathComponent("two.PNG"))
         try "x".write(to: sub.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
-        let model = ConvertImagesModel()
+        let model = ConvertImagesModel(outputParent: dir)
         model.add([sub, sub.appendingPathComponent("one.png"), dir.appendingPathComponent("a-missing.png")])
         XCTAssertEqual(model.items.map(\.url.lastPathComponent), ["one.png", "two.PNG"])
         XCTAssertEqual(model.items.first?.kind, "PNG")
@@ -200,14 +200,13 @@ final class ConvertImagesTests: XCTestCase {
     }
 
     @MainActor func testQueueConvertsABatchIntoOneFolder() async throws {
-        let model = ConvertImagesModel()
+        let model = ConvertImagesModel(outputParent: dir)
         model.settings.format = .webp
         model.add([try makeImage(format: .jpg, name: "one"), try makeImage(format: .heic, name: "two"), dir.appendingPathComponent("bad.txt")])
         try "x".write(to: dir.appendingPathComponent("bad.txt"), atomically: true, encoding: .utf8)
         model.add([dir.appendingPathComponent("bad.txt")])
 
         model.convert()
-        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(60), "every image is converted") {
             !model.isRunning && !model.items.contains(where: { $0.status == .waiting || $0.status == .converting })
         }
@@ -219,18 +218,16 @@ final class ConvertImagesTests: XCTestCase {
     @MainActor func testClearDuringARunLetsANewBatchFinishOnItsOwn() async throws {
         let first = try (1...2).map { try makeNoisyImage(name: "First \($0)", side: 1200) }
         let second = try (1...4).map { try makeNoisyImage(name: "Second \($0)", side: 1200) }
-        let model = ConvertImagesModel()
+        let model = ConvertImagesModel(outputParent: dir)
         model.settings.format = .webp
         model.add(first)
         model.convert()
-        removeAfterTest(model.folder)
         try await waitUntil("the first image is being converted") { model.items.first?.status == .converting }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add(second)
         model.convert()
-        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(60), "the second batch has finished") {
             guard model.isRunning else { return true }
             model.convert()

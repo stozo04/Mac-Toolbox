@@ -55,6 +55,10 @@ enum BatchFiles {
         return (walker?.compactMap { $0 as? URL } ?? []).filter(isImage).sorted { $0.path < $1.path }
     }
 
+    static func bytes(of url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+
     /// A new dated folder in Downloads (or in `parent`), e.g. "Toolbox GIFs 2026-10-26 14.30.05", or "… 14.30.05 2" when that one exists.
     static func makeOutputFolder(named prefix: String, in parent: URL? = nil) throws -> URL {
         let f = DateFormatter()

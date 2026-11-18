@@ -109,6 +109,12 @@ final class BatchQueue<Item: BatchItem> {
             queue.begin(status, for: id, in: run)
         }
 
+        @MainActor func detached<Output>(showing status: Item.QueueStatus,
+                                         _ work: @escaping @Sendable () throws -> Output) async throws -> Output {
+            set(status)
+            return try await Task.detached(priority: .userInitiated, operation: work).value
+        }
+
         @MainActor func progress(_ status: @escaping @Sendable (Double) -> Item.QueueStatus) -> @Sendable (Double) -> Void {
             let phase = queue.begin(status(0), for: id, in: run)
             return { [queue, id] fraction in
