@@ -314,6 +314,46 @@ final class VaultDiskTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: disk.location.mountPoint.path))
     }
 
+    @MainActor
+    func testAFailedUnlockNeverEjectsAMountWhileAnotherCopyIsRunning() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("two-unlocks"))
+        let disk = VaultDisk(location: location)
+        try await disk.create(password: Self.password)
+        addTeardownBlock { disk.lockAndWait() }
+        let mountsThenFails = VaultTool { path, arguments, input, timeout in
+            let result = try await VaultTool.system.run(path, arguments, input, timeout)
+            guard arguments.contains("attach") else { return result }
+            return Shell.Result(status: 1, out: "", err: "the other copy's attach won")
+        }
+        let model = VaultModel(location: location, watchesSystem: false, tool: mountsThenFails, anotherCopyIsRunning: { true })
+
+        await model.unlock(password: Self.password)
+
+        XCTAssertTrue(disk.isOpen, "a failed unlock ejected the vault another copy had just opened")
+        XCTAssertFalse(model.ownsMount)
+        XCTAssertEqual(model.phase, .locked)
+        XCTAssertEqual(model.message, "The vault couldn't open. the other copy's attach won")
+    }
+
+    func testAFailedAttachLeavesAloneAVolumeThatWasMountedBeforeItBegan() async throws {
+        let disk = try await makeOpenDisk("mounted-before")
+        var late = disk
+        late.tool = VaultTool { path, arguments, input, timeout in
+            if arguments.first == "eject" || arguments.first == "detach" { return Shell.Result(status: 0, out: "", err: "") }
+            guard arguments.contains("attach") else { return try await VaultTool.system.run(path, arguments, input, timeout) }
+            return Shell.Result(status: 1, out: "", err: "already attached")
+        }
+
+        do {
+            try await late.unlock(password: Self.password)
+            XCTFail("An attach that failed counted as open")
+        } catch {
+            XCTAssertEqual(error as? VaultError, .diskTool(action: "open", message: "already attached"))
+        }
+
+        XCTAssertTrue(disk.isOpen, "the failure cleanup ejected a volume this attempt did not mount")
+    }
+
     func testAMountThatCannotStartLeavesNoFolderBehind() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("no-start"))
         try FileManager.default.createDirectory(at: location.folder, withIntermediateDirectories: true)

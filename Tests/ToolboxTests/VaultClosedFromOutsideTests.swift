@@ -29,8 +29,7 @@ final class VaultClosedFromOutsideTests: XCTestCase {
         XCTAssertEqual(model.phase, .locked)
         XCTAssertTrue(model.items.isEmpty)
         XCTAssertNil(model.thumbnails)
-        XCTAssertEqual(model.message, "The vault was closed from outside Toolbox. "
-            + "Files that were being added at that moment were not moved and are still where they were. Unlock to continue.")
+        XCTAssertEqual(model.message, "The vault was closed from outside Toolbox. Unlock to continue.")
         XCTAssertEqual(steps.value, [], "a disk tool was run although nothing was mounted")
         XCTAssertFalse(FileManager.default.fileExists(atPath: model.disk.location.mountPoint.path))
         XCTAssertFalse(model.lockIfClosedFromOutside(), "the notice was given twice")
@@ -61,7 +60,7 @@ final class VaultClosedFromOutsideTests: XCTestCase {
 
         model.volumeDidUnmount(model.root)
         XCTAssertEqual(model.phase, .locked)
-        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage)
+        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage(duringImport: false, unconfirmed: 0))
         XCTAssertEqual(steps.value, [])
     }
 
@@ -80,7 +79,7 @@ final class VaultClosedFromOutsideTests: XCTestCase {
         XCTAssertEqual(Set(model.moveFailures.map(\.reason)), ["The vault closed before it was safely inside, so the original was kept."])
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
-        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage)
+        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage(duringImport: true, unconfirmed: 0))
         XCTAssertEqual(steps.value, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: model.disk.location.mountPoint.path), "a file was left in the plain mount-point folder")
     }
@@ -100,7 +99,7 @@ final class VaultClosedFromOutsideTests: XCTestCase {
         XCTAssertEqual(model.moveFailures.map(\.name), ["photo-3.png", "photo-4.png", "photo-5.png", "photo-6.png"])
         XCTAssertEqual(Set(model.moveFailures.map(\.reason)), ["The vault closed before it was safely inside, so the original was kept."])
         XCTAssertEqual(files.map { FileManager.default.fileExists(atPath: $0.path) }, [false, false, true, true, true, true])
-        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage)
+        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage(duringImport: true, unconfirmed: 0))
         XCTAssertNil(model.moveProgress)
         XCTAssertFalse(FileManager.default.fileExists(atPath: mountPoint), "a file was left in the plain mount-point folder")
         if case .failed = model.searchState { XCTFail("a missing vault was shown as a search problem") }
@@ -124,7 +123,64 @@ final class VaultClosedFromOutsideTests: XCTestCase {
 
         XCTAssertEqual(model.moveFailures.map(\.name), ["photo-3.png", "photo-4.png", "photo-5.png", "photo-6.png"])
         XCTAssertEqual(files.map { FileManager.default.fileExists(atPath: $0.path) }, [false, false, true, true, true, true])
-        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage)
+        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage(duringImport: true, unconfirmed: 0))
+    }
+
+    func testAFileThatFinishedMovingAsTheVaultClosedIsNeverReportedAsKept() async throws {
+        let (model, _) = try await makeOpenVault("finished-as-closed")
+        let files = try (1...6).map { try makeFile("photo-\($0).png") }
+        let mountPoint = model.root.path
+        model.moveFile = { [weak model] file, root in
+            let moved = try await VaultMover.move(file, into: root)
+            if file.lastPathComponent == "photo-3.png" {
+                try await Self.detach(mountPoint)
+                await model?.volumeDidUnmount(root)
+            }
+            return moved
+        }
+
+        model.add(files)
+        try await waitUntil(timeout: .seconds(60), "the batch has ended") { model.phase == .locked && model.moveProgress == nil }
+        try await pause(for: .milliseconds(300), because: "a late report from the cancelled batch would arrive by now")
+
+        XCTAssertEqual(files.map { FileManager.default.fileExists(atPath: $0.path) }, [false, false, false, true, true, true])
+        XCTAssertEqual(model.moveFailures.map(\.name), ["photo-3.png", "photo-4.png", "photo-5.png", "photo-6.png"])
+        XCTAssertEqual(model.moveFailures.map(\.reason), [
+            "It finished moving just as the vault closed. Check it after you unlock.",
+            "The vault closed before it was safely inside, so the original was kept.",
+            "The vault closed before it was safely inside, so the original was kept.",
+            "The vault closed before it was safely inside, so the original was kept.",
+        ])
+        XCTAssertEqual(model.message, "The vault was closed from outside Toolbox. Files that had not been moved yet are still where they were. "
+            + "1 file finished moving just as the vault closed; check it after you unlock. Unlock to continue.")
+    }
+
+    func testAMoveThatFinishesAfterTheNoticeCorrectsTheReport() async throws {
+        let (model, _) = try await makeOpenVault("finished-after-notice")
+        let files = try (1...4).map { try makeFile("photo-\($0).png") }
+        let mountPoint = model.root.path
+        model.moveFile = { [weak model] file, root in
+            guard file.lastPathComponent == "photo-2.png" else { return try await VaultMover.move(file, into: root) }
+            try await Self.detach(mountPoint)
+            await model?.volumeDidUnmount(root)
+            try FileManager.default.removeItem(at: file)
+            return root.appendingPathComponent(file.lastPathComponent)
+        }
+
+        model.add(files)
+        try await waitUntil(timeout: .seconds(60), "the late move was reported") {
+            model.moveFailures.contains { $0.reason == VaultModel.finishedAsVaultClosedReason }
+        }
+
+        XCTAssertEqual(model.moveFailures.map(\.name), ["photo-2.png", "photo-3.png", "photo-4.png"])
+        XCTAssertEqual(model.moveFailures.map(\.reason), [
+            VaultModel.finishedAsVaultClosedReason,
+            "The vault closed before it was safely inside, so the original was kept.",
+            "The vault closed before it was safely inside, so the original was kept.",
+        ])
+        XCTAssertEqual(files.map { FileManager.default.fileExists(atPath: $0.path) }, [false, false, true, true])
+        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage(duringImport: true, unconfirmed: 1))
+        XCTAssertEqual(model.phase, .locked)
     }
 
     func testASearchIndexThatFailsBecauseTheVaultIsGoneLocksInsteadOfBlamingSearch() async throws {
@@ -136,7 +192,7 @@ final class VaultClosedFromOutsideTests: XCTestCase {
         model.retrySearch()
         try await waitUntil(timeout: .seconds(60), "the index noticed the vault was gone") { model.phase == .locked }
 
-        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage)
+        XCTAssertEqual(model.message, VaultModel.closedFromOutsideMessage(duringImport: false, unconfirmed: 0))
         if case .failed = model.searchState { XCTFail("a missing vault was shown as a search problem") }
         XCTAssertEqual(steps.value, [])
     }

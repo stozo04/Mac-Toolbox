@@ -91,6 +91,7 @@ final class VaultModel {
     private var openGeneration = 0
     private var filesStillToMove: [URL] = []
     private(set) var ownsMount = false
+    fileprivate var outsideCloseNotice: (duringImport: Bool, unconfirmed: Int)?
     private let anotherCopyIsRunning: @MainActor () -> Bool
     fileprivate var mayEject: Bool { ownsMount || !anotherCopyIsRunning() }
     @ObservationIgnored var moveFile: @Sendable (_ file: URL, _ vaultRoot: URL) async throws -> URL = { try await VaultMover.move($0, into: $1) }
@@ -124,7 +125,7 @@ final class VaultModel {
             try await self.disk.create(password: password)
             Log.info("Vault created", category: VaultLog.category)
             self.phase = .locked
-            try await self.disk.unlock(password: password)
+            try await self.disk.unlock(password: password, ejectsIfItFails: !self.anotherCopyIsRunning())
             self.ownsMount = true
             self.openUnlessLockedMeanwhile(since: locksBefore)
         }
@@ -141,7 +142,7 @@ final class VaultModel {
         defer { isWorking = false }
         let locksBefore = lockCount
         do {
-            try await disk.unlock(password: password)
+            try await disk.unlock(password: password, ejectsIfItFails: !anotherCopyIsRunning())
             ownsMount = true
             openUnlessLockedMeanwhile(since: locksBefore)
         } catch VaultError.wrongPassword {
@@ -347,7 +348,7 @@ final class VaultModel {
                 if Task.isCancelled || !disk.isOpen { break }
                 do {
                     let moved = try await moveFile(file, root)
-                    if moveID == id { showMovedIn(moved) }
+                    if moveID == id { showMovedIn(moved) } else { correctReportIfMovedAfterAll(file) }
                 } catch {
                     guard moveID == id else { break }
                     moveFailures.append(VaultMoveFailure(name: file.lastPathComponent, reason: error.localizedDescription))
@@ -652,8 +653,17 @@ final class VaultModel {
 }
 
 extension VaultModel {
-    static let closedFromOutsideMessage = "The vault was closed from outside Toolbox. "
-        + "Files that were being added at that moment were not moved and are still where they were. Unlock to continue."
+    static let finishedAsVaultClosedReason = "It finished moving just as the vault closed. Check it after you unlock."
+
+    static func closedFromOutsideMessage(duringImport: Bool, unconfirmed: Int) -> String {
+        var notice = "The vault was closed from outside Toolbox."
+        if duringImport { notice += " Files that had not been moved yet are still where they were." }
+        if unconfirmed > 0 {
+            notice += " \(unconfirmed == 1 ? "1 file" : "\(unconfirmed) files") finished moving just as the vault closed; "
+                + "check \(unconfirmed == 1 ? "it" : "them") after you unlock."
+        }
+        return notice + " Unlock to continue."
+    }
 
     static func isUnexpected(_ error: Error) -> Bool {
         guard let moveError = error as? VaultMoveError else { return true }
@@ -686,17 +696,34 @@ extension VaultModel {
     @discardableResult
     func lockIfClosedFromOutside() -> Bool {
         guard phase == .open || phase == .opening, !isLocking, !disk.isOpen else { return false }
-        Log.warning("Vault closed from outside the app", category: VaultLog.category, ["not_moved": String(filesStillToMove.count)])
-        let reason = VaultMoveError.vaultNotOpen.localizedDescription
-        moveFailures += filesStillToMove.map { VaultMoveFailure(name: $0.lastPathComponent, reason: reason) }
+        let duringImport = moveTask != nil || !filesStillToMove.isEmpty
+        let unconfirmed = filesStillToMove.filter { !FileManager.default.fileExists(atPath: $0.path) }
+        Log.warning("Vault closed from outside the app", category: VaultLog.category,
+                    ["still_to_move": String(filesStillToMove.count), "unconfirmed": String(unconfirmed.count)])
+        moveFailures += filesStillToMove.map {
+            VaultMoveFailure(name: $0.lastPathComponent,
+                             reason: unconfirmed.contains($0) ? Self.finishedAsVaultClosedReason : VaultMoveError.vaultNotOpen.localizedDescription)
+        }
+        outsideCloseNotice = (duringImport, unconfirmed.count)
         beginLocking()
         clearOpenState()
         disk.removeEmptyMountPoint()
         ownsMount = false
         isLocking = false
         phase = disk.exists ? .locked : .setup
-        message = Self.closedFromOutsideMessage
+        message = Self.closedFromOutsideMessage(duringImport: duringImport, unconfirmed: unconfirmed.count)
         return true
+    }
+
+    // The move in flight when the eject was noticed can still finish: its copy was already checked and saved to the disk.
+    fileprivate func correctReportIfMovedAfterAll(_ file: URL) {
+        let kept = VaultMoveError.vaultNotOpen.localizedDescription
+        guard !FileManager.default.fileExists(atPath: file.path), let notice = outsideCloseNotice,
+              let listed = moveFailures.firstIndex(where: { $0.name == file.lastPathComponent && $0.reason == kept }) else { return }
+        moveFailures[listed] = VaultMoveFailure(name: file.lastPathComponent, reason: Self.finishedAsVaultClosedReason)
+        let noticeShown = message == Self.closedFromOutsideMessage(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed)
+        outsideCloseNotice = (notice.duringImport, notice.unconfirmed + 1)
+        if noticeShown { message = Self.closedFromOutsideMessage(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed + 1) }
     }
 
     fileprivate func addDebugFiles() {

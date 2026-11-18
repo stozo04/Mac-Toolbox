@@ -122,12 +122,13 @@ struct VaultDisk {
         }
     }
 
-    func unlock(password: String) async throws {
+    func unlock(password: String, ejectsIfItFails: Bool = true) async throws {
         if isOpen { try await lock() }
         try refuseFilesLeftOutside()
         if !FileManager.default.fileExists(atPath: location.mountPoint.path) {
             try FileManager.default.createDirectory(at: location.mountPoint, withIntermediateDirectories: false)
         }
+        let wasMountedByOthers = isOpen
         do {
             let result = try await tool.run(Self.diskutil, ["image", "--stdinpass", "attach", "--nobrowse",
                                                             "--mountPoint", location.mountPoint.path, location.image.path],
@@ -136,7 +137,7 @@ struct VaultDisk {
                 throw Self.isWrongPassword(result) ? VaultError.wrongPassword : VaultError.diskTool(action: "open", message: Self.reason(result))
             }
         } catch {
-            try? await lock()
+            if ejectsIfItFails, !wasMountedByOthers { try? await lock() }
             removeEmptyMountPoint()
             throw Self.diskToolError(error, action: "open")
         }

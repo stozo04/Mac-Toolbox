@@ -31,7 +31,7 @@ enum ReleaseNotes {
         Release(version: "0.11.7", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "Vault: a file is never deleted after its copy went to an unprotected folder because the vault closed mid-move; the original is kept."),
             .init(kind: .improved, text: "Vault: each file moved in is saved to the disk before its original is deleted, so a power cut can't lose both."),
-            .init(kind: .fixed, text: "Vault: if the vault is ejected from outside Toolbox, the app notices, locks and lists every file that was not moved."),
+            .init(kind: .fixed, text: "Vault: if the vault is ejected from outside Toolbox, the app notices, locks, and says which files were not moved and which had just finished."),
             .init(kind: .fixed, text: "Vault: the door won't open over files left outside the vault in its open folder; it names the folder, shows it in Finder and tells you to move them."),
             .init(kind: .fixed, text: "Vault: an unlock or a vault creation that fails partway no longer leaves a half-open vault or a half-made one behind."),
             .init(kind: .fixed, text: "Vault: a second copy of Toolbox no longer ejects the vault the first copy is using; it asks you to lock it there first."),
