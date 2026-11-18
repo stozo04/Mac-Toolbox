@@ -127,6 +127,27 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: engine.privateFolder.path))
     }
 
+    func testAnIndexOpenedBeforeTheVaultWasEjectedIsNotUsedAgain() async throws {
+        let disk = VaultDisk(location: VaultLocation(folder: root.appendingPathComponent("ejected")))
+        try await disk.create(password: "eject-pass")
+        try await disk.unlock(password: "eject-pass")
+        defer { disk.lockAndWait() }
+        let located = EmbeddingModel.Located(text: root.appendingPathComponent("t.gguf"), media: root.appendingPathComponent("m.gguf"))
+        let engine = VaultSearchEngine(root: disk.location.mountPoint, model: located)
+        defer { engine.close() }
+        _ = try await engine.pending([])
+
+        disk.lockAndWait()
+
+        do {
+            _ = try await engine.pending([])
+            XCTFail("The index of an ejected vault was read")
+        } catch VaultSearchError.notMounted {
+        } catch {
+            XCTFail("Expected notMounted, got \(error)")
+        }
+    }
+
     func testEachEngineHasItsOwnWorkFolderAndClearsOldOnes() async throws {
         let located = EmbeddingModel.Located(text: root.appendingPathComponent("t.gguf"), media: root.appendingPathComponent("m.gguf"))
         let leftover = root.appendingPathComponent(".toolbox/\(VaultSearchEngine.workFolderPrefix)old")
