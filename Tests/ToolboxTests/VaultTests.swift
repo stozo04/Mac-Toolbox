@@ -159,6 +159,25 @@ final class VaultTests: XCTestCase {
     }
 
     @MainActor
+    func testAVaultEjectedOutsideToolboxGoesBackToTheLockedDoor() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("ejected"))
+        let model = VaultModel(location: location, watchesSystem: false)
+        await model.create(password: "eject-pass", confirmation: "eject-pass")
+        model.finishOpening()
+        defer { model.lockImmediately() }
+        XCTAssertEqual(model.phase, .open)
+        let photo = try makePhoto("outside.png")
+
+        VaultDisk(location: location).lockAndWait()
+        model.add([photo])
+
+        XCTAssertEqual(model.phase, .locked)
+        XCTAssertEqual(model.message, VaultModel.closedOutsideMessage)
+        XCTAssertNil(model.moveProgress)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+    }
+
+    @MainActor
     func testDuplicatesNotKeptGoToTheVaultTrashAndComeBack() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("trash"))
         let model = VaultModel(location: location, watchesSystem: false)

@@ -179,7 +179,16 @@ final class VaultModel {
         settleAfterLocking()
     }
 
+    static let closedOutsideMessage = "The vault was closed outside Toolbox. Enter your password to open it again."
     static let stillOpenMessage = "The vault couldn't be locked because something is still using a file in it. Close it and press Lock again."
+
+    private func returnToDoorIfClosedOutside() -> Bool {
+        guard phase == .open || phase == .opening, !isLocking, !disk.isOpen else { return false }
+        Log.warning("Vault closed outside Toolbox", category: VaultLog.category)
+        lockImmediately()
+        message = Self.closedOutsideMessage
+        return true
+    }
 
     private func beginLocking() {
         lockCount += 1
@@ -336,7 +345,7 @@ final class VaultModel {
     }
 
     func add(_ urls: [URL]) {
-        guard phase == .open, !isLocking, moveTask == nil else { return }
+        guard phase == .open, !isLocking, moveTask == nil, !returnToDoorIfClosedOutside() else { return }
         let files = VaultMover.expand(urls)
         guard !files.isEmpty else { return }
         moveFailures = []
@@ -345,6 +354,7 @@ final class VaultModel {
         moveID = id
         moveTask = Task {
             for file in files {
+                if returnToDoorIfClosedOutside() { return }
                 if Task.isCancelled || !disk.isOpen { break }
                 do {
                     _ = try await VaultMover.move(file, into: root)
@@ -525,7 +535,7 @@ final class VaultModel {
         } catch VaultSearchError.closed {
             return
         } catch {
-            guard searchEngine === engine else { return }
+            guard searchEngine === engine, !returnToDoorIfClosedOutside() else { return }
             VaultLog.failure("Vault search index failed", error)
             searchState = .failed(error.localizedDescription)
         }
