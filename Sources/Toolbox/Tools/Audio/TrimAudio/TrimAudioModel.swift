@@ -10,6 +10,9 @@ final class TrimAudioModel {
     private static let logCategory = "trimAudio"
     private static let endTolerance = 0.05
 
+    typealias Trim = @Sendable (TrimAudioJob, URL, @escaping @Sendable (Double) -> Void) async throws -> TrimAudioResult
+    typealias DecodePeaks = @Sendable (URL, Double) async throws -> [Float]
+
     enum SaveState: Equatable {
         case idle
         case saving(Double)
@@ -35,7 +38,11 @@ final class TrimAudioModel {
     private var loadTask: Task<Void, Never>?
     private var waveformTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    private var currentSave: UUID?
     private var timeObserver: Any?
+    private let outputParent: URL?
+    private let trim: Trim
+    private let decodePeaks: DecodePeaks
 
     var hasClip: Bool { file != nil }
     var isSaving: Bool { if case .saving = saveState { true } else { false } }
@@ -50,7 +57,12 @@ final class TrimAudioModel {
         return [file.lastPathComponent, info.summary, TrimTime.format(info.duration)].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    init() {
+    init(outputParent: URL? = nil,
+         trim: @escaping Trim = { try await AudioTrimmer.trim($0, into: $1, progress: $2) },
+         decodePeaks: @escaping DecodePeaks = { try await AudioWaveform.peaks(of: $0, duration: $1) }) {
+        self.outputParent = outputParent
+        self.trim = trim
+        self.decodePeaks = decodePeaks
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.tick(time.seconds) }
         }
@@ -103,6 +115,7 @@ final class TrimAudioModel {
 
     private func reset() {
         saveTask?.cancel()
+        currentSave = nil
         loadTask?.cancel()
         waveformTask?.cancel()
         player.pause()
@@ -121,11 +134,10 @@ final class TrimAudioModel {
     }
 
     private func loadWaveform(_ url: URL, duration: Double) {
-        waveformTask = Task {
+        waveformTask = Task { [decodePeaks] in
             do {
-                let peaks = try await Task.detached(priority: .userInitiated) {
-                    try await AudioWaveform.peaks(of: url, duration: duration)
-                }.value
+                let decode = Task.detached(priority: .userInitiated) { try await decodePeaks(url, duration) }
+                let peaks = try await withTaskCancellationHandler { try await decode.value } onCancel: { decode.cancel() }
                 if !Task.isCancelled && file == url { self.peaks = peaks }
             } catch is CancellationError {
             } catch {
@@ -256,23 +268,31 @@ final class TrimAudioModel {
         saveState = .saving(0)
         let job = TrimAudioJob(source: file, start: selection.start, end: selection.end,
                                sample: info?.sample ?? SourceSampleFormat(), settings: settings)
+        let save = UUID()
+        currentSave = save
         saveTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                let folder = try BatchFiles.makeOutputFolder(named: Self.outputFolderName)
-                let result = try await AudioTrimmer.trim(job, into: folder) { p in
-                    Task { @MainActor in
-                        if case .saving = self.saveState { self.saveState = .saving(p) }
-                    }
+            let finished = await outcome(of: job, from: file, in: save)
+            guard currentSave == save else { return }
+            saveState = finished
+        }
+    }
+
+    private func outcome(of job: TrimAudioJob, from file: URL, in save: UUID) async -> SaveState {
+        do {
+            let folder = try BatchFiles.makeOutputFolder(named: Self.outputFolderName, in: outputParent)
+            let result = try await trim(job, folder) { p in
+                Task { @MainActor in
+                    if self.currentSave == save, case .saving = self.saveState { self.saveState = .saving(p) }
                 }
-                saveState = .done(result)
-                Log.info("Trim audio finished", category: Self.logCategory, logContext(job, copied: result.copiedAsIs))
-            } catch is CancellationError {
-                saveState = .idle
-            } catch {
-                saveState = .failed(error.localizedDescription)
-                Log.error("Trim audio failed", category: Self.logCategory, Log.details(error, file: file, logContext(job, copied: nil)))
             }
+            Log.info("Trim audio finished", category: Self.logCategory, logContext(job, copied: result.copiedAsIs))
+            return .done(result)
+        } catch is CancellationError {
+            return .idle
+        } catch {
+            Log.error("Trim audio failed", category: Self.logCategory, Log.details(error, file: file, logContext(job, copied: nil)))
+            return .failed(error.localizedDescription)
         }
     }
 

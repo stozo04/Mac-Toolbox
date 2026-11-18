@@ -19,14 +19,16 @@ final class StorageExplorerModel {
     private(set) var detail: SpaceHog?
     var selection: Set<URL> = []
     private(set) var lastOutcome: StorageCleaner.Outcome?
+    private(set) var clearingHogID: String?
 
     private var measureTask: Task<Void, Never>?
-    private let trash: (URL) throws -> Void
-    private let delete: (URL) throws -> Void
+    private var latestMeasurement: [String: UUID] = [:]
+    private let trash: @Sendable (URL) throws -> Void
+    private let delete: @Sendable (URL) throws -> Void
 
     init(hogs: [SpaceHog] = SpaceHog.all(),
-         trash: @escaping (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
-         delete: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }) {
+         trash: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
+         delete: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }) {
         self.hogs = hogs
         self.trash = trash
         self.delete = delete
@@ -37,6 +39,8 @@ final class StorageExplorerModel {
         measures.values.reduce(0) { sum, m in if case .done(let r) = m { sum + r.total } else { sum } }
     }
 
+    var isClearing: Bool { clearingHogID != nil }
+
     var isMeasuring: Bool { measures.values.contains(.measuring) }
 
     func result(_ hog: SpaceHog) -> HogResult? {
@@ -46,17 +50,40 @@ final class StorageExplorerModel {
     func measureAll() {
         measureTask?.cancel()
         disk = StorageScanner.diskUsage()
-        for hog in hogs { measures[hog.id] = .measuring }
         let hogs = self.hogs
+        let started = Dictionary(uniqueKeysWithValues: hogs.map { ($0.id, beginMeasuring($0)) })
         measureTask = Task {
             await withTaskGroup(of: (String, HogResult).self) { group in
                 for hog in hogs { group.addTask { (hog.id, StorageScanner.measure(hog)) } }
                 for await (id, result) in group {
                     if Task.isCancelled { break }
-                    measures[id] = .done(result)
+                    if let measurement = started[id] { finishMeasuring(id, measurement, with: result) }
                 }
             }
         }
+    }
+
+    private func measure(_ hog: SpaceHog) {
+        let measurement = beginMeasuring(hog)
+        Task {
+            let result = await Task.detached { StorageScanner.measure(hog) }.value
+            guard finishMeasuring(hog.id, measurement, with: result) else { return }
+            disk = StorageScanner.diskUsage()
+        }
+    }
+
+    private func beginMeasuring(_ hog: SpaceHog) -> UUID {
+        let measurement = UUID()
+        latestMeasurement[hog.id] = measurement
+        measures[hog.id] = .measuring
+        return measurement
+    }
+
+    @discardableResult
+    private func finishMeasuring(_ id: String, _ measurement: UUID, with result: HogResult) -> Bool {
+        guard latestMeasurement[id] == measurement else { return false }
+        measures[id] = .done(result)
+        return true
     }
 
     func open(_ hog: SpaceHog) {
@@ -83,16 +110,17 @@ final class StorageExplorerModel {
 
     /// Clears the ticked items (to the Trash, or for good when the hog is the Trash itself) and re-measures.
     func clearSelected() {
-        guard let hog = detail, let r = result(hog) else { return }
+        guard !isClearing, let hog = detail, let r = result(hog) else { return }
         let chosen = r.items.filter { selection.contains($0.url) }
-        let outcome = StorageCleaner.clear(chosen, from: hog, trash: trash, delete: delete)
-        lastOutcome = outcome
         selection = []
-        Log.info("Storage cleared", category: "storage", ["hog": hog.id, "items": String(chosen.count), "failed": String(outcome.failures.count)])
-        measures[hog.id] = .measuring
-        Task {
-            measures[hog.id] = .done(await Task.detached { StorageScanner.measure(hog) }.value)
-            disk = StorageScanner.diskUsage()
+        clearingHogID = hog.id
+        _ = beginMeasuring(hog)
+        Task { [trash, delete] in
+            let outcome = await Task.detached { StorageCleaner.clear(chosen, from: hog, trash: trash, delete: delete) }.value
+            clearingHogID = nil
+            if detail?.id == hog.id { lastOutcome = outcome }
+            Log.info("Storage cleared", category: "storage", ["hog": hog.id, "items": String(chosen.count), "failed": String(outcome.failures.count)])
+            measure(hog)
         }
     }
 

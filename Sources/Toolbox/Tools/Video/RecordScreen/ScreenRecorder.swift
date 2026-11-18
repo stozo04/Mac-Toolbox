@@ -115,7 +115,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             self.stream = stream
             try await stream.startCapture()
         } catch {
-            teardownCapture()
+            stopClickAndMicrophoneCapture()
+            _ = await releaseCaptureOnQueue()
             writer?.cancelWriting()
             try? FileManager.default.removeItem(at: output)
             throw error
@@ -259,13 +260,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 
     /// Stops capture and finishes the file. Returns the saved file.
     func stop() async throws -> URL {
-        teardownCapture()
+        stopClickAndMicrophoneCapture()
         if let stream {
             self.stream = nil
             try? await stream.stopCapture()
         }
         // Wait for any buffer still being handled before the inputs are closed.
-        let end: CMTime = await withCheckedContinuation { cont in queue.async { cont.resume(returning: self.lastTime) } }
+        let end = await releaseCaptureOnQueue()
 
         guard let writer, let url = outputURL else { throw RecorderError.noFrames }
         defer { self.writer = nil; videoInput = nil; audioInput = nil; outputURL = nil }
@@ -284,10 +285,19 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         return url
     }
 
-    private func teardownCapture() {
+    private func stopClickAndMicrophoneCapture() {
         highlighter?.stop()
-        highlighter = nil
         micSession?.stopRunning()
-        micSession = nil
+    }
+
+    /// The sample handlers read `highlighter` and `micSession` on `queue`, so they are let go there, behind every buffer already queued.
+    private func releaseCaptureOnQueue() async -> CMTime {
+        await withCheckedContinuation { drained in
+            queue.async {
+                self.highlighter = nil
+                self.micSession = nil
+                drained.resume(returning: self.lastTime)
+            }
+        }
     }
 }

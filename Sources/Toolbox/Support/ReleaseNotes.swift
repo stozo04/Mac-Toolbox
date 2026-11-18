@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.4"
+    static let current = "0.11.6"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,15 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.11.6", date: "2026-11-18", changes: [
+            .init(kind: .fixed, text: "Dropping several files at once always tells you when some were skipped. Before, the note could vanish depending on which file loaded last."),
+            .init(kind: .fixed, text: "Storage Explorer no longer freezes while it moves things to the Trash or empties it, and shows that it is working."),
+            .init(kind: .fixed, text: "Storage Explorer: a list measured earlier can no longer replace a newer one."),
+            .init(kind: .fixed, text: "Color Picker: the palette is always from the image you chose last, and a cleared palette stays cleared."),
+            .init(kind: .fixed, text: "Trim Audio: opening another file while one is being saved no longer mixes up the two saves, and closing a file stops reading its waveform."),
+            .init(kind: .fixed, text: "Video to GIF: the same video is no longer added twice when it is reached through a link or another path."),
+            .init(kind: .fixed, text: "Record Screen: stopping a recording can no longer trip over a frame that is still being handled."),
+        ]),
         Release(version: "0.11.4", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Cancel now always stops the work: a cancel pressed just as a conversion, trim or download started could be missed, and it then ran to the end."),
             .init(kind: .fixed, text: "Quitting Toolbox stops conversions and downloads that are still running instead of leaving them going in the background."),

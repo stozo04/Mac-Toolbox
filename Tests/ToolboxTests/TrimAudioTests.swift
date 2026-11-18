@@ -282,6 +282,111 @@ final class TrimAudioTests: XCTestCase {
         XCTAssertFalse(model.isPlaying)
     }
 
+    private typealias HeldTrim = (job: TrimAudioJob, folder: URL, finish: CheckedContinuation<TrimAudioResult, Error>)
+
+    @MainActor private func makeModelWithHeldSaves(_ held: Locked<[HeldTrim]>) -> TrimAudioModel {
+        TrimAudioModel(outputParent: dir, trim: { job, folder, _ in
+            try await withCheckedThrowingContinuation { finish in held.update { $0.append((job, folder, finish)) } }
+        })
+    }
+
+    @MainActor private func open(_ url: URL, in model: TrimAudioModel) async throws {
+        model.load(url)
+        try await waitUntil(timeout: .seconds(30), "\(url.lastPathComponent) is loaded") { !model.isLoading && model.isReadyToPlay }
+        model.setFormat(.mp3)
+    }
+
+    @MainActor
+    func testASaveLeftBehindByOpeningAnotherFileCannotChangeTheNewSave() async throws {
+        let first = dir.appendingPathComponent("First.wav"), second = dir.appendingPathComponent("Second.wav")
+        try makeTone(at: first)
+        try makeTone(at: second, seconds: 2)
+        let held = Locked<[HeldTrim]>([])
+        let model = makeModelWithHeldSaves(held)
+        addTeardownBlock { await model.close() }
+        try await open(first, in: model)
+        model.save()
+        try await waitUntil("the first save starts") { held.value.count == 1 }
+
+        try await open(second, in: model)
+        XCTAssertEqual(model.saveState, .idle)
+        model.save()
+        try await waitUntil("the second save starts") { held.value.count == 2 }
+        try held.value.element(at: 0).finish.resume(throwing: CancellationError())
+        try await pause(for: .milliseconds(50), because: "the old save's ending would land on a later main-actor turn")
+
+        XCTAssertEqual(model.saveState, .saving(0), "the old save ending must not make the new one look idle")
+        let saved = TrimAudioResult(url: dir.appendingPathComponent("Second (Trimmed).mp3"), copiedAsIs: false)
+        try held.value.element(at: 1).finish.resume(returning: saved)
+        try await waitUntil("the second save lands") { model.saveState == .done(saved) }
+        XCTAssertEqual(try held.value.element(at: 1).job.source, second)
+    }
+
+    @MainActor
+    func testAFinishedSaveOfAClosedFileIsNotShownOnTheNextFile() async throws {
+        let first = dir.appendingPathComponent("First.wav"), second = dir.appendingPathComponent("Second.wav")
+        try makeTone(at: first)
+        try makeTone(at: second, seconds: 2)
+        let held = Locked<[HeldTrim]>([])
+        let model = makeModelWithHeldSaves(held)
+        addTeardownBlock { await model.close() }
+        try await open(first, in: model)
+        model.save()
+        try await waitUntil("the first save starts") { held.value.count == 1 }
+
+        try await open(second, in: model)
+        try held.value.element(at: 0).finish.resume(returning: TrimAudioResult(url: dir.appendingPathComponent("First (Trimmed).mp3"), copiedAsIs: false))
+        try await pause(for: .milliseconds(50), because: "the old save's result would land on a later main-actor turn")
+
+        XCTAssertEqual(model.saveState, .idle)
+    }
+
+    @MainActor
+    func testSaveMakesItsFolderUnderTheGivenParent() async throws {
+        let tone = dir.appendingPathComponent("Tone.wav")
+        try makeTone(at: tone)
+        let held = Locked<[HeldTrim]>([])
+        let model = makeModelWithHeldSaves(held)
+        addTeardownBlock { await model.close() }
+        try await open(tone, in: model)
+
+        model.save()
+        try await waitUntil("the save starts") { held.value.count == 1 }
+
+        let folder = try XCTUnwrap(held.value.first).folder
+        XCTAssertEqual(folder.deletingLastPathComponent().standardizedFileURL, dir.standardizedFileURL)
+        XCTAssertTrue(folder.lastPathComponent.hasPrefix(TrimAudioModel.outputFolderName))
+        try XCTUnwrap(held.value.first).finish.resume(throwing: CancellationError())
+        try await waitUntil("the save ends") { model.saveState == .idle }
+    }
+
+    @MainActor
+    func testClosingTheFileStopsTheWaveformDecode() async throws {
+        let tone = dir.appendingPathComponent("Tone.wav")
+        try makeTone(at: tone)
+        let started = Locked(false), cancelled = Locked(false)
+        let model = TrimAudioModel(outputParent: dir, decodePeaks: { _, _ in
+            started.set(true)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (decode: CheckedContinuation<[Float], Error>) in
+                    DispatchQueue.global().async {
+                        while !cancelled.value { usleep(1000) }
+                        decode.resume(throwing: CancellationError())
+                    }
+                }
+            } onCancel: {
+                cancelled.set(true)
+            }
+        })
+        addTeardownBlock { cancelled.set(true) }
+        model.load(tone)
+        try await waitUntil(timeout: .seconds(30), "the waveform decode starts") { started.value }
+
+        model.close()
+
+        try await waitUntil("the decode is told to stop") { cancelled.value }
+    }
+
     func testMissingEncoderIsReported() async throws {
         let job = TrimAudioJob(source: dir.appendingPathComponent("Tone.wav"), start: 0, end: 1, sample: .init(bitDepth: 16), settings: .init())
         do {

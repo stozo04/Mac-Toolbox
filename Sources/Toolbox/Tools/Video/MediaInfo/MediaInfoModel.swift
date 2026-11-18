@@ -24,6 +24,11 @@ final class MediaInfoModel {
     private(set) var notice: String?
     private(set) var flash: String?
 
+    private let inspect: (URL) async throws -> MediaReport
+    private var readers: [Item.ID: Task<Void, Never>] = [:]
+
+    init(inspect: @escaping (URL) async throws -> MediaReport = MediaInspector.inspect) { self.inspect = inspect }
+
     var hasItems: Bool { !items.isEmpty }
     var selected: Item? { items.first { $0.id == selection } }
     var reports: [MediaReport] { items.compactMap { if case .ready(let r) = $0.state { r } else { nil } } }
@@ -32,27 +37,24 @@ final class MediaInfoModel {
 
     /// Adds files; folders are searched for video and audio files inside them.
     func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += Self.mediaFiles(in: url)
-            if found.count == before { skipped += 1 }
-        }
+        let (found, skipped) = BatchFiles.gather(urls, files: Self.mediaFiles)
         var known = Set(items.map { BatchFiles.identity($0.url) })
         let new = found.filter { known.insert(BatchFiles.identity($0)).inserted }.map { Item(url: $0) }
         items += new
         if selection == nil { selection = new.first?.id }
-        notice = skipped == 0 ? nil : "\(skipped) item(s) had no video or audio files and were skipped."
+        notice = BatchFiles.skippedNotice(skipped, because: "had no video or audio files")
         for item in new { read(item) }
     }
 
     func remove(_ id: Item.ID) {
+        readers.removeValue(forKey: id)?.cancel()
         items.removeAll { $0.id == id }
         if selection == id { selection = items.first?.id }
     }
 
     func clear() {
+        readers.values.forEach { $0.cancel() }
+        readers = [:]
         items = []
         selection = nil
         notice = nil
@@ -71,15 +73,17 @@ final class MediaInfoModel {
     }
 
     private func read(_ item: Item) {
-        Task { [weak self] in
-            let state: State
-            do {
-                state = .ready(try await MediaInspector.inspect(item.url))
-            } catch {
-                state = .failed(error.localizedDescription)
+        readers[item.id] = Task { [weak self, inspect] in
+            let outcome: Result<MediaReport, Error>
+            do { outcome = .success(try await inspect(item.url)) } catch { outcome = .failure(error) }
+            guard let self, !Task.isCancelled, readers.removeValue(forKey: item.id) != nil else { return }
+            switch outcome {
+            case .success(let report):
+                set(item.id, .ready(report))
+            case .failure(let error):
+                set(item.id, .failed(error.localizedDescription))
                 Log.warning("Media info failed", category: "mediainfo", Log.details(error, file: item.url))
             }
-            self?.set(item.id, state)
         }
     }
 
