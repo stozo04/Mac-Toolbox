@@ -10,13 +10,7 @@ final class VaultClosedFromOutsideTests: XCTestCase {
     private var dir: URL!
 
     override func setUp() async throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vault-outside-\(UUID())")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    }
-
-    override func tearDown() async throws {
-        try? FileManager.default.removeItem(at: dir)
-        killProgramsLeftRunning()
+        dir = try makeVaultTestFolder("outside")
     }
 
     func testAVaultDetachedFromOutsideIsShownAsLockedWithoutAnEject() async throws {

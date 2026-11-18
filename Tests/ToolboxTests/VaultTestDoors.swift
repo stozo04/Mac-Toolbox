@@ -12,6 +12,8 @@ final class DoorStandIn: @unchecked Sendable {
         case mountsThenHangs
         /// Runs on whatever the door's time limit says, as a wedged eject would. Ended by `killProgramsLeftRunning`.
         case ignoresItsTimeLimit
+        /// The real tool on a bound a busy Mac can meet, whatever the door's bounds: for closing up after a test that gave it short ones.
+        case realWithRoomToFinish
     }
 
     static let verbs = ["create", "attach", "chpass", "eject", "detach"]
@@ -52,6 +54,8 @@ final class DoorStandIn: @unchecked Sendable {
                 return try await hang(verb, timeout)
             case .ignoresItsTimeLimit:
                 return try await hang(verb, .untilFinished)
+            case .realWithRoomToFinish:
+                return try await VaultTool.system.run(path, arguments, input, .diskImage)
             }
         }
     }
@@ -70,6 +74,40 @@ final class DoorStandIn: @unchecked Sendable {
 
 extension XCTestCase {
     static var vaultPassword: String { "door-pass" }
+
+    /// One test's folder for throwaway vaults. A test that wedges an eject on purpose can leave its image attached with
+    /// nothing mounted, so when the test ends every image under this folder, and nothing else, is force-detached.
+    func makeVaultTestFolder(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(name)-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock {
+            self.killProgramsLeftRunning(file: file, line: line)
+            for image in await Self.imagesAttached(under: folder) ?? [] {
+                _ = try? await Shell.run(VaultDisk.hdiutil, ["detach", "-force", image.device], timeout: .seconds(60))
+            }
+            let left = await Self.imagesAttached(under: folder)?.map(\.path)
+            XCTAssertEqual(left, [], "the test left disk images attached", file: file, line: line)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        return folder
+    }
+
+    /// Nil for a folder that is not a test's own vault folder, or when hdiutil could not say: never an empty answer from a failed look.
+    static func imagesAttached(under folder: URL) async -> [(path: String, device: String)]? {
+        let temporary = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        let scope = folder.resolvingSymlinksInPath().path
+        guard scope.hasPrefix(temporary + "/vault-"),
+              let info = try? await Shell.run(VaultDisk.hdiutil, ["info", "-plist"], timeout: .quick),
+              let plist = try? PropertyListSerialization.propertyList(from: Data(info.out.utf8), format: nil) as? [String: Any],
+              let images = plist["images"] as? [[String: Any]] else { return nil }
+        return images.compactMap { image in
+            guard let path = image["image-path"] as? String,
+                  URL(fileURLWithPath: path).resolvingSymlinksInPath().path.hasPrefix(scope + "/"),
+                  let entities = image["system-entities"] as? [[String: Any]],
+                  let wholeDisk = entities.compactMap({ $0["dev-entry"] as? String }).min(by: { $0.count < $1.count }) else { return nil }
+            return (path, wholeDisk)
+        }
+    }
 
     /// A door on a throwaway folder that is locked again when the test ends, so nothing stays mounted.
     func makeDoor(in folder: URL, tool: VaultTool = .system, bounds: VaultDoor.Bounds = VaultDoor.Bounds(),

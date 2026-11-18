@@ -8,13 +8,7 @@ final class VaultLockingTests: XCTestCase {
     private var dir: URL!
 
     override func setUp() async throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vault-locking-\(UUID())")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    }
-
-    override func tearDown() async throws {
-        killProgramsLeftRunning()
-        try? FileManager.default.removeItem(at: dir)
+        dir = try makeVaultTestFolder("locking")
     }
 
     // MARK: Locking
@@ -355,6 +349,7 @@ final class VaultLockingTests: XCTestCase {
         let model = VaultModel(location: location, watchesSystem: false, tool: stand.tool, bounds: bounds, anotherCopyIsRunning: { false })
         addTeardownBlock { @MainActor in
             for verb in DoorStandIn.verbs { stand.play(verb, as: .real) }
+            for verb in ["eject", "detach"] { stand.play(verb, as: .realWithRoomToFinish) }
             Shell.livePIDs.forEach { kill($0, SIGKILL) }
             await model.lock()
             await Self.detachWhateverIsLeft(at: model.disk)

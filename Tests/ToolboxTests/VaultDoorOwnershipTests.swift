@@ -6,13 +6,7 @@ final class VaultDoorOwnershipTests: XCTestCase {
     private var dir: URL!
 
     override func setUpWithError() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vault-owner-\(UUID())")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    }
-
-    override func tearDown() {
-        killProgramsLeftRunning()
-        try? FileManager.default.removeItem(at: dir)
+        dir = try makeVaultTestFolder("owner")
     }
 
     private func folder(_ name: String) -> URL { dir.appendingPathComponent(name) }

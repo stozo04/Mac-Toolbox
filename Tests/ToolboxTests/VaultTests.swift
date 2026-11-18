@@ -73,14 +73,12 @@ final class VaultTests: XCTestCase {
     private var vault: URL!
 
     override func setUpWithError() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(UUID())")
+        dir = try makeVaultTestFolder("library")
         source = dir.appendingPathComponent("source")
         vault = dir.appendingPathComponent("vault")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
     }
-
-    override func tearDown() { try? FileManager.default.removeItem(at: dir) }
 
     func testKindComesFromTheFileType() {
         XCTAssertEqual(VaultItem.kind(of: URL(fileURLWithPath: "/a/b.JPG")), .image)

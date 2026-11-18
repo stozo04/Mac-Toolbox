@@ -9,11 +9,8 @@ final class VaultSearchTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("vault-search-\(UUID())")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        root = try makeVaultTestFolder("search")
     }
-
-    override func tearDown() { try? FileManager.default.removeItem(at: root) }
 
     func testMeaningMatchesStandOutAndNamesAlwaysCount() {
         var vectors = VaultVectors()

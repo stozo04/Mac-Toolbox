@@ -5,13 +5,7 @@ final class VaultDoorTests: XCTestCase {
     private var dir: URL!
 
     override func setUpWithError() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vault-door-\(UUID())")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    }
-
-    override func tearDown() {
-        killProgramsLeftRunning()
-        try? FileManager.default.removeItem(at: dir)
+        dir = try makeVaultTestFolder("door")
     }
 
     private func folder(_ name: String) -> URL { dir.appendingPathComponent(name) }
@@ -310,6 +304,24 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: door.disk.location.mountPoint.path))
         XCTAssertFalse(door.noticeOutsideEject())
         XCTAssertEqual(stand.steps.value, ["attach"])
+    }
+
+    // MARK: What a test leaves behind
+
+    func testAnImageLeftAttachedWithNothingMountedIsFoundOnlyUnderItsOwnFolder() async throws {
+        let location = VaultLocation(folder: folder("left-attached"))
+        try await makeVaultImage(in: location.folder)
+        let attach = try await Shell.run(VaultDisk.hdiutil, ["attach", "-stdinpass", "-nomount", location.image.path],
+                                         input: Data(Self.vaultPassword.utf8), timeout: .seconds(60))
+        XCTAssertTrue(attach.succeeded, attach.err)
+
+        let attached = await Self.imagesAttached(under: dir)
+        let found = try XCTUnwrap(attached)
+
+        XCTAssertEqual(found.map(\.path), [location.image.resolvingSymlinksInPath().path])
+        XCTAssertEqual(found.first?.device.hasPrefix("/dev/disk"), true)
+        let outsideTheTestFolders = await Self.imagesAttached(under: FileManager.default.temporaryDirectory)
+        XCTAssertNil(outsideTheTestFolders, "a folder that is not a test's own vault folder was searched")
     }
 
     // MARK: Where the vault lives
