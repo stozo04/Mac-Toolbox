@@ -141,4 +141,107 @@ final class StorageExplorerTests: XCTestCase {
         XCTAssertLessThan(size, 200_000, "the linked Library folder is not followed")
         XCTAssertEqual(DirectorySize.bytes(of: dir.appendingPathComponent("missing")), 0)
     }
+
+    // MARK: Clearing and measuring that overlap
+
+    private final class Hold: @unchecked Sendable {
+        private let armed = Locked(false)
+        private let holding = Locked(false)
+        private let gate = DispatchSemaphore(value: 0)
+
+        var isHolding: Bool { holding.value }
+
+        func arm() { armed.set(true) }
+
+        func passOrWait() {
+            var shouldHold = false
+            armed.update { shouldHold = $0; $0 = false }
+            guard shouldHold else { return }
+            holding.set(true)
+            gate.wait()
+        }
+
+        func release() { gate.signal() }
+    }
+
+    @MainActor private func measuredCaches(trash: @escaping @Sendable (URL) throws -> Void) async throws -> (StorageExplorerModel, SpaceHog) {
+        let model = StorageExplorerModel(hogs: SpaceHog.all(home: home), trash: trash, delete: { try FileManager.default.removeItem(at: $0) })
+        model.measureAll()
+        try await waitUntil(timeout: .seconds(60), "every space hog is measured") { !model.isMeasuring }
+        let caches = try XCTUnwrap(model.hogs.first { $0.id == "caches" })
+        model.open(caches)
+        model.toggle(try XCTUnwrap(model.result(caches)?.items.first))
+        return (model, caches)
+    }
+
+    @MainActor func testClearingRunsOffTheMainThreadAndShowsThatItIsClearing() async throws {
+        let ranOnMain = Locked<Bool?>(nil)
+        let hold = Hold()
+        addTeardownBlock { hold.release() }
+        hold.arm()
+        let (model, caches) = try await measuredCaches { url in
+            ranOnMain.set(Thread.isMainThread)
+            hold.passOrWait()
+            try FileManager.default.removeItem(at: url)
+        }
+
+        model.clearSelected()
+
+        XCTAssertTrue(model.isClearing)
+        XCTAssertTrue(model.selection.isEmpty)
+        XCTAssertNil(model.lastOutcome)
+        try await waitUntil("the clearing reaches the Trash step") { hold.isHolding }
+        XCTAssertEqual(ranOnMain.value, false, "moving files to the Trash must not block the main thread")
+        model.clearSelected()
+        hold.release()
+        try await waitUntil(timeout: .seconds(60), "the caches are cleared and measured again") { !model.isClearing && !model.isMeasuring }
+        XCTAssertEqual(model.lastOutcome?.failures, [])
+        XCTAssertEqual(model.result(caches)?.items.count, 1)
+    }
+
+    @MainActor func testAnOutcomeIsNotShownOnAnotherSpaceHogOpenedMeanwhile() async throws {
+        let hold = Hold()
+        addTeardownBlock { hold.release() }
+        hold.arm()
+        let (model, _) = try await measuredCaches { url in
+            hold.passOrWait()
+            try FileManager.default.removeItem(at: url)
+        }
+        model.clearSelected()
+        try await waitUntil("the clearing reaches the Trash step") { hold.isHolding }
+
+        model.open(try XCTUnwrap(model.hogs.first { $0.id == "homebrew" }))
+        hold.release()
+        try await waitUntil(timeout: .seconds(60), "the caches are cleared and measured again") { !model.isClearing && !model.isMeasuring }
+
+        XCTAssertNil(model.lastOutcome)
+    }
+
+    @MainActor func testAMeasurementStartedEarlierDoesNotReplaceANewerOne() async throws {
+        let root = home.appendingPathComponent("hog")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 1000).write(to: root.appendingPathComponent("a"))
+        let hold = Hold()
+        addTeardownBlock { hold.release() }
+        let hog = SpaceHog(id: "held", title: "Held", detail: "", symbol: "folder", root: root, clearing: .trash) { _ in
+            hold.passOrWait()
+            return true
+        }
+        let model = StorageExplorerModel(hogs: [hog], trash: { _ in }, delete: { _ in })
+        let names = { model.result(hog)?.items.map(\.url.lastPathComponent).sorted() }
+        model.measureAll()
+        try await waitUntil("the folder is measured") { names() == ["a"] }
+        model.open(hog)
+        hold.arm()
+        model.clearSelected()
+        try await waitUntil("the measurement after clearing is under way") { hold.isHolding }
+
+        try Data(repeating: 1, count: 2000).write(to: root.appendingPathComponent("b"))
+        model.measureAll()
+        try await waitUntil("the newer measurement arrives") { names() == ["a", "b"] }
+        hold.release()
+        try await pause(for: .milliseconds(300), because: "the older measurement would land once its scan finishes")
+
+        XCTAssertEqual(names(), ["a", "b"])
+    }
 }

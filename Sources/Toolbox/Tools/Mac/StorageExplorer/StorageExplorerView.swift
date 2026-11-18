@@ -179,7 +179,12 @@ private struct HogDetail: View {
     private var canClear: Bool { if case .notHere = hog.clearing { false } else { true } }
 
     @ViewBuilder private var footer: some View {
-        if let outcome = model.lastOutcome {
+        if model.isClearing {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(isTrash ? "Deleting…" : "Moving to the Trash…").font(.callout).foregroundStyle(.secondary)
+            }
+        } else if let outcome = model.lastOutcome {
             if outcome.failures.isEmpty {
                 Label("Cleared \(ByteFormat.string(outcome.freed)).", systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
             } else {
@@ -188,11 +193,11 @@ private struct HogDetail: View {
         }
         if canClear {
             HStack {
-                Button("Select All") { model.selectAll() }
+                Button("Select All") { model.selectAll() }.disabled(model.isClearing)
                 Spacer()
                 Text(ByteFormat.string(model.selectedBytes)).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                 Button(isTrash ? "Delete Permanently…" : "Move to Trash…") { model.confirmAndClear() }
-                    .buttonStyle(.borderedProminent).tint(isTrash ? .red : nil).disabled(model.selection.isEmpty)
+                    .buttonStyle(.borderedProminent).tint(isTrash ? .red : nil).disabled(model.selection.isEmpty || model.isClearing)
             }
         }
     }
