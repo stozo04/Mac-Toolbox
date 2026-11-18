@@ -56,6 +56,7 @@ final class ResizeImagesModel: BatchQueueModel {
         queue = BatchQueue(BatchTool(outputFolderName: "Toolbox Resized Images", logCategory: "resize-images", failureLog: "Image resize failed",
                                      skippedBecause: "had no readable images", files: BatchFiles.images), outputParent: outputParent)
     }
+
     private(set) var selectedID: UUID?
     /// The selected photo, small enough to draw quickly.
     private(set) var previewImage: CGImage?

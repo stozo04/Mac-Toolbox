@@ -33,6 +33,7 @@ final class RotateImagesModel: BatchQueueModel {
         queue = BatchQueue(BatchTool(outputFolderName: "Toolbox Rotated Images", logCategory: "rotate-images", failureLog: "Image rotation failed",
                                      skippedBecause: "had no readable images", files: BatchFiles.images), outputParent: outputParent)
     }
+
     private(set) var selectedID: UUID?
     /// The selected photo with the current change applied, small enough to draw quickly.
     private(set) var preview: CGImage?
