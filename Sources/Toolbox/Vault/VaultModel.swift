@@ -105,6 +105,7 @@ final class VaultModel {
             return VaultLog.failure("Vault creation failed", refusal)
         }
         Log.info("Vault created", category: VaultLog.category)
+        quitGuard.forgetRefusal()
         phase = .locked
         guard lockCount == locksBefore else { return }
         await open(password: password, since: locksBefore)
@@ -127,10 +128,16 @@ final class VaultModel {
         case .refused(.wrongPassword):
             wrongPasswordAttempts += 1
             message = VaultError.wrongPassword.localizedDescription
+            warnIfLeftMounted()
         case .refused(let refusal):
             showDoorFailure(refusal)
             VaultLog.failure("Vault unlock failed", refusal)
+            warnIfLeftMounted()
         }
+    }
+
+    private func warnIfLeftMounted() {
+        if door.state == .open { message = VaultNotices.leftMountedByFailedUnlock }
     }
 
     func finishOpening() {
@@ -621,7 +628,7 @@ extension VaultModel {
         let pending = door.startLock()
         if pending.wait(upTo: door.bounds.lock) == nil {
             Log.error("Mac went to sleep before the vault locked", category: VaultLog.category,
-                      ["reason": VaultNotices.whyNotLocked(changingPassword: door.isChangingPassword, failure: lastLockFailure)])
+                      ["reason": VaultNotices.whyNotLocked(during: door.unfinishedWrite, failure: lastLockFailure)])
         }
         if lockInFlight == nil { lockInFlight = Task { settle(await pending.value()) } }
     }
@@ -660,7 +667,9 @@ extension VaultModel {
     func changePassword(current: String, new: String, confirmation: String) async -> Bool {
         do {
             try VaultDisk.validateNewPassword(new, confirmation: confirmation)
-            if let refusal = await door.changePassword(from: current, to: new) { throw refusal }
+            let refusal = await door.changePassword(from: current, to: new)
+            quitGuard.forgetRefusal()
+            if let refusal { throw refusal }
             Log.info("Vault password changed", category: VaultLog.category)
             return true
         } catch {

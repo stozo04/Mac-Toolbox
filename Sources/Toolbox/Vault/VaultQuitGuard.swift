@@ -25,7 +25,7 @@ final class VaultQuitGuard {
     }
 
     func lockBeforeQuitting() -> Task<Bool, Never>? {
-        guard vault.isWorking || vault.isLocking || isMountedByThisCopy else { return nil }
+        guard vault.isWorking || vault.isLocking || isMountedByThisCopy || vault.door.unfinishedWrite != nil else { return nil }
         quitsAnywayIfStillOpen = refusal != nil && vault.message == refusal
         let locking = vault.lockImmediately()
         return Task { [vault] in
@@ -37,23 +37,28 @@ final class VaultQuitGuard {
 
     /// Answered from the door's state alone, so it is also right when the lock has not finished within the patience.
     func mayQuit() -> Bool {
-        guard isMountedByThisCopy else {
-            refusal = nil
+        let write = vault.door.unfinishedWrite
+        guard isMountedByThisCopy || write != nil else {
+            forgetRefusal()
             return true
         }
-        let changingPassword = vault.door.isChangingPassword
-        let details = ["door": "\(vault.door.state)",
-                       "reason": VaultNotices.whyNotLocked(changingPassword: changingPassword, failure: vault.lastLockFailure)]
+        let details = ["door": "\(vault.door.state)", "reason": VaultNotices.whyNotLocked(during: write, failure: vault.lastLockFailure)]
         guard !quitsAnywayIfStillOpen else {
-            Log.error("Quit with the vault still open", category: VaultLog.category, details)
+            Log.error("Quit before the vault was locked", category: VaultLog.category, details)
             return true
         }
-        Log.error("Quit refused because the vault is still open", category: VaultLog.category, details)
-        let refused = changingPassword ? VaultNotices.quitRefusedWhilePasswordChanges : VaultNotices.quitRefused(reason: vault.lastLockFailure)
+        Log.error("Quit refused because the vault is not locked yet", category: VaultLog.category, details)
+        let refused = write.map(VaultNotices.quitRefused(during:)) ?? VaultNotices.quitRefused(reason: vault.lastLockFailure)
         refusal = refused
         vault.message = refused
         showVaultPage?()
         return false
+    }
+
+    /// A refusal stops being true once the vault is locked or the write it waited for is done.
+    func forgetRefusal() {
+        if let refusal, vault.message == refusal { vault.message = nil }
+        refusal = nil
     }
 
     private var isMountedByThisCopy: Bool {

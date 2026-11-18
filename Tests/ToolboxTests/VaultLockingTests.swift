@@ -301,19 +301,19 @@ final class VaultLockingTests: XCTestCase {
         model.quitGuard.prepare(in: preparation)
         stand.play("chpass", as: .hangs)
         let changing = Task { await model.changePassword(current: Self.vaultPassword, new: "newer-pass", confirmation: "newer-pass") }
-        try await waitUntil("the password change is running") { stand.isHanging("chpass") && model.door.isChangingPassword }
+        try await waitUntil("the password change is running") { stand.isHanging("chpass") && model.door.unfinishedWrite == .changingPassword }
 
         let first = try await answerToQuit(preparation)
 
         XCTAssertFalse(first)
-        XCTAssertEqual(model.message, VaultNotices.quitRefusedWhilePasswordChanges)
+        XCTAssertEqual(model.message, VaultNotices.quitRefused(during: .changingPassword))
         XCTAssertFalse(model.message?.contains("taking too long to eject") ?? true, "the refusal blamed the eject for waiting on the password change")
-        XCTAssertTrue(model.door.isChangingPassword, "quitting stopped the password change")
+        XCTAssertEqual(model.door.unfinishedWrite, .changingPassword, "quitting stopped the password change")
         XCTAssertEqual(stand.stopped.value, [])
 
         model.lockBeforeSleep()
-        XCTAssertTrue(model.door.isChangingPassword, "sleep stopped the password change")
-        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: model.door.isChangingPassword, failure: model.lastLockFailure),
+        XCTAssertEqual(model.door.unfinishedWrite, .changingPassword, "sleep stopped the password change")
+        XCTAssertEqual(VaultNotices.whyNotLocked(during: model.door.unfinishedWrite, failure: model.lastLockFailure),
                        "the password is still being changed")
 
         let second = try await answerToQuit(preparation)
@@ -322,9 +322,10 @@ final class VaultLockingTests: XCTestCase {
     }
 
     func testTheReasonForAnUnfinishedLockNamesWhatItWaitsFor() {
-        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: false, failure: nil), "the lock had not finished")
-        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: false, failure: "Resource busy"), "Resource busy")
-        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: true, failure: "Resource busy"), "the password is still being changed")
+        XCTAssertEqual(VaultNotices.whyNotLocked(during: nil, failure: nil), "the lock had not finished")
+        XCTAssertEqual(VaultNotices.whyNotLocked(during: nil, failure: "Resource busy"), "Resource busy")
+        XCTAssertEqual(VaultNotices.whyNotLocked(during: .changingPassword, failure: "Resource busy"), "the password is still being changed")
+        XCTAssertEqual(VaultNotices.whyNotLocked(during: .creating, failure: nil), "the vault is still being created")
     }
 
     func testQuittingWhileTheVaultIsBeingCreatedNeverStopsTheCreation() async throws {
@@ -353,13 +354,31 @@ final class VaultLockingTests: XCTestCase {
         let mayQuit = try await answerToQuit(preparation)
         Shell.stopChildrenBeforeQuit(grace: 0.2)
 
-        XCTAssertTrue(mayQuit, "quit waits for a creation only as long as its patience lasts, then lets the app go")
+        XCTAssertFalse(mayQuit, "the app quit before the new vault was moved into place, so the vault would be lost")
+        XCTAssertEqual(model.message, VaultNotices.quitRefused(during: .creating))
         XCTAssertTrue(isRunning(pid), "creating the vault was stopped by quitting")
         await creating.value
         XCTAssertTrue(model.disk.exists)
         XCTAssertEqual(verbs.value, ["create"], "a vault created while the app was quitting was mounted afterwards")
         XCTAssertFalse(model.disk.isOpen)
-        XCTAssertNil(model.message)
+        XCTAssertNil(model.message, "the refusal still asked to wait for a creation that had finished")
+        XCTAssertTrue(model.quitGuard.mayQuit())
+    }
+
+    func testAFailedUnlockThatLeavesTheVaultMountedSaysSo() async throws {
+        let stand = DoorStandIn()
+        let model = try await makeLockedVault("left-mounted", stand: stand)
+        stand.play("attach", as: .mountsThenFails("the attach went wrong late"))
+        stand.play("eject", as: .fails("busy"))
+        stand.play("detach", as: .fails("hdiutil: couldn't unmount \"disk9\" - Resource busy"))
+
+        await model.unlock(password: Self.vaultPassword)
+
+        XCTAssertTrue(model.disk.isOpen)
+        XCTAssertEqual(model.door.state, .open)
+        XCTAssertEqual(model.phase, .locked)
+        XCTAssertEqual(model.message, VaultNotices.leftMountedByFailedUnlock, "the owner was not told the vault is still readable")
+        XCTAssertFalse(model.quitGuard.mayQuit(), "the app could quit without a word with the vault mounted")
     }
 
     func testTheRefusalSaysWhatMacOSSaidWhenNothingIsKnownToUseTheVault() {

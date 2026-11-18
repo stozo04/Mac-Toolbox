@@ -19,6 +19,12 @@ final class VaultDoor: @unchecked Sendable {
         case notOurs
     }
 
+    /// Writes that are never cut short. A lock waits behind them, and quitting during one must not lose its last step.
+    enum UnfinishedWrite: Equatable, Sendable {
+        case creating
+        case changingPassword
+    }
+
     enum UnlockOutcome: Equatable, Sendable {
         case opened
         case lockedMeanwhile
@@ -70,7 +76,7 @@ final class VaultDoor: @unchecked Sendable {
     private let guardLock = NSLock()
     private var current: State
     private var lockRequests = 0
-    private var passwordChanges = 0
+    private var writing: UnfinishedWrite?
     private var attaching: Task<Shell.Result, Error>?
     private var lastOperation: Task<Void, Never>?
     private var ownership: Int32?
@@ -90,8 +96,7 @@ final class VaultDoor: @unchecked Sendable {
 
     var state: State { guardLock.withLock { current } }
 
-    /// A lock waits behind a password change, which is never cut short.
-    var isChangingPassword: Bool { guardLock.withLock { passwordChanges > 0 } }
+    var unfinishedWrite: UnfinishedWrite? { guardLock.withLock { writing } }
 
     /// Whether this copy holds the lock file that says "the vault is mine while I have it open".
     var holdsOwnership: Bool { guardLock.withLock { ownership != nil } }
@@ -105,11 +110,11 @@ final class VaultDoor: @unchecked Sendable {
     // MARK: Operations
 
     func create(password: String) async -> VaultError? {
-        await inTurn { await self.createImage(password: password) }
+        await inTurn { await self.whileWriting(.creating) { await self.createImage(password: password) } }
     }
 
     func changePassword(from old: String, to new: String) async -> VaultError? {
-        await inTurn { await self.changeImagePassword(from: old, to: new) }
+        await inTurn { await self.whileWriting(.changingPassword) { await self.changeImagePassword(from: old, to: new) } }
     }
 
     func unlock(password: String) async -> UnlockOutcome {
@@ -348,6 +353,12 @@ final class VaultDoor: @unchecked Sendable {
 
     // MARK: Writes that are never cut short
 
+    private func whileWriting<Outcome>(_ write: UnfinishedWrite, _ body: () async -> Outcome) async -> Outcome {
+        guardLock.withLock { writing = write }
+        defer { guardLock.withLock { writing = nil } }
+        return await body()
+    }
+
     private func createImage(password: String) async -> VaultError? {
         guard !disk.exists else { return .alreadyExists }
         let unfinished = disk.location.folder.appendingPathComponent("\(VaultDisk.unfinishedPrefix)\(UUID().uuidString)\(VaultDisk.unfinishedSuffix)")
@@ -367,8 +378,6 @@ final class VaultDoor: @unchecked Sendable {
     }
 
     private func changeImagePassword(from old: String, to new: String) async -> VaultError? {
-        guardLock.withLock { passwordChanges += 1 }
-        defer { guardLock.withLock { passwordChanges -= 1 } }
         let borrowed = guardLock.withLock { ownership == nil }
         if borrowed, !takeOwnership() { return .openInAnotherCopy }
         defer { if borrowed { guardLock.withLock { releaseOwnership() } } }

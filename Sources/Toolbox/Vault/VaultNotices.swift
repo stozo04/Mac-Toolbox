@@ -15,13 +15,27 @@ enum VaultNotices {
         return notice + " Unlock to continue."
     }
 
-    static let quitRefusedWhilePasswordChanges = "The vault's password is still being changed, so Toolbox didn't quit. "
-        + "Wait for it to finish, then quit again. Quit again now to quit anyway; the change will still finish, "
-        + "and the vault will stay open until you eject it or restart."
+    static let leftMountedByFailedUnlock = "The vault couldn't open, and what macOS had already mounted couldn't be ejected, "
+        + "so the vault may still be readable in Finder. Close anything using it, then unlock again, or restart your Mac."
+
+    static func quitRefused(during write: VaultDoor.UnfinishedWrite) -> String {
+        switch write {
+        case .creating:
+            "The vault is still being created, so Toolbox didn't quit. Wait for it to finish, then quit again. "
+                + "Quit again now to quit anyway; you will have to create the vault again."
+        case .changingPassword:
+            "The vault's password is still being changed, so Toolbox didn't quit. Wait for it to finish, then quit again. "
+                + "Quit again now to quit anyway; the change will still finish, and the vault will stay open until you eject it or restart."
+        }
+    }
 
     /// For the log when quit or sleep could not wait for the lock.
-    static func whyNotLocked(changingPassword: Bool, failure: String?) -> String {
-        changingPassword ? "the password is still being changed" : failure ?? "the lock had not finished"
+    static func whyNotLocked(during write: VaultDoor.UnfinishedWrite?, failure: String?) -> String {
+        switch write {
+        case .creating: "the vault is still being created"
+        case .changingPassword: "the password is still being changed"
+        case nil: failure ?? "the lock had not finished"
+        }
     }
 
     static func quitRefused(reason: String?) -> String {
