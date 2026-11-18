@@ -91,6 +91,11 @@ final class NetworkSpeedTests: XCTestCase {
 }
 
 final class WifiServiceTests: XCTestCase {
+    func testACancelledKeychainLookupIsCancelledNotAFailure() {
+        XCTAssertEqual(WifiService.outcome(ofNotRunning: CancellationError()), .cancelled)
+        XCTAssertEqual(WifiService.outcome(ofNotRunning: Shell.ShellError.launchFailed("/usr/bin/security")), .failed("The Keychain could not be opened."))
+    }
+
     func testQRPayloadEscapesSpecialCharacters() {
         let bs = String(UnicodeScalar(92))
         let p = WifiService.qrPayload(ssid: "My;Net:1", password: "a,b\"c\(bs)d", security: .wpa, hidden: false)
