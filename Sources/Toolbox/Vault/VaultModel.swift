@@ -120,7 +120,8 @@ final class VaultModel {
     }
 
     private func open(password: String, since locksBefore: Int) async {
-        switch await door.unlock(password: password) {
+        let outcome = await door.unlock(password: password)
+        switch outcome {
         case .opened where lockCount == locksBefore:
             beginOpening()
         case .opened, .lockedMeanwhile:
@@ -128,16 +129,11 @@ final class VaultModel {
         case .refused(.wrongPassword):
             wrongPasswordAttempts += 1
             message = VaultError.wrongPassword.localizedDescription
-            warnIfLeftMounted()
         case .refused(let refusal):
             showDoorFailure(refusal)
             VaultLog.failure("Vault unlock failed", refusal)
-            warnIfLeftMounted()
         }
-    }
-
-    private func warnIfLeftMounted() {
-        if door.state == .open { message = VaultNotices.leftMountedByFailedUnlock }
+        if case .refused = outcome, door.state == .open { message = VaultNotices.leftMountedByFailedUnlock }
     }
 
     func finishOpening() {
