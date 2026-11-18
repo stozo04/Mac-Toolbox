@@ -2,15 +2,19 @@ import AppKit
 import Observation
 
 @MainActor @Observable
-final class RedactImageModel {
+final class RedactImageModel: BatchQueueModel {
     /// Shared so the queue survives switching to another tool and back.
     static let shared = RedactImageModel()
 
-    enum Status: Equatable {
+    enum Status: BatchStatus {
         case ready
         case working
         case done(RedactResult)
         case failed(String)
+
+        static var waiting: Status { .ready }
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
     struct Region: Identifiable, Equatable {
@@ -20,7 +24,7 @@ final class RedactImageModel {
         var coversFoundText = false
     }
 
-    struct Item: Identifiable {
+    struct Item: BatchItem {
         let id = UUID()
         let url: URL
         let bytes: Int64
@@ -49,15 +53,15 @@ final class RedactImageModel {
         var id: String { rawValue }
     }
 
-    private let outputParent: URL?
+    let queue: BatchQueue<Item>
 
-    init(outputParent: URL? = nil) { self.outputParent = outputParent }
+    init(outputParent: URL? = nil) {
+        let tool = BatchTool(outputFolderName: "Toolbox Redacted Images", logCategory: "redact-image", failureLog: "Redaction failed",
+                             skippedBecause: "were not images macOS can read, or were animated,", files: BatchFiles.images)
+        queue = BatchQueue(tool, outputParent: outputParent)
+    }
 
-    private(set) var items: [Item] = []
-    private(set) var isRunning = false
     private(set) var finding: RedactFind?
-    private(set) var folder: URL?
-    private(set) var notice: String?
     /// What the last Find & Cover did.
     private(set) var findMessage: String?
     var selectedID: UUID?
@@ -67,11 +71,10 @@ final class RedactImageModel {
     private(set) var styleWasChosen = false
     var scope = Scope.thisImage
 
-    private var task: Task<Void, Never>?
-    private var runID = UUID()
+    private var findTask: Task<Void, Never>?
+    private var findRun = UUID()
     private var thumbnailer: Task<Void, Never>?
 
-    var hasItems: Bool { !items.isEmpty }
     var selected: Item? { items.first { $0.id == selectedID } }
     var isBusy: Bool { isRunning || finding != nil }
     var hasExportable: Bool { items.contains { $0.isExportable } }
@@ -91,46 +94,31 @@ final class RedactImageModel {
     private func apply(_ style: RedactStyle) {
         guard settings.style != style else { return }
         settings.style = style
-        for i in items.indices where !items[i].regions.isEmpty { reopen(i) }
+        for item in items where !item.regions.isEmpty { queue.update(item.id, Self.reopen) }
     }
 
     // MARK: Queue
 
-    /// Adds images; folders are searched for images inside them. Animated and unreadable ones are skipped.
     func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += BatchFiles.images(in: url)
-            if found.count == before { skipped += 1 }
-        }
-        var known = Set(items.map { BatchFiles.identity($0.url) })
-        for url in found where known.insert(BatchFiles.identity(url)).inserted {
-            guard let size = RedactImage.inspect(url) else { skipped += 1; continue }
-            items.append(Item(url: url, bytes: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0), size: size))
+        queue.add(urls) { url in
+            RedactImage.inspect(url).map { Item(url: url, bytes: BatchFiles.bytes(of: url), size: $0) }
         }
         if selectedID == nil || selected == nil { select(items.first?.id) }
-        notice = skipped == 0 ? nil : "\(skipped) item(s) were not images macOS can read, or were animated, and were skipped."
         loadThumbnails()
     }
 
     func remove(_ id: UUID) {
-        guard !isBusy else { return }
-        items.removeAll { $0.id == id }
+        guard !isBusy, queue.remove(id) else { return }
         if selectedID == id { select(items.first?.id) }
     }
 
     func clear() {
-        task?.cancel()
-        runID = UUID()
-        items = []
+        findTask?.cancel()
+        findRun = UUID()
+        queue.clear()
         selectedID = nil
         selectedRegionID = nil
-        folder = nil
-        notice = nil
         findMessage = nil
-        isRunning = false
         finding = nil
     }
 
@@ -147,9 +135,8 @@ final class RedactImageModel {
             while let item = items.first(where: { $0.thumbnail == nil }) {
                 let url = item.url
                 let image = await Task.detached(priority: .utility) { ImageConverter.thumbnail(of: url, maxSize: 200) }.value
-                guard let i = items.firstIndex(where: { $0.id == item.id }) else { continue }
                 // Without a thumbnail the loop would find this image again forever.
-                items[i].thumbnail = image ?? Self.placeholder
+                queue.update(item.id) { $0.thumbnail = image ?? Self.placeholder }
             }
             thumbnailer = nil
         }
@@ -166,42 +153,49 @@ final class RedactImageModel {
     /// Covers a new region on the selected image and selects it.
     @discardableResult
     func addRegion(_ rect: CGRect) -> UUID? {
-        guard !isBusy, let i = selectedIndex else { return nil }
+        guard !isBusy, let item = selected else { return nil }
         let region = Region(rect: RedactImage.fitted(rect))
-        items[i].regions.append(region)
-        reopen(i)
+        queue.update(item.id) {
+            $0.regions.append(region)
+            Self.reopen(&$0)
+        }
         selectedRegionID = region.id
         return region.id
     }
 
     func setRect(_ rect: CGRect, of regionID: UUID) {
-        guard !isBusy, let i = selectedIndex, let r = items[i].regions.firstIndex(where: { $0.id == regionID }) else { return }
-        items[i].regions[r].rect = RedactImage.fitted(rect)
-        reopen(i)
+        guard !isBusy, let item = selected, item.regions.contains(where: { $0.id == regionID }) else { return }
+        queue.update(item.id) {
+            guard let index = $0.regions.firstIndex(where: { $0.id == regionID }) else { return }
+            $0.regions[index].rect = RedactImage.fitted(rect)
+            Self.reopen(&$0)
+        }
     }
 
     /// Removes the selected region.
     func deleteSelectedRegion() {
-        guard !isBusy, let i = selectedIndex, let id = selectedRegionID else { return }
-        items[i].regions.removeAll { $0.id == id }
+        guard !isBusy, let item = selected, let id = selectedRegionID else { return }
+        queue.update(item.id) {
+            $0.regions.removeAll { $0.id == id }
+            Self.reopen(&$0)
+        }
         selectedRegionID = nil
-        reopen(i)
     }
 
     /// Removes every region from the selected image.
     func clearRegions() {
-        guard !isBusy, let i = selectedIndex, !items[i].regions.isEmpty else { return }
-        items[i].regions = []
+        guard !isBusy, let item = selected, !item.regions.isEmpty else { return }
+        queue.update(item.id) {
+            $0.regions = []
+            Self.reopen(&$0)
+        }
         selectedRegionID = nil
-        reopen(i)
     }
 
-    private var selectedIndex: Int? { items.firstIndex { $0.id == selectedID } }
-
     /// A saved or failed image whose regions change has to be exported again.
-    private func reopen(_ i: Int) {
-        switch items[i].status {
-        case .done, .failed: items[i].status = .ready
+    private static func reopen(_ item: inout Item) {
+        switch item.status {
+        case .done, .failed: item.status = .ready
         case .ready, .working: break
         }
     }
@@ -216,11 +210,11 @@ final class RedactImageModel {
         finding = kind
         findMessage = nil
         let run = UUID()
-        runID = run
-        task = Task {
+        findRun = run
+        findTask = Task {
             var added = 0, images = 0, failed = 0
             for target in targets {
-                if Task.isCancelled || runID != run { break }
+                if Task.isCancelled || findRun != run { break }
                 let url = target.url
                 let outcome = await Task.detached(priority: .userInitiated) { () -> Result<[CGRect], Error> in
                     Result { try RedactImage.find(kind, in: url) }
@@ -235,7 +229,7 @@ final class RedactImageModel {
                     Log.error("Find failed", category: "redact-image", Log.details(error, file: url, ["kind": kind.rawValue]))
                 }
             }
-            guard runID == run else { return }
+            guard findRun == run else { return }
             Log.info("Regions found", category: "redact-image", ["kind": kind.rawValue, "found": "\(added)", "images": "\(targets.count)"])
             if !Task.isCancelled { findMessage = summary(kind, added: added, images: images, of: targets.count, failed: failed) }
             finding = nil
@@ -244,20 +238,21 @@ final class RedactImageModel {
 
     /// Adds the boxes that are not already covered. Returns how many were added.
     private func merge(_ boxes: [CGRect], into id: UUID, areText: Bool) -> Int {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return 0 }
         var added = 0
         var coversFoundText = false
-        for box in boxes {
-            let covering = items[i].regions.indices.filter { RedactImage.overlaps(items[i].regions[$0].rect, box) }
-            if covering.isEmpty {
-                items[i].regions.append(Region(rect: box, coversFoundText: areText))
-                added += 1
-            } else if areText {
-                for index in covering { items[i].regions[index].coversFoundText = true }
+        queue.update(id) { item in
+            for box in boxes {
+                let covering = item.regions.indices.filter { RedactImage.overlaps(item.regions[$0].rect, box) }
+                if covering.isEmpty {
+                    item.regions.append(Region(rect: box, coversFoundText: areText))
+                    added += 1
+                } else if areText {
+                    for index in covering { item.regions[index].coversFoundText = true }
+                }
+                coversFoundText = coversFoundText || areText
             }
-            coversFoundText = coversFoundText || areText
+            if added > 0 { Self.reopen(&item) }
         }
-        if added > 0 { reopen(i) }
         // Blurred or pixelated text can sometimes be made out again; a black box cannot.
         if added > 0 || coversFoundText, !styleWasChosen { apply(.blackBox) }
         return added
@@ -272,54 +267,22 @@ final class RedactImageModel {
 
     // MARK: Exporting
 
-    /// Saves a copy of every image that has regions, with them covered, into one new dated folder in Downloads.
     func export() {
         guard !isBusy, hasExportable else { return }
-        let folder: URL
-        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images", in: outputParent) } catch {
-            notice = error.localizedDescription
-            Log.error("Output folder failed", category: "redact-image", Log.details(error))
-            return
-        }
-        notice = OutputFolderError.clearing(notice)
-        isRunning = true
-        self.folder = folder
         let settings = self.settings
-        let work = items.filter(\.isExportable).map { (id: $0.id, url: $0.url, rects: $0.rects) }
-        let run = UUID()
-        runID = run
-        task = Task {
-            for job in work {
-                if Task.isCancelled || runID != run { break }
-                update(job.id, .working)
-                // Decoding and encoding are heavy; keep them off the main thread.
-                let outcome = await Task.detached(priority: .userInitiated) { () -> Result<RedactResult, Error> in
-                    Result { try RedactImage.save(source: job.url, regions: job.rects, settings: settings, into: folder) }
-                }.value
-                switch outcome {
-                case .success(let result):
-                    update(job.id, .done(result))
-                    Log.info("Image redacted", category: "redact-image", ["regions": "\(result.regions)", "style": settings.style.rawValue,
-                                                                       "removeMetadata": "\(settings.removeMetadata)"])
-                case .failure(let error):
-                    update(job.id, .failed(error.localizedDescription))
-                    Log.error("Redaction failed", category: "redact-image", Log.details(error, file: job.url, ["style": settings.style.rawValue]))
-                }
+        queue.run(retryingFailed: false, failureContext: ["style": settings.style.rawValue], where: \.isExportable) { item, folder, step in
+            let rects = item.rects
+            let result = try await step.detached(showing: .working) {
+                try RedactImage.save(source: item.url, regions: rects, settings: settings, into: folder)
             }
-            guard runID == run else { return }
-            for i in items.indices where items[i].status == .working { items[i].status = .ready }
-            isRunning = false
+            Log.info("Image redacted", category: "redact-image", ["regions": "\(result.regions)", "style": settings.style.rawValue,
+                                                               "removeMetadata": "\(settings.removeMetadata)"])
+            return .done(result)
         }
     }
 
-    func cancel() { task?.cancel() }
-
-    private func update(_ id: UUID, _ status: Status) {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i].status = status
+    func cancel() {
+        findTask?.cancel()
+        queue.cancel()
     }
-
-    func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-
-    func revealFolder() { if let folder { NSWorkspace.shared.open(folder) } }
 }
