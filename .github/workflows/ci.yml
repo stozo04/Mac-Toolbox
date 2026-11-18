@@ -41,14 +41,12 @@ jobs:
             decide true "Could not compare with origin/$BASE_REF: every job runs."
           fi
           [ -n "$changed" ] || decide true "No changed files found: every job runs."
-          while IFS= read -r path; do
-            case "$path" in
-              .github/workflows/*) decide true "Workflow changed ($path): every job runs." ;;
-              THIRD_PARTY_NOTICES.md) decide true "$path is copied into Toolbox.app: every job runs." ;;
-              *.md | features/* | images/* | supabase/* | .github/dependabot.yml) ;;
-              *) decide true "Changed outside the docs-only paths ($path): every job runs." ;;
-            esac
-          done <<< "$changed"
+          if grep -q '^\.github/workflows/' <<< "$changed"; then
+            decide true "A workflow changed: every job runs."
+          fi
+          if ! first="$(scripts/app-untouched.sh <<< "$changed")"; then
+            decide true "Changed a path that can affect the app ($first): every job runs."
+          fi
           decide false "Only docs, designs, Dependabot config or Supabase files changed: the macOS jobs are skipped."
 
   version:
