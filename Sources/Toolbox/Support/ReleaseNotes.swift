@@ -35,6 +35,7 @@ enum ReleaseNotes {
             .init(kind: .fixed, text: "Vault: quitting waits for the vault to lock. If it can't be locked, Toolbox stays open and tells you why; quit again to quit anyway."),
             .init(kind: .fixed, text: "Vault: two copies of Toolbox can no longer open the vault at the same time or eject it from under each other."),
             .init(kind: .improved, text: "Vault: creating the vault and changing its password are never cut short, even if you quit while they run."),
+            .init(kind: .fixed, text: "Vault: smart search no longer fails with \"disk I/O error\" after the vault was ejected outside Toolbox."),
         ]),
         Release(version: "0.11.8", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "AI Models stops watching your disk for models when you leave the page. Before, one visit kept it looking for as long as Toolbox was open."),

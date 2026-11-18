@@ -234,8 +234,13 @@ final class VaultSearchEngine: @unchecked Sendable {
 
     private func openIndex() throws -> VaultIndex {
         try checkOpen()
+        do {
+            try requireMounted()
+        } catch {
+            forgetIndexOfEjectedVault()
+            throw error
+        }
         if let index { return index }
-        try requireMounted()
         if !FileManager.default.fileExists(atPath: privateFolder.path) {
             try FileManager.default.createDirectory(at: privateFolder, withIntermediateDirectories: false)
         }
@@ -243,6 +248,12 @@ final class VaultSearchEngine: @unchecked Sendable {
         index = opened
         removeLeftoverWorkFolders()
         return opened
+    }
+
+    private func forgetIndexOfEjectedVault() {
+        index?.close()
+        index = nil
+        cachedVectors = nil
     }
 
     private func removeLeftoverWorkFolders() {

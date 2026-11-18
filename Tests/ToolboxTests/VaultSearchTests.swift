@@ -107,6 +107,25 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertEqual(try writeCount(of: database) - writesBefore, 1, "removing \(paths.count) files committed once per file")
     }
 
+    func testAnIndexOpenedBeforeTheVaultWasEjectedIsNotUsedAgain() async throws {
+        let door = try await makeOpenDoor(in: root.appendingPathComponent("ejected"))
+        let located = EmbeddingModel.Located(text: root.appendingPathComponent("t.gguf"), media: root.appendingPathComponent("m.gguf"))
+        let engine = VaultSearchEngine(root: door.disk.location.mountPoint, model: located)
+        defer { engine.close() }
+        _ = try await engine.pending([])
+
+        let locked = await door.lock()
+        XCTAssertEqual(locked, .locked)
+
+        do {
+            _ = try await engine.pending([])
+            XCTFail("the index of an ejected vault was read")
+        } catch VaultSearchError.notMounted {
+        } catch {
+            XCTFail("expected notMounted, got \(error)")
+        }
+    }
+
     func testSearchFindsTheMatchingPhotoWithTheRealModel() async throws {
         guard let model = EmbeddingModel.locate() else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
         let red = try makePhoto("one.png", red: 230, green: 20, blue: 20)
