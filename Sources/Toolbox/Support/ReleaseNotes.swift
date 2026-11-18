@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.6"
+    static let current = "0.11.7"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,17 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.11.7", date: "2026-11-18", changes: [
+            .init(kind: .fixed, text: "Vault: a file is never deleted after its copy went to an unprotected folder because the vault closed mid-move; the original is kept."),
+            .init(kind: .improved, text: "Vault: each file moved in is saved to the disk before its original is deleted, so a power cut can't lose both."),
+            .init(kind: .fixed, text: "Vault: if the vault is ejected from outside Toolbox, the app notices, locks, and says which files were not moved and which had just finished."),
+            .init(kind: .fixed, text: "Vault: the door won't open over files left outside the vault in its open folder; it names the folder, shows it in Finder and tells you to move them."),
+            .init(kind: .fixed, text: "Vault: an unlock or a vault creation that fails partway no longer leaves a half-open vault or a half-made one behind."),
+            .init(kind: .fixed, text: "Vault: a second copy of Toolbox no longer ejects the vault the first copy is using; it asks you to lock it there first."),
+            .init(kind: .fixed, text: "Vault: creating a vault can never delete or replace one that already exists."),
+            .init(kind: .improved, text: "Vault: moving many files into a big vault is faster, and scrolling a long library uses far less memory."),
+            .init(kind: .improved, text: "Vault: search tidies up after deleted files much faster."),
+        ]),
         Release(version: "0.11.6", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "Dropping several files at once always tells you when some were skipped. Before, the note could vanish depending on which file loaded last."),
             .init(kind: .fixed, text: "Storage Explorer no longer freezes while it moves things to the Trash or empties it, and shows that it is working."),

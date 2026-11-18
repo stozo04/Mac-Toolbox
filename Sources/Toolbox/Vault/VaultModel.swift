@@ -33,6 +33,7 @@ final class VaultModel {
     private(set) var isWorking = false
     private(set) var wrongPasswordAttempts = 0
     var message: String?
+    private(set) var folderWithFilesLeftOutside: URL?
     private(set) var items: [VaultItem] = []
     var selection: Set<VaultItem.ID> = []
     var viewing: VaultItem.ID?
@@ -88,12 +89,21 @@ final class VaultModel {
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
     private var openGeneration = 0
+    private var filesStillToMove: [URL] = []
+    private(set) var ownsMount = false
+    fileprivate var outsideCloseNotice: (duringImport: Bool, unconfirmed: Int)?
+    private let anotherCopyIsRunning: @MainActor () -> Bool
+    fileprivate var mayEject: Bool { ownsMount || !anotherCopyIsRunning() }
+    @ObservationIgnored var moveFile: @Sendable (_ file: URL, _ vaultRoot: URL) async throws -> URL = { try await VaultMover.move($0, into: $1) }
+    @ObservationIgnored private(set) var libraryReloads = 0
     private static let duplicatePause: Duration = .milliseconds(400)
     private static let typingPause: Duration = .milliseconds(250)
 
-    init(location: VaultLocation = .standard, watchesSystem: Bool = true) {
-        disk = VaultDisk(location: location)
-        if disk.isOpen { disk.lockAndWait() }
+    init(location: VaultLocation, watchesSystem: Bool = true, tool: VaultTool = .system,
+         anotherCopyIsRunning: @escaping @MainActor () -> Bool = VaultModel.anotherCopyOfThisAppIsRunning) {
+        disk = VaultDisk(location: location, tool: tool)
+        self.anotherCopyIsRunning = anotherCopyIsRunning
+        if disk.isOpen, !anotherCopyIsRunning() { disk.lockAndWait() }
         phase = disk.exists ? .locked : .setup
         if watchesSystem { watchSystem() }
     }
@@ -103,7 +113,7 @@ final class VaultModel {
 
     func create(password: String, confirmation: String) async {
         guard !isWorking, !isLocking else { return }
-        message = nil
+        clearDoorMessage()
         do {
             try VaultDisk.validateNewPassword(password, confirmation: confirmation)
         } catch {
@@ -115,25 +125,31 @@ final class VaultModel {
             try await self.disk.create(password: password)
             Log.info("Vault created", category: VaultLog.category)
             self.phase = .locked
-            try await self.disk.unlock(password: password)
+            try await self.disk.unlock(password: password, mayEject: !self.anotherCopyIsRunning())
+            self.ownsMount = true
             self.openUnlessLockedMeanwhile(since: locksBefore)
         }
     }
 
     func unlock(password: String) async {
         guard !isWorking, !isLocking, !password.isEmpty else { return }
-        message = nil
+        clearDoorMessage()
+        guard !disk.isOpen || mayEject else {
+            message = Self.openInAnotherCopyMessage
+            return
+        }
         isWorking = true
         defer { isWorking = false }
         let locksBefore = lockCount
         do {
-            try await disk.unlock(password: password)
+            try await disk.unlock(password: password, mayEject: !anotherCopyIsRunning())
+            ownsMount = true
             openUnlessLockedMeanwhile(since: locksBefore)
         } catch VaultError.wrongPassword {
             wrongPasswordAttempts += 1
             message = VaultError.wrongPassword.localizedDescription
         } catch {
-            message = error.localizedDescription
+            showDoorFailure(error)
             VaultLog.failure("Vault unlock failed", error)
         }
     }
@@ -142,15 +158,6 @@ final class VaultModel {
         guard phase == .opening, !isLocking, disk.isOpen else { return }
         phase = .open
         addDebugFiles()
-    }
-
-    private func addDebugFiles() {
-        #if DEBUG
-        let arguments = CommandLine.arguments
-        guard let flag = arguments.firstIndex(of: "--vault-debug-add"), flag + 1 < arguments.count else { return }
-        let folder = URL(fileURLWithPath: arguments[flag + 1], isDirectory: true)
-        add([folder])
-        #endif
     }
 
     func lock() async {
@@ -163,11 +170,13 @@ final class VaultModel {
         await engine?.shutDown()
         await moveTask?.value
         clearOpenState()
-        do {
-            try await disk.lock()
-        } catch {
-            VaultLog.failure("Vault lock failed", error)
-            disk.lockAndWait()
+        if mayEject {
+            do {
+                try await disk.lock()
+            } catch {
+                VaultLog.failure("Vault lock failed", error)
+                disk.lockAndWait()
+            }
         }
         settleAfterLocking()
     }
@@ -175,7 +184,7 @@ final class VaultModel {
     func lockImmediately() {
         beginLocking()
         clearOpenState()
-        disk.lockAndWait()
+        if mayEject { disk.lockAndWait() }
         settleAfterLocking()
     }
 
@@ -198,7 +207,8 @@ final class VaultModel {
 
     private func settleAfterLocking() {
         isLocking = false
-        guard disk.isOpen else {
+        guard disk.isOpen, mayEject else {
+            ownsMount = false
             if disk.exists { phase = .locked }
             return
         }
@@ -210,21 +220,9 @@ final class VaultModel {
         startSearch()
     }
 
-    func changePassword(current: String, new: String, confirmation: String) async -> Bool {
-        do {
-            try VaultDisk.validateNewPassword(new, confirmation: confirmation)
-            try await disk.changePassword(from: current, to: new)
-            Log.info("Vault password changed", category: VaultLog.category)
-            return true
-        } catch {
-            message = error.localizedDescription
-            if !Self.isUserMistake(error) { VaultLog.failure("Vault password change failed", error) }
-            return false
-        }
-    }
-
     func reload() {
         guard disk.isOpen else { return }
+        libraryReloads += 1
         items = VaultLibrary.items(in: root)
         selection.formIntersection(Set(items.map(\.id)))
         if let viewing, !items.contains(where: { $0.id == viewing }) { self.viewing = nil }
@@ -340,29 +338,42 @@ final class VaultModel {
         let files = VaultMover.expand(urls)
         guard !files.isEmpty else { return }
         moveFailures = []
+        filesStillToMove = files
+        guard !lockIfClosedFromOutside() else { return }
         moveProgress = MoveProgress(done: 0, total: files.count)
         let id = UUID()
         moveID = id
-        moveTask = Task {
+        moveTask = Task { [moveFile] in
             for file in files {
                 if Task.isCancelled || !disk.isOpen { break }
                 do {
-                    _ = try await VaultMover.move(file, into: root)
+                    let moved = try await moveFile(file, root)
+                    if moveID == id { showMovedIn(moved) } else { correctReportIfMovedAfterAll(file) }
                 } catch {
+                    guard moveID == id else { break }
                     moveFailures.append(VaultMoveFailure(name: file.lastPathComponent, reason: error.localizedDescription))
                     if Self.isUnexpected(error) { VaultLog.failure("Vault move failed", error, file: file) }
                 }
+                guard moveID == id else { break }
+                filesStillToMove.removeAll { $0 == file }
                 moveProgress?.done += 1
-                reload()
             }
             Log.info("Moved into vault", category: VaultLog.category,
                      ["count": String(files.count), "failed": String(moveFailures.count)])
+            guard moveID == id, !lockIfClosedFromOutside() else { return }
+            filesStillToMove = []
+            if !isLocking { reload() }
             refreshIndex()
-            guard moveID == id else { return }
             moveProgress = nil
             moveTask = nil
             moveID = nil
         }
+    }
+
+    private func showMovedIn(_ url: URL) {
+        guard !isLocking, let item = VaultLibrary.item(movedTo: url) else { return }
+        items = VaultLibrary.inserting(item, into: items)
+        if item.kind == .video { loadDurations() }
     }
 
     func delete(_ ids: Set<VaultItem.ID>) async {
@@ -525,7 +536,7 @@ final class VaultModel {
         } catch VaultSearchError.closed {
             return
         } catch {
-            guard searchEngine === engine else { return }
+            guard searchEngine === engine, !lockIfClosedFromOutside() else { return }
             VaultLog.failure("Vault search index failed", error)
             searchState = .failed(error.localizedDescription)
         }
@@ -551,6 +562,7 @@ final class VaultModel {
             } catch VaultSearchError.closed {
                 return
             } catch {
+                guard !lockIfClosedFromOutside() else { return }
                 VaultLog.failure("Vault search failed", error)
                 message = "Search failed: \(error.localizedDescription)"
             }
@@ -558,25 +570,10 @@ final class VaultModel {
         }
     }
 
-    static func isUnexpected(_ error: Error) -> Bool {
-        guard let moveError = error as? VaultMoveError else { return true }
-        switch moveError {
-        case .copyDiffers, .unreadable, .originalKept: return true
-        case .interrupted, .changedWhileMoving: return false
-        case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
-        }
-    }
-
-    static func isUserMistake(_ error: Error) -> Bool {
-        switch error as? VaultError {
-        case .wrongPassword, .passwordTooShort, .passwordsDiffer: true
-        default: false
-        }
-    }
-
     private func openUnlessLockedMeanwhile(since locksBefore: Int) {
         guard lockCount == locksBefore else {
             disk.lockAndWait()
+            ownsMount = disk.isOpen
             Log.info("Vault locked while it was opening", category: VaultLog.category)
             return
         }
@@ -600,6 +597,7 @@ final class VaultModel {
         moveProgress = nil
         moveTask = nil
         moveID = nil
+        filesStillToMove = []
         releasePlayer()
         openGeneration += 1
         lengthTasks.forEach { $0.cancel() }
@@ -628,7 +626,7 @@ final class VaultModel {
         do {
             try await work()
         } catch {
-            message = error.localizedDescription
+            showDoorFailure(error)
             VaultLog.failure(failure, error)
         }
     }
@@ -644,6 +642,121 @@ final class VaultModel {
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.lockImmediately() }
         })
+        observers.append(workspace.addObserver(forName: NSWorkspace.didUnmountNotification, object: nil, queue: .main) { [weak self] note in
+            let volume = note.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL
+            MainActor.assumeIsolated { self?.volumeDidUnmount(volume) }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.lockIfClosedFromOutside() }
+        })
+    }
+}
+
+extension VaultModel {
+    static let finishedAsVaultClosedReason = "It finished moving just as the vault closed. Check it after you unlock."
+
+    static func closedFromOutsideMessage(duringImport: Bool, unconfirmed: Int) -> String {
+        var notice = "The vault was closed from outside Toolbox."
+        if duringImport { notice += " Files that had not been moved yet are still where they were." }
+        if unconfirmed > 0 {
+            notice += " \(unconfirmed == 1 ? "1 file" : "\(unconfirmed) files") finished moving just as the vault closed; "
+                + "check \(unconfirmed == 1 ? "it" : "them") after you unlock."
+        }
+        return notice + " Unlock to continue."
+    }
+
+    static func isUnexpected(_ error: Error) -> Bool {
+        guard let moveError = error as? VaultMoveError else { return true }
+        switch moveError {
+        case .copyDiffers, .unreadable, .vaultNotOpen, .notSaved, .originalKept: return true
+        case .interrupted, .changedWhileMoving: return false
+        case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
+        }
+    }
+
+    static func isUserMistake(_ error: Error) -> Bool {
+        switch error as? VaultError {
+        case .wrongPassword, .passwordTooShort, .passwordsDiffer: true
+        default: false
+        }
+    }
+
+    static let openInAnotherCopyMessage = VaultError.openInAnotherCopy.localizedDescription
+
+    static func anotherCopyOfThisAppIsRunning() -> Bool {
+        guard let identifier = Bundle.main.bundleIdentifier else { return false }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).contains { $0 != .current }
+    }
+
+    func volumeDidUnmount(_ volume: URL?) {
+        guard volume?.resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().path else { return }
+        lockIfClosedFromOutside()
+    }
+
+    @discardableResult
+    func lockIfClosedFromOutside() -> Bool {
+        guard phase == .open || phase == .opening, !isLocking, !disk.isOpen else { return false }
+        let duringImport = moveTask != nil || !filesStillToMove.isEmpty
+        let unconfirmed = filesStillToMove.filter { !FileManager.default.fileExists(atPath: $0.path) }
+        Log.warning("Vault closed from outside the app", category: VaultLog.category,
+                    ["still_to_move": String(filesStillToMove.count), "unconfirmed": String(unconfirmed.count)])
+        moveFailures += filesStillToMove.map {
+            VaultMoveFailure(name: $0.lastPathComponent,
+                             reason: unconfirmed.contains($0) ? Self.finishedAsVaultClosedReason : VaultMoveError.vaultNotOpen.localizedDescription,
+                             source: $0)
+        }
+        outsideCloseNotice = (duringImport, unconfirmed.count)
+        beginLocking()
+        clearOpenState()
+        disk.removeEmptyMountPoint()
+        ownsMount = false
+        isLocking = false
+        phase = disk.exists ? .locked : .setup
+        message = Self.closedFromOutsideMessage(duringImport: duringImport, unconfirmed: unconfirmed.count)
+        return true
+    }
+
+    // The move in flight when the eject was noticed can still finish: its copy was already checked and saved to the disk.
+    fileprivate func correctReportIfMovedAfterAll(_ file: URL) {
+        let kept = VaultMoveError.vaultNotOpen.localizedDescription
+        guard !FileManager.default.fileExists(atPath: file.path), let notice = outsideCloseNotice,
+              let listed = moveFailures.firstIndex(where: { $0.source == file && $0.reason == kept }) else { return }
+        moveFailures[listed] = VaultMoveFailure(name: file.lastPathComponent, reason: Self.finishedAsVaultClosedReason, source: file)
+        let noticeShown = message == Self.closedFromOutsideMessage(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed)
+        outsideCloseNotice = (notice.duringImport, notice.unconfirmed + 1)
+        if noticeShown { message = Self.closedFromOutsideMessage(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed + 1) }
+    }
+
+    fileprivate func addDebugFiles() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--vault-debug-add"), flag + 1 < arguments.count else { return }
+        let folder = URL(fileURLWithPath: arguments[flag + 1], isDirectory: true)
+        add([folder])
+        #endif
+    }
+
+    func changePassword(current: String, new: String, confirmation: String) async -> Bool {
+        do {
+            try VaultDisk.validateNewPassword(new, confirmation: confirmation)
+            try await disk.changePassword(from: current, to: new)
+            Log.info("Vault password changed", category: VaultLog.category)
+            return true
+        } catch {
+            message = error.localizedDescription
+            if !Self.isUserMistake(error) { VaultLog.failure("Vault password change failed", error) }
+            return false
+        }
+    }
+
+    fileprivate func clearDoorMessage() {
+        message = nil
+        folderWithFilesLeftOutside = nil
+    }
+
+    fileprivate func showDoorFailure(_ error: Error) {
+        message = error.localizedDescription
+        if case VaultError.filesLeftOutside = error { folderWithFilesLeftOutside = disk.location.mountPoint }
     }
 }
 
