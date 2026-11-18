@@ -37,6 +37,7 @@ enum ReleaseNotes {
             .init(kind: .fixed, text: "Burn In Subtitles: cancelling while the speech is being transcribed is no longer shown as a failure."),
             .init(kind: .fixed, text: "Annotate Screenshot: a blurred area can no longer show the blur of the picture you had open before."),
             .init(kind: .fixed, text: "Behind the scenes: problem reports written while earlier ones were being sent are no longer lost."),
+        ]),
         Release(version: "0.11.3", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Redact PDF: Find & Redact now also reads scanned pages that have a page number on them, and words shown in notes and pictures."),
             .init(kind: .fixed, text: "Redact PDF: if a page could not be searched, the result names the page so you can check it yourself."),
