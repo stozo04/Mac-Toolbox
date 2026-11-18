@@ -493,4 +493,109 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertNil(model.paletteImage)
         XCTAssertNotNil(model.paletteNotice)
     }
+
+    // MARK: Palette loads that overlap
+
+    private final class HeldSamples: @unchecked Sendable {
+        private let gates: [String: DispatchSemaphore]
+        private let image: CGImage
+
+        init(holding names: [String], image: CGImage) {
+            gates = Dictionary(uniqueKeysWithValues: names.map { ($0, DispatchSemaphore(value: 0)) })
+            self.image = image
+        }
+
+        func sample(_ url: URL) -> CGImage? {
+            gates[url.lastPathComponent]?.wait()
+            return image
+        }
+
+        func release(_ name: String) { gates[name]?.signal() }
+    }
+
+    @MainActor private func makeModel(holding names: [String], pasteboard: NSPasteboard? = nil) throws -> (ColorPickerModel, HeldSamples) {
+        let held = HeldSamples(holding: names, image: try image(width: 8, height: 8) { _, _ in (20, 120, 220, 255) })
+        addTeardownBlock { names.forEach(held.release) }
+        let model = ColorPickerModel(defaults: try makeScratchDefaults(), pasteboard: pasteboard ?? makeScratchPasteboard()) { held.sample($0) }
+        return (model, held)
+    }
+
+    private func makeImageFiles(_ names: String...) throws -> [URL] {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("color-picker-overlap-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return try names.map {
+            let url = dir.appendingPathComponent($0)
+            try Data().write(to: url)
+            return url
+        }
+    }
+
+    private func settle() async throws {
+        try await pause(for: .milliseconds(100), because: "a late palette would land on a later main-actor turn")
+    }
+
+    @MainActor func testClearingThePaletteWhileAnImageIsReadKeepsItCleared() async throws {
+        let (model, held) = try makeModel(holding: ["slow.png"])
+        model.loadPalette(from: try makeImageFiles("slow.png"))
+        XCTAssertTrue(model.isReadingImage)
+
+        model.clearPalette()
+        XCTAssertFalse(model.isReadingImage)
+        held.release("slow.png")
+        try await settle()
+
+        XCTAssertNil(model.paletteName)
+        XCTAssertNil(model.paletteImage)
+        XCTAssertTrue(model.palette.isEmpty)
+        XCTAssertFalse(model.isReadingImage)
+    }
+
+    @MainActor func testANewerPaletteImageIsNotReplacedByAnOlderSlowerOne() async throws {
+        let (model, held) = try makeModel(holding: ["slow.png"])
+        let files = try makeImageFiles("slow.png", "quick.png")
+        model.loadPalette(from: [try files.element(at: 0)])
+        model.loadPalette(from: [try files.element(at: 1)])
+        try await waitUntil("the newer image is shown") { model.paletteName == "quick.png" }
+        XCTAssertFalse(model.isReadingImage)
+
+        held.release("slow.png")
+        try await settle()
+
+        XCTAssertEqual(model.paletteName, "quick.png")
+        XCTAssertFalse(model.isReadingImage)
+    }
+
+    @MainActor func testAnOlderImageArrivingDoesNotEndTheWaitForTheNewerOne() async throws {
+        let (model, held) = try makeModel(holding: ["first.png", "second.png"])
+        let files = try makeImageFiles("first.png", "second.png")
+        model.loadPalette(from: [try files.element(at: 0)])
+        model.loadPalette(from: [try files.element(at: 1)])
+
+        held.release("first.png")
+        try await settle()
+        XCTAssertTrue(model.isReadingImage, "the newer image is still being read")
+        XCTAssertNil(model.paletteName)
+        held.release("second.png")
+
+        try await waitUntil("the newer image is shown") { model.paletteName == "second.png" }
+        XCTAssertFalse(model.isReadingImage)
+    }
+
+    @MainActor func testAPastedImageIsNotReplacedByAFileStillBeingRead() async throws {
+        let pasteboard = makeScratchPasteboard()
+        let picture = try image(width: 8, height: 8) { _, _ in (200, 40, 40, 255) }
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects([NSImage(cgImage: picture, size: NSSize(width: 8, height: 8))]))
+        let (model, held) = try makeModel(holding: ["slow.png"], pasteboard: pasteboard)
+        model.loadPalette(from: try makeImageFiles("slow.png"))
+
+        model.pastePaletteImage()
+        XCTAssertEqual(model.paletteName, "Pasted image")
+        XCTAssertFalse(model.isReadingImage)
+        held.release("slow.png")
+        try await settle()
+
+        XCTAssertEqual(model.paletteName, "Pasted image")
+    }
 }

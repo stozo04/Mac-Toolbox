@@ -41,12 +41,16 @@ final class ColorPickerModel {
 
     private var sampler: NSColorSampler?
     private var copiedTask: Task<Void, Never>?
+    private var paletteLoad: Task<Void, Never>?
     private let defaults: UserDefaults
     private let pasteboard: NSPasteboard
+    private let sample: @Sendable (URL) -> CGImage?
 
-    init(defaults: UserDefaults = .standard, pasteboard: NSPasteboard = .general) {
+    init(defaults: UserDefaults = .standard, pasteboard: NSPasteboard = .general,
+         sample: @escaping @Sendable (URL) -> CGImage? = { PaletteExtractor.sample(at: $0) }) {
         self.defaults = defaults
         self.pasteboard = pasteboard
+        self.sample = sample
         history = ColorHistory.load(from: defaults)
         current = history.colors.first
     }
@@ -164,9 +168,10 @@ final class ColorPickerModel {
         }
         paletteNotice = nil
         isReadingImage = true
-        Task { [weak self] in
-            let image = await Task.detached(priority: .userInitiated) { PaletteExtractor.sample(at: url) }.value
-            guard let self else { return }
+        paletteLoad?.cancel()
+        paletteLoad = Task { [weak self, sample] in
+            let image = await Task.detached(priority: .userInitiated) { sample(url) }.value
+            guard let self, !Task.isCancelled else { return }
             self.isReadingImage = false
             guard let image else {
                 self.paletteNotice = "\(url.lastPathComponent) could not be read."
@@ -190,14 +195,21 @@ final class ColorPickerModel {
             return
         }
         paletteNotice = nil
+        stopReadingImage()
         setPaletteImage(cg, name: "Pasted image")
     }
 
     func clearPalette() {
+        stopReadingImage()
         paletteImage = nil
         paletteName = nil
         palette = []
         paletteNotice = nil
+    }
+
+    private func stopReadingImage() {
+        paletteLoad?.cancel()
+        isReadingImage = false
     }
 
     private func setPaletteImage(_ image: CGImage, name: String) {
