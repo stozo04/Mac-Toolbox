@@ -29,8 +29,13 @@ enum Shell {
         var errorDescription: String? {
             switch self {
             case .launchFailed(let path): "Could not start \(Shell.name(path))."
-            case .timedOut(let path, let seconds): "\(Shell.name(path)) did not finish within \(Int(seconds)) seconds, so it was stopped."
+            case .timedOut(let path, let seconds): "\(Shell.name(path)) did not finish within \(Self.wording(of: seconds)), so it was stopped."
             }
+        }
+
+        static func wording(of seconds: TimeInterval) -> String {
+            let amount = seconds.formatted(.number.precision(.fractionLength(0...1)))
+            return amount == 1.formatted() ? "1 second" : "\(amount) seconds"
         }
     }
 

@@ -9,11 +9,8 @@ final class VaultSearchTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("vault-search-\(UUID())")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        root = try makeVaultTestFolder("search")
     }
-
-    override func tearDown() { try? FileManager.default.removeItem(at: root) }
 
     func testMeaningMatchesStandOutAndNamesAlwaysCount() {
         var vectors = VaultVectors()
@@ -110,6 +107,25 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertEqual(try writeCount(of: database) - writesBefore, 1, "removing \(paths.count) files committed once per file")
     }
 
+    func testAnIndexOpenedBeforeTheVaultWasEjectedIsNotUsedAgain() async throws {
+        let door = try await makeOpenDoor(in: root.appendingPathComponent("ejected"))
+        let located = EmbeddingModel.Located(text: root.appendingPathComponent("t.gguf"), media: root.appendingPathComponent("m.gguf"))
+        let engine = VaultSearchEngine(root: door.disk.location.mountPoint, model: located)
+        defer { engine.close() }
+        _ = try await engine.pending([])
+
+        let locked = await door.lock()
+        XCTAssertEqual(locked, .locked)
+
+        do {
+            _ = try await engine.pending([])
+            XCTFail("the index of an ejected vault was read")
+        } catch VaultSearchError.notMounted {
+        } catch {
+            XCTFail("expected notMounted, got \(error)")
+        }
+    }
+
     func testSearchFindsTheMatchingPhotoWithTheRealModel() async throws {
         guard let model = EmbeddingModel.locate() else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
         let red = try makePhoto("one.png", red: 230, green: 20, blue: 20)
@@ -203,10 +219,10 @@ final class VaultSearchTests: XCTestCase {
     func testSearchingKeepsOnlyVisibleItemsSelectedInARealVault() async throws {
         guard EmbeddingModel.locate() != nil else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
         let location = VaultLocation(folder: root.appendingPathComponent("vault"))
-        try await VaultDisk(location: location).create(password: "search-pass")
+        try await makeVaultImage(in: location.folder)
         let model = VaultModel(location: location, watchesSystem: false)
-        defer { model.lockImmediately() }
-        await model.unlock(password: "search-pass")
+        addTeardownBlock { @MainActor in await model.lock() }
+        await model.unlock(password: Self.vaultPassword)
         model.finishOpening()
         let red = try makePhoto("red square.png", red: 230, green: 20, blue: 20)
         let blue = try makePhoto("blue square.png", red: 20, green: 40, blue: 230)

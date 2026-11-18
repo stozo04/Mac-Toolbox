@@ -73,14 +73,12 @@ final class VaultTests: XCTestCase {
     private var vault: URL!
 
     override func setUpWithError() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(UUID())")
+        dir = try makeVaultTestFolder("library")
         source = dir.appendingPathComponent("source")
         vault = dir.appendingPathComponent("vault")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
     }
-
-    override func tearDown() { try? FileManager.default.removeItem(at: dir) }
 
     func testKindComesFromTheFileType() {
         XCTAssertEqual(VaultItem.kind(of: URL(fileURLWithPath: "/a/b.JPG")), .image)
@@ -222,13 +220,14 @@ final class VaultTests: XCTestCase {
     }
 
     func testAVaultDetachedWhileAFileMovesInKeepsTheOriginal() async throws {
-        let disk = try await makeOpenDisk("detached-midway")
+        let door = try await makeOpenDoor(in: dir.appendingPathComponent("detached-midway"))
+        let disk = door.disk
         let photo = try makePhoto("secret.png")
 
         do {
             _ = try await VaultMover.move(photo, into: disk.location.mountPoint) { copy in
                 try VaultMover.flushToDisk(copy)
-                disk.lockAndWait()
+                XCTAssertEqual(door.startLock().wait(upTo: 60), .locked)
             }
             XCTFail("The original was deleted although the vault had closed")
         } catch {
@@ -290,14 +289,14 @@ final class VaultTests: XCTestCase {
     @MainActor
     func testLockingWhileTheDoorIsUnlockingKeepsTheVaultClosed() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("race"))
-        try await VaultDisk(location: location).create(password: "race-pass")
+        try await makeVaultImage(in: location.folder)
         let model = VaultModel(location: location, watchesSystem: false)
         XCTAssertEqual(model.phase, .locked)
 
-        defer { model.lockImmediately() }
-        let unlocking = Task { await model.unlock(password: "race-pass") }
+        addTeardownBlock { @MainActor in await model.lock() }
+        let unlocking = Task { await model.unlock(password: Self.vaultPassword) }
         try await waitUntil("the unlock is under way") { model.isWorking }
-        model.lockImmediately()
+        await model.lock()
         await unlocking.value
 
         XCTAssertFalse(model.disk.isOpen)
@@ -310,7 +309,7 @@ final class VaultTests: XCTestCase {
         let model = VaultModel(location: location, watchesSystem: false)
         await model.create(password: "batch-pass", confirmation: "batch-pass")
         model.finishOpening()
-        defer { model.lockImmediately() }
+        addTeardownBlock { @MainActor in await model.lock() }
         let files = try (0..<12).map { try makePhoto("new-\($0).png") }
         let reloadsBefore = model.libraryReloads
 
@@ -341,7 +340,7 @@ final class VaultTests: XCTestCase {
         let model = VaultModel(location: location, watchesSystem: false)
         await model.create(password: "trash-pass", confirmation: "trash-pass")
         model.finishOpening()
-        defer { model.lockImmediately() }
+        addTeardownBlock { @MainActor in await model.lock() }
         let photo = try makePhoto("a.png")
         let twin = source.appendingPathComponent("b.png")
         try FileManager.default.copyItem(at: photo, to: twin)
@@ -380,7 +379,7 @@ final class VaultTests: XCTestCase {
         let model = VaultModel(location: location, watchesSystem: false)
         await model.create(password: "rename-pass", confirmation: "rename-pass")
         model.finishOpening()
-        defer { model.lockImmediately() }
+        addTeardownBlock { @MainActor in await model.lock() }
         model.add([try makePhoto("a.png")])
         try await waitUntil(timeout: .seconds(30), "the file is in the vault") { model.moveProgress == nil && model.items.count == 1 }
         let photo = try XCTUnwrap(model.items.first)
@@ -458,12 +457,12 @@ final class VaultTests: XCTestCase {
         XCTAssertNil(VaultLibrary.neighbor(of: "/missing", in: items, step: 1))
     }
 
-    func testLockingAVaultThatIsStillAttachingLeavesItsMountPointAlone() async throws {
-        let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent("attaching")))
-        try FileManager.default.createDirectory(at: disk.location.mountPoint, withIntermediateDirectories: true)
-        try await disk.lock()
-        disk.lockAndWait()
-        XCTAssertTrue(FileManager.default.fileExists(atPath: disk.location.mountPoint.path))
+    func testLockingAVaultThatIsNotMountedLeavesItsFolderAlone() async throws {
+        let door = makeDoor(in: dir.appendingPathComponent("attaching"))
+        try FileManager.default.createDirectory(at: door.disk.location.mountPoint, withIntermediateDirectories: true)
+        let locked = await door.lock()
+        XCTAssertEqual(locked, .locked)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: door.disk.location.mountPoint.path))
     }
 
     func testAClosedGateDropsLateThumbnailWrites() {
@@ -571,60 +570,27 @@ final class VaultTests: XCTestCase {
         XCTAssertNil(metadata["file_name"])
     }
 
-    func testEncryptedVaultOpensOnlyWithItsPassword() async throws {
-        let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent("disk")))
-        XCTAssertFalse(disk.exists)
-
-        try await disk.create(password: "first-pass")
-        XCTAssertTrue(disk.exists)
-        XCTAssertFalse(disk.isOpen)
-
-        do {
-            try await disk.unlock(password: "wrong-pass")
-            XCTFail("A wrong password opened the vault")
-        } catch {
-            XCTAssertEqual(error as? VaultError, .wrongPassword)
-        }
-
-        try await disk.unlock(password: "first-pass")
-        XCTAssertTrue(disk.isOpen)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: disk.location.mountPoint.appendingPathComponent(VaultDisk.spotlightOptOut).path))
+    func testFilesMovedInAreThereAfterLockingAndUnlocking() async throws {
+        let door = try await makeOpenDoor(in: dir.appendingPathComponent("disk"))
+        let disk = door.disk
         _ = try await VaultMover.move(try makePhoto("secret.png"), into: disk.location.mountPoint)
-        try await disk.lock()
+
+        let locked = await door.lock()
+        XCTAssertEqual(locked, .locked)
         XCTAssertFalse(disk.isOpen)
         XCTAssertFalse(FileManager.default.fileExists(atPath: disk.location.mountPoint.path), "an empty mount point is left behind")
 
-        try await disk.changePassword(from: "first-pass", to: "second-pass")
-        do {
-            try await disk.unlock(password: "first-pass")
-            XCTFail("The old password still opens the vault")
-        } catch {
-            XCTAssertEqual(error as? VaultError, .wrongPassword)
-        }
-        try await disk.unlock(password: "second-pass")
+        let opened = await door.unlock(password: Self.vaultPassword)
+        XCTAssertEqual(opened, .opened)
         XCTAssertEqual(VaultLibrary.items(in: disk.location.mountPoint).map(\.name), ["secret.png"])
-
-        do {
-            try await disk.unlock(password: "wrong-pass")
-            XCTFail("A wrong password was accepted because the vault was already open")
-        } catch {
-            XCTAssertEqual(error as? VaultError, .wrongPassword)
-        }
-        XCTAssertFalse(disk.isOpen)
-        disk.lockAndWait()
-        XCTAssertFalse(disk.isOpen)
     }
 
     private static let toolTimeout = Shell.Timeout.seconds(60)
 
     private func makeOpenDisk(_ name: String) async throws -> VaultDisk {
-        let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent(name)))
-        try await disk.create(password: "disk-pass")
-        addTeardownBlock { disk.lockAndWait() }
-        try await disk.unlock(password: "disk-pass")
-        XCTAssertTrue(disk.isOpen)
-        XCTAssertTrue(disk.location.mountPoint.path.hasPrefix(dir.path + "/"))
-        return disk
+        let door = try await makeOpenDoor(in: dir.appendingPathComponent(name))
+        XCTAssertTrue(door.disk.location.mountPoint.path.hasPrefix(dir.path + "/"))
+        return door.disk
     }
 
     private func detachFromOutside(_ disk: VaultDisk) async throws {

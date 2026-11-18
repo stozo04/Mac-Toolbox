@@ -39,6 +39,7 @@ final class MainWindowReopener: NSObject, NSApplicationDelegate {
     static let windowID = "main"
     private var openMainWindow: (() -> Void)?
     private var pendingOpen = PendingWindowOpen()
+    var quitPreparation = QuitPreparation.shared
 
     func mainWindowAppeared(opener: @escaping () -> Void) {
         openMainWindow = opener
@@ -54,6 +55,18 @@ final class MainWindowReopener: NSObject, NSApplicationDelegate {
         pendingOpen.begin(at: now)
         openMainWindow()
         return false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        quitPreparation.terminateReply { [weak self] mayQuit in
+            sender.reply(toApplicationShouldTerminate: mayQuit)
+            if !mayQuit { self?.showWhyTheQuitWasRefused(sender) }
+        }
+    }
+
+    private func showWhyTheQuitWasRefused(_ app: NSApplication) {
+        app.activate(ignoringOtherApps: true)
+        if !WindowPresence.hasMainWindow(app.windows.map(WindowPresence.init)) { openMainWindow?() }
     }
 }
 

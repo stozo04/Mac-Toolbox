@@ -99,8 +99,15 @@ final class ShellTests: XCTestCase {
             XCTFail("a timed out sleep returned a result")
         } catch {
             XCTAssertEqual(error as? Shell.ShellError, .timedOut("/bin/sleep", 1))
-            XCTAssertEqual(error.localizedDescription, "sleep did not finish within 1 seconds, so it was stopped.")
+            XCTAssertEqual(error.localizedDescription, "sleep did not finish within 1 second, so it was stopped.")
         }
+    }
+
+    func testATimeoutShorterThanASecondIsNotCalledZeroSeconds() {
+        XCTAssertEqual(Shell.ShellError.timedOut("/usr/bin/hdiutil", 0.3).localizedDescription,
+                       "hdiutil did not finish within 0.3 seconds, so it was stopped.")
+        XCTAssertEqual(Shell.ShellError.wording(of: 30), "30 seconds")
+        XCTAssertEqual(Shell.ShellError.wording(of: 2.5), "2.5 seconds")
     }
 
     func testAProgramThatEndsBeforeItsTimeoutReturnsItsResult() async throws {
