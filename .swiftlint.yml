@@ -1,7 +1,8 @@
 # SwiftLint config for Toolbox. CI fails on errors; warnings are reported on the PR but don't block.
 # The size limits are a ratchet: each warning sits just above the largest case in the code today, each error a clear step
-# above that, so new code cannot grow past what exists. Largest today: file 756 lines, type body 591, function body 87,
-# cyclomatic complexity 18. When the largest case shrinks, lower its limit to match.
+# above that, so new code cannot grow past what exists. Largest today: type body 599, function body 87, cyclomatic
+# complexity 18, and file 756 lines apart from Vault/VaultModel.swift, which is 869 and carries the one file_length warning
+# until it is split. When the largest case shrinks, lower its limit to match.
 included:
   - Sources/Toolbox
   - Tests
