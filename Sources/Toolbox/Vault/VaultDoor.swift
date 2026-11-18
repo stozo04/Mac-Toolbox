@@ -185,13 +185,14 @@ final class VaultDoor: @unchecked Sendable {
 
     private func mount(password: String, requestsBefore: Int) async -> UnlockOutcome {
         guard guardLock.withLock({ lockRequests == requestsBefore }) else { return .lockedMeanwhile }
-        if guardLock.withLock({ current == .open }) { return .opened }
+        let wasOurs = guardLock.withLock { current == .open }
         guard takeOwnership() else {
             guardLock.withLock { current = disk.isOpen ? .openElsewhere : .closed }
             return .refused(.openInAnotherCopy)
         }
-        if let refusal = await clearTheWay() {
+        if let refusal = await clearTheWay(mountIsOurs: wasOurs) {
             guardLock.withLock {
+                if wasOurs, disk.isOpen { return }
                 releaseOwnership()
                 current = disk.isOpen ? .openElsewhere : .closed
             }
@@ -229,11 +230,13 @@ final class VaultDoor: @unchecked Sendable {
         }
     }
 
-    /// Before attaching: nothing mounted that is not ours to eject, and no files in the folder the volume will cover.
-    private func clearTheWay() async -> VaultError? {
+    /// Before attaching: nothing stays mounted, so the password is always the one that opens it, and nothing is ejected
+    /// that is not ours; then no files in the folder the volume will cover.
+    private func clearTheWay(mountIsOurs: Bool) async -> VaultError? {
         if disk.isOpen {
-            guard !anotherCopyIsRunning() else { return .openInAnotherCopy }
+            guard mountIsOurs || !anotherCopyIsRunning() else { return .openInAnotherCopy }
             if let failure = await ejectThenForce() { return .diskTool(action: "lock", message: failure) }
+            guardLock.withLock { current = .closed }
         }
         do {
             try disk.refuseFilesLeftOutside()
@@ -262,8 +265,18 @@ final class VaultDoor: @unchecked Sendable {
         return .lockedMeanwhile
     }
 
+    /// A volume is here although the attach failed. With another copy running it may be that copy's (versions before
+    /// 0.11.9 take no lock file), so it is left alone; otherwise it is this attach landing late and is ejected.
     private func undoMount(_ refusal: VaultError) async -> UnlockOutcome {
-        guard disk.isOpen, let failure = await ejectThenForce() else { return abandonMount(.refused(refusal)) }
+        guard disk.isOpen else { return abandonMount(.refused(refusal)) }
+        guard !anotherCopyIsRunning() else {
+            guardLock.withLock {
+                releaseOwnership()
+                current = .openElsewhere
+            }
+            return .refused(refusal)
+        }
+        guard let failure = await ejectThenForce() else { return abandonMount(.refused(refusal)) }
         Log.error("Vault left mounted by a failed unlock", category: VaultLog.category, ["eject": failure])
         guardLock.withLock { current = .open }
         return .refused(refusal)

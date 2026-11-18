@@ -74,6 +74,28 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertEqual(model.door.state, .closed)
     }
 
+    func testTheDoorOffersTheFolderOnlyWhileFilesAreLeftInIt() async throws {
+        let model = try await makeLockedVault("stray", stand: DoorStandIn())
+        let mountPoint = model.disk.location.mountPoint
+        try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: false)
+        let stray = mountPoint.appendingPathComponent("stray.png")
+        try Data("left outside".utf8).write(to: stray)
+
+        await model.unlock(password: Self.vaultPassword)
+
+        XCTAssertEqual(model.folderWithFilesLeftOutside?.path, mountPoint.path)
+        XCTAssertEqual(model.message?.contains("Move it somewhere else, then unlock again."), true, model.message ?? "no message")
+        XCTAssertFalse(model.disk.isOpen)
+
+        try FileManager.default.removeItem(at: stray)
+        await model.unlock(password: Self.vaultPassword)
+
+        XCTAssertNil(model.folderWithFilesLeftOutside)
+        XCTAssertNil(model.message)
+        XCTAssertTrue(model.disk.isOpen)
+        XCTAssertEqual(model.phase, .opening)
+    }
+
     func testAVaultThatWillNotEjectComesBackOpenWithTheReason() async throws {
         let stand = DoorStandIn()
         let model = try await makeOpenVault("busy", stand: stand)

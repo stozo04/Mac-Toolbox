@@ -37,8 +37,6 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertTrue(door.disk.isOpen)
         XCTAssertTrue(door.holdsOwnership)
         XCTAssertTrue(FileManager.default.fileExists(atPath: door.disk.location.mountPoint.appendingPathComponent(VaultDisk.spotlightOptOut).path))
-        let again = await door.unlock(password: Self.vaultPassword)
-        XCTAssertEqual(again, .opened, "unlocking an open vault ejected it first")
 
         let locked = await door.lock()
         XCTAssertEqual(locked, .locked)
@@ -50,6 +48,27 @@ final class VaultDoorTests: XCTestCase {
         let lockedAgain = await door.lock()
         XCTAssertEqual(lockedAgain, .locked)
         XCTAssertEqual(stand.steps.value.count, 3, "locking a closed vault ran a disk tool")
+    }
+
+    func testAnOpenVaultIsNotAWayAroundThePassword() async throws {
+        let stand = DoorStandIn()
+        let door = try await makeOpenDoor(in: folder("already-open"), tool: stand.tool)
+
+        let wrong = await door.unlock(password: "wrong-pass")
+
+        XCTAssertEqual(wrong, .refused(.wrongPassword), "a wrong password was accepted because the vault was already open")
+        XCTAssertFalse(door.disk.isOpen)
+        XCTAssertEqual(door.state, .closed)
+        XCTAssertFalse(door.holdsOwnership)
+        XCTAssertEqual(stand.steps.value, ["attach", "eject", "attach"])
+
+        let opened = await door.unlock(password: Self.vaultPassword)
+        XCTAssertEqual(opened, .opened)
+        let reopened = await door.unlock(password: Self.vaultPassword)
+        XCTAssertEqual(reopened, .opened)
+        XCTAssertEqual(door.state, .open)
+        XCTAssertTrue(door.disk.isOpen)
+        XCTAssertEqual(stand.mostClosingsAtOnce, 1)
     }
 
     func testEveryToolHasItsTimeLimitAndNothingEndsWithTheApp() async throws {

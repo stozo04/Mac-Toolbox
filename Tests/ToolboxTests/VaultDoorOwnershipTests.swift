@@ -116,6 +116,45 @@ final class VaultDoorOwnershipTests: XCTestCase {
         XCTAssertEqual(door.state, .openElsewhere)
     }
 
+    func testAFailedUnlockNeverEjectsAMountWhileAnotherCopyIsRunning() async throws {
+        try await makeVaultImage(in: folder("two-unlocks"))
+        let steps = Locked<[String]>([])
+        let mountsThenFails = VaultTool { path, arguments, input, timeout in
+            steps.update { $0.append(arguments.first { DoorStandIn.verbs.contains($0) } ?? path) }
+            let result = try await VaultTool.system.run(path, arguments, input, timeout)
+            guard arguments.contains("attach") else { return result }
+            return Shell.Result(status: 1, out: "", err: "the other copy's attach won")
+        }
+        let door = makeDoor(in: folder("two-unlocks"), tool: mountsThenFails, anotherCopyIsRunning: { true })
+
+        let outcome = await door.unlock(password: Self.vaultPassword)
+
+        XCTAssertEqual(outcome, .refused(.diskTool(action: "open", message: "the other copy's attach won")))
+        XCTAssertTrue(door.disk.isOpen, "a failed unlock ejected the vault another copy had just opened")
+        XCTAssertEqual(steps.value, ["attach"])
+        XCTAssertEqual(door.state, .openElsewhere)
+        XCTAssertFalse(door.holdsOwnership)
+        let lock = await door.lock()
+        XCTAssertEqual(lock, .notOurs)
+        XCTAssertTrue(door.disk.isOpen)
+    }
+
+    func testCreatingNeverTouchesAVaultThatIsAlreadyThere() async throws {
+        let location = VaultLocation(folder: folder("already-there"))
+        try Self.writeImage(at: location.image.path, holding: "someone's vault")
+        let ran = Locked(false)
+        let door = makeDoor(in: location.folder, tool: VaultTool { path, _, _, _ in
+            ran.set(true)
+            throw Shell.ShellError.launchFailed(path)
+        })
+
+        let refusal = await door.create(password: "new-pass")
+
+        XCTAssertEqual(refusal, .alreadyExists)
+        XCTAssertFalse(ran.value)
+        XCTAssertEqual(try String(contentsOf: location.image.appendingPathComponent("band"), encoding: .utf8), "someone's vault")
+    }
+
     func testTwoCopiesUnlockingAtTheSameInstantLeaveExactlyOneOpen() async throws {
         try await makeVaultImage(in: folder("same-instant"))
         let firstStand = DoorStandIn()
