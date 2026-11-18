@@ -146,7 +146,8 @@ final class VaultDoor: @unchecked Sendable {
         return pending
     }
 
-    /// A vault found mounted at launch is a crash leftover unless a running copy holds it.
+    /// A vault found mounted at launch is a crash leftover unless a running copy holds it. One that will not eject is kept
+    /// as this copy's open vault, so unlocking retries the eject and quitting warns.
     func recoverAtLaunch() async -> LockOutcome {
         await inTurn { await self.closeLeftover() }
     }
@@ -316,7 +317,7 @@ final class VaultDoor: @unchecked Sendable {
             return .notOurs
         }
         if let failure = await ejectThenForce() {
-            guardLock.withLock { releaseOwnership() }
+            guardLock.withLock { current = .open }
             return .stillMounted(reason: failure)
         }
         return closed()

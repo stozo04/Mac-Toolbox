@@ -18,6 +18,9 @@ enum VaultNotices {
     static let leftMountedByFailedUnlock = "The vault couldn't open, and what macOS had already mounted couldn't be ejected, "
         + "so the vault may still be readable in Finder. Close anything using it, then unlock again, or restart your Mac."
 
+    static let leftoverStillMounted = "The vault was still open from a time Toolbox closed unexpectedly, and it couldn't be ejected, "
+        + "so it may still be readable in Finder. Close anything using it, then unlock again, or restart your Mac."
+
     static func quitRefused(during write: VaultDoor.UnfinishedWrite) -> String {
         switch write {
         case .creating:

@@ -150,6 +150,37 @@ final class VaultLockingTests: XCTestCase {
         await model.lock()
     }
 
+    func testALeftoverThatWillNotEjectIsKeptAsThisCopysAndSaysSo() async throws {
+        try await makeVaultImage(in: dir.appendingPathComponent("stuck-leftover"))
+        var crashed: VaultDoor? = VaultDoor(location: VaultLocation(folder: dir.appendingPathComponent("stuck-leftover")), anotherCopyIsRunning: { false })
+        let opened = await crashed?.unlock(password: Self.vaultPassword)
+        XCTAssertEqual(opened, .opened)
+        let location = try XCTUnwrap(crashed?.disk.location)
+        crashed = nil
+        let stand = DoorStandIn()
+        stand.play("eject", as: .fails("busy"))
+        stand.play("detach", as: .fails("hdiutil: couldn't unmount \"disk9\" - Resource busy"))
+
+        let model = VaultModel(location: location, watchesSystem: false, tool: stand.tool, anotherCopyIsRunning: { false })
+        addTeardownBlock { @MainActor in
+            for verb in DoorStandIn.verbs { stand.play(verb, as: .real) }
+            await model.lock()
+        }
+        try await waitUntil(timeout: .seconds(60), "the launch check has settled") { !model.isLocking }
+
+        XCTAssertTrue(model.disk.isOpen)
+        XCTAssertEqual(model.door.state, .open)
+        XCTAssertTrue(model.door.holdsOwnership)
+        XCTAssertEqual(model.phase, .locked)
+        XCTAssertEqual(model.message, VaultNotices.leftoverStillMounted)
+        XCTAssertFalse(model.quitGuard.mayQuit(), "the app could quit without a word with the leftover still mounted")
+
+        stand.play("eject", as: .real)
+        await model.unlock(password: Self.vaultPassword)
+        XCTAssertEqual(model.phase, .opening)
+        XCTAssertEqual(stand.steps.value, ["eject", "detach", "eject", "attach"])
+    }
+
     // MARK: Sleep
 
     func testSleepDoesNotReturnUntilTheVaultIsLocked() async throws {

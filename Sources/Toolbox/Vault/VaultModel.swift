@@ -206,7 +206,10 @@ final class VaultModel {
     private func closeLeftoverFromACrash() {
         isLocking = true
         lockInFlight = Task {
-            _ = await door.recoverAtLaunch()
+            if case .stillMounted(let reason) = await door.recoverAtLaunch() {
+                lastLockFailure = reason
+                message = VaultNotices.leftoverStillMounted
+            }
             lockInFlight = nil
             isLocking = false
         }
