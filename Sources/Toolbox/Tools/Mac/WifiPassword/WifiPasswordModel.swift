@@ -21,7 +21,14 @@ final class WifiPasswordModel {
     private(set) var load = Load.idle
     private(set) var networks: [String] = []
     private(set) var reveal = Reveal.hidden
-    var selected: String? { didSet { if selected != oldValue { reveal = .hidden } } }
+    private(set) var qrSaveNotice: String?
+    var selected: String? {
+        didSet {
+            guard selected != oldValue else { return }
+            reveal = .hidden
+            qrSaveNotice = nil
+        }
+    }
     var security = WifiSecurity.wpa
     var hidden = false
 
@@ -30,6 +37,19 @@ final class WifiPasswordModel {
     var qrText: String? {
         guard let selected, let password else { return nil }
         return WifiService.qrPayload(ssid: selected, password: password, security: security, hidden: hidden)
+    }
+
+    func saveQR(_ image: NSImage, to url: URL) {
+        do {
+            guard let data = WifiService.pngData(image) else { throw CocoaError(.fileWriteUnknown) }
+            try data.write(to: url, options: .atomic)
+            qrSaveNotice = nil
+        } catch {
+            qrSaveNotice = "The QR code could not be saved. Choose another place and try again."
+            // The error's own text quotes the file name, which holds the network's name.
+            let unnamed = NSError(domain: (error as NSError).domain, code: (error as NSError).code)
+            Log.error("Wi-Fi QR save failed", category: "wifi", Log.details(unnamed))
+        }
     }
 
     func loadNetworks() {

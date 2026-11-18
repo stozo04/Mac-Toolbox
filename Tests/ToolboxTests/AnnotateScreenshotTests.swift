@@ -634,6 +634,29 @@ final class AnnotateScreenshotTests: XCTestCase {
         XCTAssertEqual(saved.lastPathComponent, "Original annotated.png")
         XCTAssertEqual(try Data(contentsOf: original), before)
     }
+
+    @MainActor func testAFileToDragIsMadeOrTheReasonItWasNotIsShown() throws {
+        let m = try model()
+        let made = try XCTUnwrap(m.dragFile(into: dir.appendingPathComponent("drag")))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: made.path))
+        XCTAssertNil(m.notice)
+
+        let notAFolder = dir.appendingPathComponent("taken")
+        try Data("a file where the folder should go".utf8).write(to: notAFolder)
+        XCTAssertNil(m.dragFile(into: notAFolder))
+        XCTAssertEqual(m.notice, "The image could not be made ready to drag. Use Save or Copy instead.")
+
+        XCTAssertNotNil(m.dragFile(into: dir.appendingPathComponent("drag")))
+        XCTAssertNil(m.notice, "a drag that works clears the old message")
+    }
+
+    func testASaveFailureKeepsItsWordingAndCarriesTheReasonForTheLog() throws {
+        let missing = dir.appendingPathComponent("no-such-folder")
+        XCTAssertThrowsError(try AnnotateScreenshot.save(try picture(), name: "Shot", format: .png, quality: 1, into: missing)) { error in
+            XCTAssertEqual(error.localizedDescription, "The image could not be saved.")
+            XCTAssertTrue(Log.details(error)["underlying"]?.hasPrefix("NSCocoaErrorDomain ") ?? false, "\(Log.details(error))")
+        }
+    }
 }
 
 private func XCTAssertEqual(_ a: Int, _ b: Int, accuracy: Int, file: StaticString = #filePath, line: UInt = #line) {

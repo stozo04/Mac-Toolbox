@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.5"
+    static let current = "0.11.4"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,7 +28,7 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
-        Release(version: "0.11.5", date: "2026-11-17", changes: [
+        Release(version: "0.11.4", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Cancel now always stops the work: a cancel pressed just as a conversion, trim or download started could be missed, and it then ran to the end."),
             .init(kind: .fixed, text: "Quitting Toolbox stops conversions and downloads that are still running instead of leaving them going in the background."),
             .init(kind: .fixed, text: "A system tool that hangs can no longer leave a Mac tool waiting forever: it is stopped after a time limit, and the message says so."),
@@ -37,6 +37,16 @@ enum ReleaseNotes {
             .init(kind: .fixed, text: "Burn In Subtitles: cancelling while the speech is being transcribed is no longer shown as a failure."),
             .init(kind: .fixed, text: "Annotate Screenshot: a blurred area can no longer show the blur of the picture you had open before."),
             .init(kind: .fixed, text: "Behind the scenes: problem reports written while earlier ones were being sent are no longer lost."),
+        Release(version: "0.11.3", date: "2026-11-17", changes: [
+            .init(kind: .fixed, text: "Redact PDF: Find & Redact now also reads scanned pages that have a page number on them, and words shown in notes and pictures."),
+            .init(kind: .fixed, text: "Redact PDF: if a page could not be searched, the result names the page so you can check it yourself."),
+            .init(kind: .improved, text: "Redact PDF: the copy is searched again for the words you covered, and you are told how often one is still there where you left it uncovered."),
+            .init(kind: .fixed, text: "Redact PDF: a copy can no longer be saved over the original through a hard link or another name for the same file."),
+            .init(kind: .improved, text: "Redact Image: Find & Cover uses Black Box unless you picked a style, and warns when you blur or pixelate found text, which can sometimes be undone."),
+            .init(kind: .fixed, text: "Trim Video: trimming the same video twice no longer replaces the first clip."),
+            .init(kind: .fixed, text: "If the output folder in Downloads cannot be created, tools now say so once instead of failing every file."),
+            .init(kind: .fixed, text: "Wi-Fi Password & QR and Annotate Screenshot now tell you when the QR code or the dragged image could not be saved."),
+            .init(kind: .fixed, text: "Behind the scenes: error reports no longer include the part of a web link after the question mark."),
         ]),
         Release(version: "0.11.2", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Behind the scenes: the app's automatic checks no longer leave settings files on your Mac or replace what you copied."),

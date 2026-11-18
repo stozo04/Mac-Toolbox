@@ -5,14 +5,15 @@ import PDFKit
 import UniformTypeIdentifiers
 import Vision
 
-enum RedactPDFError: LocalizedError {
+enum RedactPDFError: LocalizedError, CustomNSError, Equatable {
     case unreadable
     case locked
     case empty
     case wouldOverwrite
     case nothingToRedact
     case pageFailed
-    case saveFailed
+    case pageNotDrawn
+    case saveFailed(underlying: NSError? = nil)
     case notClean
 
     var errorDescription: String? {
@@ -23,9 +24,14 @@ enum RedactPDFError: LocalizedError {
         case .wouldOverwrite: "That would replace the original. Choose another name; the original is never changed."
         case .nothingToRedact: "There is nothing to redact yet."
         case .pageFailed: "A page could not be redacted, so no copy was saved."
+        case .pageNotDrawn: "A page could not be drawn."
         case .saveFailed: "The redacted PDF could not be saved."
         case .notClean: "The saved copy still held text from a redacted page, so it was not kept."
         }
+    }
+
+    var errorUserInfo: [String: Any] {
+        if case .saveFailed(let underlying?) = self { [NSUnderlyingErrorKey: underlying] } else { [:] }
     }
 }
 
@@ -38,9 +44,10 @@ struct RedactPDFMatch: Equatable {
 }
 
 struct RedactPDFFind: Equatable {
-    var matches: [RedactPDFMatch]
-    /// Pages with no text layer, which were read by Vision instead.
-    var scannedPages: Int
+    var matches: [RedactPDFMatch] = []
+    /// Pages whose picture was read by Vision, because it may show words the text layer does not hold.
+    var scannedPages = 0
+    var unreadablePages: [Int] = []
 }
 
 struct RedactPDFResult: Equatable {
@@ -49,6 +56,12 @@ struct RedactPDFResult: Equatable {
     let pages: Int
     /// Pages that were turned into images.
     let redactedPages: Int
+    let leftUncovered: [RedactPDFLeftover]
+}
+
+struct RedactPDFLeftover: Equatable {
+    let query: String
+    let matches: Int
 }
 
 /// Redacts a PDF for good: every page with a box on it is drawn as a picture with the boxes painted in, so the text
@@ -62,7 +75,7 @@ enum RedactPDF {
     static let exportScale: CGFloat = 200.0 / 72.0
     /// No exported page picture is larger than this on its longer side.
     static let exportMaxPixel: CGFloat = 4500
-    /// The longer side of a page picture Vision reads when searching a page that has no text.
+    /// The longer side of a page picture Vision reads when searching.
     static let readingPixel: CGFloat = 3000
 
     // MARK: Opening
@@ -117,13 +130,43 @@ enum RedactPDF {
 
     // MARK: Finding
 
-    /// Every place `query` is printed, on every page. Pages that have a text layer are searched by PDFKit; pages that are
-    /// only a picture of text are read with Vision.
-    static func find(_ query: String, in document: PDFDocument) -> RedactPDFFind {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        var result = RedactPDFFind(matches: [], scannedPages: 0)
-        guard !needle.isEmpty else { return result }
+    typealias TextRecognizer = (CGImage) throws -> [VNRecognizedTextObservation]
 
+    /// Every place `query` is shown, on every page. PDFKit searches the text layer; a page whose picture may show words the
+    /// text layer does not hold is also read with Vision.
+    static func find(_ query: String, in document: PDFDocument, recognize: TextRecognizer = recognizeText) -> RedactPDFFind {
+        let needle = trimmed(query)
+        return find(each: [needle], in: document, recognize: recognize)[needle] ?? RedactPDFFind()
+    }
+
+    static func find(each queries: [String], in document: PDFDocument, recognize: TextRecognizer = recognizeText) -> [String: RedactPDFFind] {
+        let needles = Set(queries.map(trimmed).filter { !$0.isEmpty })
+        guard !needles.isEmpty else { return [:] }
+        let readings = readPictures(of: document, recognize: recognize)
+        logUnreadable(readings, pageCount: document.pageCount)
+        return Dictionary(uniqueKeysWithValues: needles.map { ($0, find($0, in: document, readings: readings)) })
+    }
+
+    private static func trimmed(_ query: String) -> String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private static func find(_ needle: String, in document: PDFDocument, readings: [PageReading]) -> RedactPDFFind {
+        var result = RedactPDFFind(matches: textLayerMatches(for: needle, in: document))
+        for reading in readings {
+            switch reading.lines {
+            case .failure:
+                result.unreadablePages.append(reading.page)
+            case .success(let lines):
+                result.scannedPages += 1
+                let inTextLayer = result.matches.filter { $0.page == reading.page }
+                result.matches += pictureMatches(for: needle, in: lines, page: reading.page, pageSize: reading.pageSize)
+                    .filter { seen in !inTextLayer.contains { RedactImage.overlaps($0.rect, seen.rect) } }
+            }
+        }
+        return result
+    }
+
+    private static func textLayerMatches(for needle: String, in document: PDFDocument) -> [RedactPDFMatch] {
+        var matches: [RedactPDFMatch] = []
         for selection in document.findString(needle, withOptions: [.caseInsensitive, .diacriticInsensitive]) {
             // A phrase that runs over two lines becomes one box per line.
             for line in selection.selectionsByLine() {
@@ -132,41 +175,86 @@ enum RedactPDF {
                 let bounds = line.bounds(for: page)
                 guard index != NSNotFound, bounds.width > 0, bounds.height > 0 else { continue }
                 let text = line.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                result.matches.append(RedactPDFMatch(page: index, rect: padded(normalized(bounds, on: page), pageSize: uprightSize(of: page)),
-                                                     text: text.isEmpty ? needle : text))
+                matches.append(RedactPDFMatch(page: index, rect: padded(normalized(bounds, on: page), pageSize: uprightSize(of: page)),
+                                              text: text.isEmpty ? needle : text))
             }
         }
-        for index in 0..<document.pageCount {
-            guard let page = document.page(at: index), !hasText(page) else { continue }
-            result.scannedPages += 1
-            result.matches += read(page, at: index, for: needle)
-        }
-        return result
+        return matches
     }
 
     static func hasText(_ page: PDFPage) -> Bool {
         !(page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The matches on a page that has no text layer, found by reading its picture.
-    private static func read(_ page: PDFPage, at index: Int, for needle: String) -> [RedactPDFMatch] {
+    private struct PageReading {
+        let page: Int
+        let pageSize: CGSize
+        let lines: Result<[VNRecognizedTextObservation], Error>
+    }
+
+    private static func readPictures(of document: PDFDocument, recognize: TextRecognizer) -> [PageReading] {
+        (0..<document.pageCount).compactMap { index in
+            guard let page = document.page(at: index), mayShowMoreThanItsText(page) else { return nil }
+            return PageReading(page: index, pageSize: uprightSize(of: page), lines: Result { try recognizedLines(on: page, recognize: recognize) })
+        }
+    }
+
+    /// Reading every page with Vision takes about a tenth of a second a page, so a page is only read when its picture can
+    /// show words PDFKit's search does not see: it has no text layer, a note or form entry is drawn on it, or its content
+    /// paints something that is not text or a straight rule.
+    static func mayShowMoreThanItsText(_ page: PDFPage) -> Bool {
+        !hasText(page) || page.annotations.contains { $0.type != "Link" } || paintsPicturesOrCurves(page)
+    }
+
+    /// Images and forms (Do), inline images (BI, ID, EI), shadings (sh) and curves (c, v, y), which is how text turned into outlines is drawn.
+    private static let pictureOperators = ["Do", "BI", "ID", "EI", "sh", "c", "v", "y"]
+
+    private static func paintsPicturesOrCurves(_ page: PDFPage) -> Bool {
+        guard let reference = page.pageRef, let operators = CGPDFOperatorTableCreate() else { return true }
+        defer { CGPDFOperatorTableRelease(operators) }
+        for name in pictureOperators {
+            CGPDFOperatorTableSetCallback(operators, name) { _, found in found?.assumingMemoryBound(to: Bool.self).pointee = true }
+        }
+        var found = false
+        let parsed = withUnsafeMutablePointer(to: &found) { flag in
+            let content = CGPDFContentStreamCreateWithPage(reference)
+            let scanner = CGPDFScannerCreate(content, operators, flag)
+            defer {
+                CGPDFScannerRelease(scanner)
+                CGPDFContentStreamRelease(content)
+            }
+            return CGPDFScannerScan(scanner)
+        }
+        return found || !parsed
+    }
+
+    private static func recognizedLines(on page: PDFPage, recognize: TextRecognizer) throws -> [VNRecognizedTextObservation] {
         let size = uprightSize(of: page)
         let scale = readingPixel / max(size.width, size.height)
-        guard let image = render(page, pixelWidth: max(1, Int(size.width * scale))) else { return [] }
+        return try autoreleasepool {
+            guard let image = render(page, pixelWidth: max(1, Int(size.width * scale))) else { throw RedactPDFError.pageNotDrawn }
+            return try recognize(image)
+        }
+    }
+
+    static func recognizeText(in image: CGImage) throws -> [VNRecognizedTextObservation] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         // Names, emails and numbers are not words; "correcting" them would hide the wrong thing.
         request.usesLanguageCorrection = false
-        guard (try? VNImageRequestHandler(cgImage: image).perform([request])) != nil else { return [] }
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return request.results ?? []
+    }
 
+    private static func pictureMatches(for needle: String, in lines: [VNRecognizedTextObservation], page: Int, pageSize: CGSize) -> [RedactPDFMatch] {
         var found: [RedactPDFMatch] = []
-        for observation in request.results ?? [] {
+        for observation in lines {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let text = candidate.string
             var rest = text.startIndex..<text.endIndex
             while let range = text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive], range: rest) {
                 if let box = try? candidate.boundingBox(for: range) {
-                    found.append(RedactPDFMatch(page: index, rect: padded(RedactImage.topLeft(box.boundingBox), pageSize: size), text: String(text[range])))
+                    found.append(RedactPDFMatch(page: page, rect: padded(RedactImage.topLeft(box.boundingBox), pageSize: pageSize), text: String(text[range])))
                 }
                 rest = range.upperBound..<text.endIndex
             }
@@ -174,15 +262,25 @@ enum RedactPDF {
         return found
     }
 
+    private static func logUnreadable(_ readings: [PageReading], pageCount: Int) {
+        let failures = readings.compactMap { reading -> (page: Int, error: Error)? in
+            if case .failure(let error) = reading.lines { (reading.page, error) } else { nil }
+        }
+        guard let first = failures.first else { return }
+        Log.warning("Pages could not be read", category: "redact-pdf",
+                    Log.details(first.error, ["unreadable": "\(failures.count)", "first_page": "\(first.page + 1)", "pages": "\(pageCount)"]))
+    }
+
     // MARK: Exporting
 
-    /// Writes a redacted copy of `source` to `destination`. `regions` maps a page number (from 0) to its boxes.
+    /// Writes a redacted copy of `source` to `destination`. `regions` maps a page number (from 0) to its boxes. `queries` are
+    /// the words Find & Redact covered: the copy is searched for them again before it is kept.
     /// Pages with boxes are flattened to pictures; with `keepSearchable` the text still visible on them is read again and
     /// laid back over each picture, invisibly. The other pages are copied as they are. The copy starts as a new document,
     /// so the original's title, author, outline and other details are not carried over. The original is never touched.
-    static func export(source: URL, regions: [Int: [CGRect]], keepSearchable: Bool, to destination: URL,
+    static func export(source: URL, regions: [Int: [CGRect]], keepSearchable: Bool, to destination: URL, searchedFor queries: [String] = [],
                        progress: (Int) -> Void = { _ in }) throws -> RedactPDFResult {
-        guard BatchFiles.identity(source) != BatchFiles.identity(destination) else { throw RedactPDFError.wouldOverwrite }
+        guard !BatchFiles.isSameFile(source, destination) else { throw RedactPDFError.wouldOverwrite }
         let input = try open(source)
         let covered = regions.filter { $0.key >= 0 && $0.key < input.pageCount && !$0.value.isEmpty }
         guard !covered.isEmpty else { throw RedactPDFError.nothingToRedact }
@@ -197,7 +295,7 @@ enum RedactPDF {
                 owners.append(flat.owner)
                 output.insert(flat.page, at: output.pageCount)
             } else {
-                guard let copy = page.copy() as? PDFPage else { throw RedactPDFError.saveFailed }
+                guard let copy = page.copy() as? PDFPage else { throw RedactPDFError.saveFailed() }
                 output.insert(copy, at: output.pageCount)
             }
             progress(index + 1)
@@ -207,17 +305,18 @@ enum RedactPDF {
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).pdf")
         defer { try? FileManager.default.removeItem(at: temporary) }
         let written = withExtendedLifetime((input, owners)) { output.write(to: temporary) }
-        guard written else { throw RedactPDFError.saveFailed }
-        try verify(temporary, pages: input.pageCount, covered: covered, searchable: keepSearchable)
+        guard written else { throw RedactPDFError.saveFailed() }
+        let copy = try verify(temporary, pages: input.pageCount, covered: covered, searchable: keepSearchable)
+        let leftUncovered = try uncoveredMatches(of: queries, in: copy, covered: covered)
         do {
             if FileManager.default.fileExists(atPath: destination.path) {
                 _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
             } else {
                 try FileManager.default.moveItem(at: temporary, to: destination)
             }
-        } catch { throw RedactPDFError.saveFailed }
+        } catch { throw RedactPDFError.saveFailed(underlying: error as NSError) }
         let bytes = Int64((try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        return RedactPDFResult(url: destination, bytes: bytes, pages: input.pageCount, redactedPages: covered.count)
+        return RedactPDFResult(url: destination, bytes: bytes, pages: input.pageCount, redactedPages: covered.count, leftUncovered: leftUncovered)
     }
 
     /// `page` as a one-page PDF page that is a picture with `boxes` painted black. Nothing of the page's own content is kept.
@@ -237,7 +336,7 @@ enum RedactPDF {
         pdf.beginPDFPage(nil)
         pdf.draw(picture, in: media)
         // Read from the picture with the boxes already in it, so what they hide cannot come back as text.
-        if searchable { DocumentScanner.drawInvisibleText(DocumentScanner.recognizeText(in: readable), in: media, context: pdf) }
+        if searchable { DocumentScanner.drawInvisibleText(DocumentScanner.recognizeText(in: readable, logCategory: "redact-pdf"), in: media, context: pdf) }
         pdf.endPDFPage()
         pdf.closePDF()
         guard let owner = PDFDocument(data: data as Data), let flat = owner.page(at: 0) else { throw RedactPDFError.pageFailed }
@@ -275,14 +374,37 @@ enum RedactPDF {
 
     /// The saved copy has to look redacted: all its pages, a black box where each one was, no text on a page that is meant to
     /// have none, and none of the details a document usually carries.
-    private static func verify(_ url: URL, pages: Int, covered: [Int: [CGRect]], searchable: Bool) throws {
-        guard let copy = PDFDocument(url: url), copy.pageCount == pages else { throw RedactPDFError.saveFailed }
+    private static func verify(_ url: URL, pages: Int, covered: [Int: [CGRect]], searchable: Bool) throws -> PDFDocument {
+        guard let copy = PDFDocument(url: url), copy.pageCount == pages else { throw RedactPDFError.saveFailed() }
         let attributes = copy.documentAttributes ?? [:]
         for key in ["Title", "Author", "Subject", "Keywords"] where attributes[key] != nil { throw RedactPDFError.notClean }
         for (index, boxes) in covered {
-            guard let page = copy.page(at: index), let picture = render(page, pixelWidth: 800) else { throw RedactPDFError.saveFailed }
+            guard let page = copy.page(at: index), let picture = render(page, pixelWidth: 800) else { throw RedactPDFError.saveFailed() }
             if !searchable, hasText(page) { throw RedactPDFError.notClean }
-            for box in boxes where !isBlack(picture, at: CGPoint(x: box.midX, y: box.midY)) { throw RedactPDFError.saveFailed }
+            for box in boxes where !isBlack(picture, at: CGPoint(x: box.midX, y: box.midY)) { throw RedactPDFError.saveFailed() }
+        }
+        return copy
+    }
+
+    /// How often each of `queries` can still be found in `copy`. A match under a box means that redaction did not take, which
+    /// is an error; a match anywhere else was left uncovered on purpose and is only counted.
+    static func uncoveredMatches(of queries: [String], in copy: PDFDocument, covered: [Int: [CGRect]],
+                                 recognize: TextRecognizer = recognizeText) throws -> [RedactPDFLeftover] {
+        let finds = find(each: queries, in: copy, recognize: recognize)
+        var leftovers: [RedactPDFLeftover] = []
+        for query in queries.map(trimmed) where !leftovers.contains(where: { $0.query.caseInsensitiveCompare(query) == .orderedSame }) {
+            guard let matches = finds[query]?.matches, !matches.isEmpty else { continue }
+            guard !matches.contains(where: { isUnderABox($0, covered: covered) }) else { throw RedactPDFError.notClean }
+            leftovers.append(RedactPDFLeftover(query: query, matches: matches.count))
+        }
+        return leftovers
+    }
+
+    /// Found boxes are padded, so a word left next to a box can touch it; only a word mostly inside a box counts as under it.
+    private static func isUnderABox(_ match: RedactPDFMatch, covered: [Int: [CGRect]]) -> Bool {
+        (covered[match.page] ?? []).contains { box in
+            let shared = box.intersection(match.rect)
+            return !shared.isNull && shared.width * shared.height >= match.rect.width * match.rect.height / 2
         }
     }
 

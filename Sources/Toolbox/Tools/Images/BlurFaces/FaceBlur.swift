@@ -5,16 +5,23 @@ import ImageIO
 import UniformTypeIdentifiers
 import Vision
 
-enum FaceBlurError: LocalizedError {
+enum FaceBlurError: LocalizedError, CustomNSError, Equatable {
     case unreadable
-    case detectionFailed
-    case saveFailed
+    case detectionFailed(underlying: NSError? = nil)
+    case saveFailed(underlying: NSError? = nil)
 
     var errorDescription: String? {
         switch self {
         case .unreadable: "This file is not an image macOS can read."
         case .detectionFailed: "Faces could not be looked for in this photo."
         case .saveFailed: "The photo could not be saved with its faces hidden."
+        }
+    }
+
+    var errorUserInfo: [String: Any] {
+        switch self {
+        case .detectionFailed(let underlying?), .saveFailed(let underlying?): [NSUnderlyingErrorKey: underlying]
+        default: [:]
         }
     }
 }
@@ -62,7 +69,7 @@ enum FaceBlur {
             let tag = CGImagePropertyOrientation(rawValue: UInt32(orientation(of: reader))) ?? .up
             try VNImageRequestHandler(cgImage: image, orientation: tag, options: [:]).perform([request])
         } catch {
-            throw FaceBlurError.detectionFailed
+            throw FaceBlurError.detectionFailed(underlying: error as NSError)
         }
         return (request.results ?? []).map(\.boundingBox)
     }
@@ -118,7 +125,7 @@ enum FaceBlur {
         let name = source.deletingPathExtension().lastPathComponent
         guard !faces.isEmpty else {
             let output = BatchFiles.uniqueURL(in: folder, name: name, ext: source.pathExtension)
-            do { try FileManager.default.copyItem(at: source, to: output) } catch { throw FaceBlurError.saveFailed }
+            do { try FileManager.default.copyItem(at: source, to: output) } catch { throw FaceBlurError.saveFailed(underlying: error as NSError) }
             return FaceBlurResult(url: output, facesHidden: 0, bytes: fileSize(output))
         }
         guard let reader = CGImageSourceCreateWithURL(source as CFURL, nil), CGImageSourceGetCount(reader) > 0,
@@ -127,20 +134,20 @@ enum FaceBlur {
         else { throw FaceBlurError.unreadable }
         let properties = CGImageSourceCopyPropertiesAtIndex(reader, 0, nil) as? [CFString: Any] ?? [:]
         let upright = try ImageConverter.pixels(of: image, orientation: orientation(of: reader), flattenAlpha: false).image
-        guard let hidden = render(upright, faces: faces, settings: settings) else { throw FaceBlurError.saveFailed }
+        guard let hidden = render(upright, faces: faces, settings: settings) else { throw FaceBlurError.saveFailed() }
 
         // The photo's own format when ImageIO can write it; PNG otherwise (WebP, for example).
         let writable = (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
         let keepsFormat = writable.contains(type)
         let writeType = keepsFormat ? type : UTType.png.identifier
         let output = BatchFiles.uniqueURL(in: folder, name: name, ext: keepsFormat ? source.pathExtension : "png")
-        guard let writer = CGImageDestinationCreateWithURL(output as CFURL, writeType as CFString, 1, nil) else { throw FaceBlurError.saveFailed }
+        guard let writer = CGImageDestinationCreateWithURL(output as CFURL, writeType as CFString, 1, nil) else { throw FaceBlurError.saveFailed() }
         var options = ImageConverter.keptProperties(properties)
         if writeType != UTType.png.identifier { options[kCGImageDestinationLossyCompressionQuality] = 0.9 }
         CGImageDestinationAddImage(writer, hidden, options as CFDictionary)
         guard CGImageDestinationFinalize(writer) else {
             try? FileManager.default.removeItem(at: output)
-            throw FaceBlurError.saveFailed
+            throw FaceBlurError.saveFailed()
         }
         return FaceBlurResult(url: output, facesHidden: faces.count, bytes: fileSize(output))
     }

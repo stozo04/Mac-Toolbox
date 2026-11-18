@@ -60,6 +60,94 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertTrue(match.rect.insetBy(dx: -0.01, dy: -0.01).contains(ink), "\(match.rect) does not hold the word at \(ink)")
     }
 
+    func testFindReadsAScannedPageThatAlsoHasAStampedPageNumber() throws {
+        let document = try RedactPDF.open(try makeScannedPDF(text: "Appleseed", size: 64, stamp: "1"))
+        let page = try XCTUnwrap(document.page(at: 0))
+        XCTAssertEqual(page.string?.trimmingCharacters(in: .whitespacesAndNewlines), "1", "the test page's text layer must be only the page number")
+
+        let found = RedactPDF.find("Appleseed", in: document)
+        XCTAssertEqual(found.scannedPages, 1)
+        XCTAssertEqual(found.matches.count, 1)
+        XCTAssertEqual(found.unreadablePages, [])
+    }
+
+    func testFindSeesAWordShownOnlyByANote() throws {
+        let document = try RedactPDF.open(try makeAnnotatedPDF(note: "Zanzibar"))
+        XCTAssertTrue(RedactPDF.hasText(try XCTUnwrap(document.page(at: 1))), "the test page must have text of its own")
+
+        let found = RedactPDF.find("Zanzibar", in: document)
+        XCTAssertEqual(found.matches.map(\.page), [1])
+        XCTAssertEqual(found.scannedPages, 1, "only the page with the note needs reading")
+    }
+
+    func testAWordInTheTextLayerOfAPageThatIsAlsoReadGetsOneBox() throws {
+        let document = try RedactPDF.open(try makeAnnotatedPDF(note: "Zanzibar"))
+        let found = RedactPDF.find("Second page", in: document)
+        XCTAssertEqual(found.scannedPages, 1)
+        XCTAssertEqual(found.matches.count, 1, "the same words were boxed once from the text and once from the picture")
+    }
+
+    func testOnlyPagesWhosePictureCanShowMoreThanTheirTextAreRead() throws {
+        let scribble = { (context: CGContext) in
+            context.move(to: CGPoint(x: 100, y: 100))
+            context.addCurve(to: CGPoint(x: 300, y: 100), control1: CGPoint(x: 150, y: 200), control2: CGPoint(x: 250, y: 0))
+            context.strokePath()
+        }
+        let ruledTable = { (context: CGContext) in
+            context.stroke(CGRect(x: 72, y: 500, width: 400, height: 100))
+            context.move(to: CGPoint(x: 72, y: 550))
+            context.addLine(to: CGPoint(x: 472, y: 550))
+            context.strokePath()
+        }
+        let document = try RedactPDF.open(try makeDrawnPDF(pages: [{ _ in }, ruledTable, scribble]))
+        let reads = try (0..<3).map { RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(document.page(at: $0))) }
+        XCTAssertEqual(reads, [false, false, true], "text only, text with straight rules, text with a curve")
+
+        let scan = try RedactPDF.open(try makeScannedPDF(text: "Appleseed", size: 64, stamp: "1"))
+        XCTAssertTrue(RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(scan.page(at: 0))))
+    }
+
+    func testAPageWithAnInlineImageIsRead() throws {
+        let text = "BT /F1 14 Tf 72 700 Td (A page of ordinary words that PDFKit can search) Tj ET"
+        let inlineImage = " q 40 0 0 40 100 100 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \u{7F} EI Q"
+        let plain = try RedactPDF.open(try writeHandMadePDF(content: text))
+        let withImage = try RedactPDF.open(try writeHandMadePDF(content: text + inlineImage))
+
+        XCTAssertTrue(RedactPDF.hasText(try XCTUnwrap(plain.page(at: 0))), "the hand-made page must have a text layer")
+        XCTAssertFalse(RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(plain.page(at: 0))))
+        XCTAssertTrue(RedactPDF.mayShowMoreThanItsText(try XCTUnwrap(withImage.page(at: 0))))
+    }
+
+    func testAPageThatCannotBeReadIsReportedAndItsTextLayerIsStillSearched() throws {
+        struct VisionIsDown: Error {}
+        let document = try RedactPDF.open(try makeAnnotatedPDF(note: "Zanzibar"))
+
+        let found = RedactPDF.find("Second page", in: document) { _ in throw VisionIsDown() }
+        XCTAssertEqual(found.unreadablePages, [1])
+        XCTAssertEqual(found.scannedPages, 0)
+        XCTAssertEqual(found.matches.count, 1)
+
+        let note = RedactPDF.find("Zanzibar", in: document) { _ in throw VisionIsDown() }
+        XCTAssertEqual(note.unreadablePages, [1])
+        XCTAssertTrue(note.matches.isEmpty)
+    }
+
+    func testReadingFailuresAreLoggedOnceWithTheReason() throws {
+        struct VisionIsDown: Error {}
+        let sink = MemorySink(minimumLevel: .warning)
+        Log.configure(sinks: [sink])
+        defer { Log.configure(sinks: []) }
+        let scans = try RedactPDF.open(try makeDrawnPDF(pages: [{ $0.fillEllipse(in: CGRect(x: 9, y: 9, width: 9, height: 9)) },
+                                                                { $0.fillEllipse(in: CGRect(x: 9, y: 9, width: 9, height: 9)) }]))
+
+        XCTAssertEqual(RedactPDF.find("Anything", in: scans) { _ in throw VisionIsDown() }.unreadablePages, [0, 1])
+        let event = try XCTUnwrap(sink.events.first { $0.message == "Pages could not be read" })
+        XCTAssertEqual(sink.events.filter { $0.message == "Pages could not be read" }.count, 1)
+        XCTAssertEqual(event.metadata["unreadable"], "2")
+        XCTAssertEqual(event.metadata["first_page"], "1")
+        XCTAssertTrue(event.metadata["error_type"]?.contains("VisionIsDown") ?? false)
+    }
+
     // MARK: Exporting
 
     func testRedactedTextIsGoneFromTheCopyNotJustCovered() throws {
@@ -155,6 +243,33 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: source), before)
     }
 
+    func testAnotherNameForTheOriginalIsRefusedAsTheDestination() throws {
+        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
+        let before = try Data(contentsOf: source)
+        let hardLink = dir.appendingPathComponent("hard-link.pdf")
+        try FileManager.default.linkItem(at: source, to: hardLink)
+        let symbolicLink = dir.appendingPathComponent("symbolic-link.pdf")
+        try FileManager.default.createSymbolicLink(at: symbolicLink, withDestinationURL: source)
+
+        for destination in [hardLink, symbolicLink] {
+            XCTAssertTrue(BatchFiles.isSameFile(source, destination), destination.lastPathComponent)
+            XCTAssertThrowsError(try RedactPDF.export(source: source, regions: [0: [CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.1)]],
+                                                      keepSearchable: false, to: destination), destination.lastPathComponent) { error in
+                XCTAssertEqual(error as? RedactPDFError, .wouldOverwrite)
+            }
+            XCTAssertEqual(try Data(contentsOf: source), before, "the original changed through \(destination.lastPathComponent)")
+            XCTAssertEqual(try Data(contentsOf: destination), before, "\(destination.lastPathComponent) no longer holds the original")
+        }
+    }
+
+    func testDifferentFilesWithTheSameBytesAreNotTheSameFile() throws {
+        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
+        let twin = dir.appendingPathComponent("twin.pdf")
+        try FileManager.default.copyItem(at: source, to: twin)
+        XCTAssertFalse(BatchFiles.isSameFile(source, twin))
+        XCTAssertFalse(BatchFiles.isSameFile(source, dir.appendingPathComponent("not-there.pdf")))
+    }
+
     func testExportingReplacesAnExistingCopyAndLeavesNoStrayFiles() throws {
         let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]])
         let output = dir.appendingPathComponent("out.pdf")
@@ -163,6 +278,85 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertNotNil(PDFDocument(url: output))
         let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         XCTAssertEqual(Set(names), [source.lastPathComponent, "out.pdf"], "a temporary file was left behind")
+    }
+
+    func testAMatchLeftUncoveredOnPurposeStillExportsAndIsCounted() throws {
+        for searchable in [false, true] {
+            let source = try makePDF(pages: [[Line("Appleseed first", x: 72, y: 700, size: 40), Line("Appleseed second", x: 72, y: 500, size: 40)],
+                                             [Line("Appleseed again", x: 72, y: 600, size: 28)]])
+            let first = try XCTUnwrap(RedactPDF.find("Appleseed", in: try RedactPDF.open(source)).matches.first { $0.page == 0 })
+            let output = dir.appendingPathComponent("partial-\(searchable).pdf")
+
+            let result = try RedactPDF.export(source: source, regions: [0: [first.rect]], keepSearchable: searchable, to: output,
+                                              searchedFor: ["Appleseed", " appleseed ", "Zebra"])
+            XCTAssertEqual(result.leftUncovered, [RedactPDFLeftover(query: "Appleseed", matches: 2)], "searchable \(searchable)")
+            XCTAssertNotNil(PDFDocument(url: output))
+        }
+    }
+
+    func testACopyWithEveryMatchCoveredHasNothingLeftToReport() throws {
+        let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)], [Line("Appleseed again", x: 72, y: 600, size: 28)]])
+        var boxes: [Int: [CGRect]] = [:]
+        for match in RedactPDF.find("Appleseed", in: try RedactPDF.open(source)).matches { boxes[match.page, default: []].append(match.rect) }
+        let output = dir.appendingPathComponent("out.pdf")
+
+        let result = try RedactPDF.export(source: source, regions: boxes, keepSearchable: true, to: output, searchedFor: ["Appleseed"])
+        XCTAssertEqual(result.leftUncovered, [])
+        XCTAssertEqual(try RedactPDF.export(source: source, regions: boxes, keepSearchable: true, to: output).leftUncovered, [])
+    }
+
+    func testAMatchStillFoundUnderABoxMeansTheCopyIsNotClean() throws {
+        let unredacted = try RedactPDF.open(try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)]]))
+        let match = try XCTUnwrap(RedactPDF.find("Appleseed", in: unredacted).matches.first)
+
+        XCTAssertThrowsError(try RedactPDF.uncoveredMatches(of: ["Appleseed"], in: unredacted, covered: [0: [match.rect]])) { error in
+            XCTAssertEqual(error as? RedactPDFError, .notClean)
+        }
+        let besideIt = CGRect(x: match.rect.maxX - 0.002, y: match.rect.minY, width: 0.1, height: match.rect.height)
+        XCTAssertEqual(try RedactPDF.uncoveredMatches(of: ["Appleseed"], in: unredacted, covered: [0: [besideIt]]),
+                       [RedactPDFLeftover(query: "Appleseed", matches: 1)], "a box that only touches the word does not cover it")
+        XCTAssertEqual(try RedactPDF.uncoveredMatches(of: ["Appleseed"], in: unredacted, covered: [1: [match.rect]]),
+                       [RedactPDFLeftover(query: "Appleseed", matches: 1)], "a box on another page does not cover it")
+    }
+
+    func testAWordHalfUnderABoxCannotBeFoundInTheCopy() throws {
+        for searchable in [false, true] {
+            let source = try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 40)]])
+            let match = try XCTUnwrap(RedactPDF.find("Appleseed", in: try RedactPDF.open(source)).matches.first)
+            let half = CGRect(x: match.rect.minX, y: match.rect.minY, width: match.rect.width / 2, height: match.rect.height)
+            let output = dir.appendingPathComponent("half-\(searchable).pdf")
+            let result = try RedactPDF.export(source: source, regions: [0: [half]], keepSearchable: searchable, to: output, searchedFor: ["Appleseed"])
+
+            XCTAssertEqual(result.leftUncovered, [], "searchable \(searchable)")
+            let copy = try RedactPDF.open(output)
+            XCTAssertFalse((copy.string ?? "").localizedCaseInsensitiveContains("Appleseed"), "searchable \(searchable): the word is still in the text")
+        }
+    }
+
+    func testANoteIsKeptOnAPageWithoutBoxesAndGoneFromAPageWithOne() throws {
+        let source = try makeAnnotatedPDF(note: "Zanzibar")
+        let box = CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.1)
+        let holdsTheNote = { (url: URL) throws -> Bool in
+            try XCTUnwrap(try RedactPDF.open(url).page(at: 1)).annotations.contains { ($0.contents ?? "").contains("Zanzibar") }
+        }
+
+        let otherPageBoxed = dir.appendingPathComponent("other-page.pdf")
+        _ = try RedactPDF.export(source: source, regions: [0: [box]], keepSearchable: false, to: otherPageBoxed)
+        XCTAssertTrue(try holdsTheNote(otherPageBoxed), "a page without boxes is copied as it is, notes included")
+
+        let notePageBoxed = dir.appendingPathComponent("note-page.pdf")
+        _ = try RedactPDF.export(source: source, regions: [1: [box]], keepSearchable: false, to: notePageBoxed)
+        XCTAssertFalse(try holdsTheNote(notePageBoxed))
+        XCTAssertNil(try Data(contentsOf: notePageBoxed).range(of: Data("Zanzibar".utf8)), "the note's words are still in the file")
+    }
+
+    func testASaveFailureKeepsItsWordingAndCarriesTheReasonForTheLog() {
+        let reason = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+        let error = RedactPDFError.saveFailed(underlying: reason)
+        XCTAssertEqual(error.localizedDescription, "The redacted PDF could not be saved.")
+        XCTAssertEqual(RedactPDFError.saveFailed().localizedDescription, "The redacted PDF could not be saved.")
+        XCTAssertTrue(Log.details(error)["underlying"]?.hasPrefix("NSCocoaErrorDomain 513") ?? false)
+        XCTAssertNil(Log.details(RedactPDFError.saveFailed())["underlying"])
     }
 
     func testNothingToRedactIsAnError() throws {
@@ -257,6 +451,44 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertEqual(model.findMessage, "No matches for “Zebra”.")
     }
 
+    @MainActor func testExportSaysHowManySearchedMatchesWereLeftUncovered() async throws {
+        let model = RedactPDFModel()
+        model.open(try makePDF(pages: [
+            [Line("Jane Appleseed", x: 72, y: 700, size: 28), Line("Dear Jane", x: 72, y: 500, size: 28)],
+            [Line("jane again", x: 72, y: 600, size: 28)],
+        ]))
+        model.query = " Jane "
+        model.redactAll()
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
+        model.query = "jane"
+        model.redactAll()
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
+        XCTAssertEqual(model.redactedQueries, ["Jane"])
+
+        model.export(to: dir.appendingPathComponent("all-covered.pdf"))
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
+        XCTAssertNil(model.notice)
+        XCTAssertEqual(try XCTUnwrap(model.saved).leftUncovered, [])
+        XCTAssertNil(RedactPDFModel.leftUncoveredNote(try XCTUnwrap(model.saved).leftUncovered))
+
+        model.remove(try XCTUnwrap(model.regions.first { $0.page == 1 }).id)
+        XCTAssertNil(model.saved)
+        model.export(to: dir.appendingPathComponent("one-left.pdf"))
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
+        XCTAssertNil(model.notice, "a match left uncovered on purpose is not an error")
+        let saved = try XCTUnwrap(model.saved)
+        XCTAssertEqual(saved.leftUncovered, [RedactPDFLeftover(query: "Jane", matches: 1)])
+        XCTAssertEqual(RedactPDFModel.leftUncoveredNote(saved.leftUncovered), "Still in the copy where it was left uncovered: “Jane” 1 time.")
+
+        model.close()
+        XCTAssertEqual(model.redactedQueries, [])
+    }
+
+    func testTheLeftUncoveredNoteCountsEachWord() {
+        XCTAssertEqual(RedactPDFModel.leftUncoveredNote([RedactPDFLeftover(query: "Jane", matches: 2), RedactPDFLeftover(query: "555", matches: 1)]),
+                       "Still in the copy where it was left uncovered: “Jane” 2 times, “555” 1 time.")
+    }
+
     @MainActor func testChangingTheBoxesForgetsTheLastSavedFile() throws {
         let model = RedactPDFModel()
         model.open(try makePDF(pages: [[Line("One", x: 72, y: 600, size: 28)]]))
@@ -272,8 +504,18 @@ final class RedactPDFTests: XCTestCase {
         XCTAssertEqual(RedactPDFModel.summary(matches: 0, added: 0, pages: 0, scanned: 0, text: "x"), "No matches for “x”.")
         XCTAssertEqual(RedactPDFModel.summary(matches: 1, added: 1, pages: 1, scanned: 0, text: "x"), "Covered 1 match on 1 page.")
         XCTAssertEqual(RedactPDFModel.summary(matches: 2, added: 2, pages: 2, scanned: 1, text: "x"),
-                       "Covered 2 matches on 2 pages. 1 scanned page was read, which can miss words, so check it.")
-        XCTAssertTrue(RedactPDFModel.summary(matches: 0, added: 0, pages: 0, scanned: 3, text: "x").hasSuffix("3 scanned pages were read, which can miss words, so check them."))
+                       "Covered 2 matches on 2 pages. 1 page has pictures or notes that were read as images, which can miss words, so check it.")
+        XCTAssertTrue(RedactPDFModel.summary(matches: 0, added: 0, pages: 0, scanned: 3, text: "x")
+            .hasSuffix("3 pages have pictures or notes that were read as images, which can miss words, so check them."))
+    }
+
+    func testSummariesNameThePagesThatCouldNotBeSearched() {
+        XCTAssertEqual(RedactPDFModel.summary(matches: 0, added: 0, pages: 0, scanned: 0, unreadable: [2], text: "x"),
+                       "No matches for “x” on the pages that could be searched. Page 3 could not be searched, so check it yourself.")
+        XCTAssertEqual(RedactPDFModel.summary(matches: 1, added: 1, pages: 1, scanned: 0, unreadable: [0, 4, 6], text: "x"),
+                       "Covered 1 match on 1 page. Pages 1, 5 and 7 could not be searched, so check them yourself.")
+        XCTAssertTrue(RedactPDFModel.summary(matches: 1, added: 0, pages: 0, scanned: 2, unreadable: Array(0..<6), text: "x")
+            .hasSuffix("so check them. 6 pages could not be searched, so check them yourself."))
     }
 
     // MARK: Helpers
@@ -321,7 +563,7 @@ final class RedactPDFTests: XCTestCase {
     }
 
     /// A one-page PDF that is only a picture of `text`, with no text layer.
-    private func makeScannedPDF(text: String, size: CGFloat) throws -> URL {
+    private func makeScannedPDF(text: String, size: CGFloat, stamp: String? = nil) throws -> URL {
         let (w, h) = (1224, 1584)
         let bitmap = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
@@ -338,10 +580,72 @@ final class RedactPDFTests: XCTestCase {
         let pdf = try XCTUnwrap(CGContext(consumer: try XCTUnwrap(CGDataConsumer(data: data as CFMutableData)), mediaBox: &media, nil))
         pdf.beginPDFPage(nil)
         pdf.draw(picture, in: media)
+        if let stamp { draw(Line(stamp, x: 300, y: 30, size: 10), in: pdf) }
         pdf.endPDFPage()
         pdf.closePDF()
         let url = dir.appendingPathComponent("scan-\(UUID()).pdf")
         try (data as Data).write(to: url)
+        return url
+    }
+
+    private func draw(_ line: Line, in context: CGContext) {
+        let font = CTFontCreateWithName("Helvetica" as CFString, line.size, nil)
+        let text = CTLineCreateWithAttributedString(NSAttributedString(string: line.text, attributes: [.font: font, .foregroundColor: NSColor.black]))
+        context.textPosition = CGPoint(x: line.x, y: line.y)
+        CTLineDraw(text, context)
+    }
+
+    private func makeDrawnPDF(pages: [(CGContext) -> Void]) throws -> URL {
+        let data = NSMutableData()
+        var media = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let pdf = try XCTUnwrap(CGContext(consumer: try XCTUnwrap(CGDataConsumer(data: data as CFMutableData)), mediaBox: &media, nil))
+        for page in pages {
+            pdf.beginPDFPage(nil)
+            pdf.setFillColor(gray: 0, alpha: 1)
+            draw(Line("A page of ordinary words that PDFKit can search", x: 72, y: 700, size: 14), in: pdf)
+            page(pdf)
+            pdf.endPDFPage()
+        }
+        pdf.closePDF()
+        let url = dir.appendingPathComponent("drawn-\(UUID()).pdf")
+        try (data as Data).write(to: url)
+        return url
+    }
+
+    private func writeHandMadePDF(content: String) throws -> URL {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            "<< /Length \(content.utf8.count) >>\nstream\n\(content)\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        var file = "%PDF-1.4\n"
+        var offsets: [Int] = []
+        for (number, body) in objects.enumerated() {
+            offsets.append(file.utf8.count)
+            file += "\(number + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let table = file.utf8.count
+        file += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for offset in offsets { file += String(format: "%010d 00000 n \n", offset) }
+        file += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(table)\n%%EOF\n"
+        let url = dir.appendingPathComponent("hand-made-\(UUID()).pdf")
+        try Data(file.utf8).write(to: url)
+        return url
+    }
+
+    private func makeAnnotatedPDF(note text: String) throws -> URL {
+        let document = try XCTUnwrap(PDFDocument(url: try makePDF(pages: [[Line("Jane Appleseed", x: 72, y: 600, size: 28)],
+                                                                          [Line("Second page text", x: 72, y: 600, size: 28)]])))
+        let note = PDFAnnotation(bounds: CGRect(x: 72, y: 300, width: 400, height: 60), forType: .freeText, withProperties: nil)
+        note.contents = text
+        note.font = NSFont(name: "Helvetica", size: 36)
+        note.fontColor = .black
+        note.color = .white
+        try XCTUnwrap(document.page(at: 1)).addAnnotation(note)
+        let url = dir.appendingPathComponent("annotated-\(UUID()).pdf")
+        XCTAssertTrue(document.write(to: url))
         return url
     }
 
