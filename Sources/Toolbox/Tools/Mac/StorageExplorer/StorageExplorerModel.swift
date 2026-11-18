@@ -19,7 +19,7 @@ final class StorageExplorerModel {
     private(set) var detail: SpaceHog?
     var selection: Set<URL> = []
     private(set) var lastOutcome: StorageCleaner.Outcome?
-    private(set) var isClearing = false
+    private(set) var clearingHogID: String?
 
     private var measureTask: Task<Void, Never>?
     private var latestMeasurement: [String: UUID] = [:]
@@ -38,6 +38,8 @@ final class StorageExplorerModel {
     var found: Int64 {
         measures.values.reduce(0) { sum, m in if case .done(let r) = m { sum + r.total } else { sum } }
     }
+
+    var isClearing: Bool { clearingHogID != nil }
 
     var isMeasuring: Bool { measures.values.contains(.measuring) }
 
@@ -111,11 +113,11 @@ final class StorageExplorerModel {
         guard !isClearing, let hog = detail, let r = result(hog) else { return }
         let chosen = r.items.filter { selection.contains($0.url) }
         selection = []
-        isClearing = true
+        clearingHogID = hog.id
         _ = beginMeasuring(hog)
         Task { [trash, delete] in
             let outcome = await Task.detached { StorageCleaner.clear(chosen, from: hog, trash: trash, delete: delete) }.value
-            isClearing = false
+            clearingHogID = nil
             if detail?.id == hog.id { lastOutcome = outcome }
             Log.info("Storage cleared", category: "storage", ["hog": hog.id, "items": String(chosen.count), "failed": String(outcome.failures.count)])
             measure(hog)

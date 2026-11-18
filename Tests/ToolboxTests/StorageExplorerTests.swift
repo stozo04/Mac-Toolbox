@@ -211,6 +211,7 @@ final class StorageExplorerTests: XCTestCase {
         try await waitUntil("the clearing reaches the Trash step") { hold.isHolding }
 
         model.open(try XCTUnwrap(model.hogs.first { $0.id == "homebrew" }))
+        XCTAssertEqual(model.clearingHogID, "caches")
         hold.release()
         try await waitUntil(timeout: .seconds(60), "the caches are cleared and measured again") { !model.isClearing && !model.isMeasuring }
 

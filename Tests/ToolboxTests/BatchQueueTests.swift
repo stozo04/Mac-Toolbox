@@ -445,4 +445,33 @@ final class BatchQueueTests: XCTestCase {
         try bench.finish("a.job")
         try await waitUntilIdle()
     }
+
+    // MARK: Observation
+
+    func testAViewReadingAModelThroughItsForwardsIsToldWhenTheQueueChanges() async throws {
+        let model = MuteVideoModel(outputParent: output)
+        let clip = file("clip.mov")
+        try Data().write(to: clip)
+        let changes = Locked(0)
+        func watch() {
+            withObservationTracking {
+                _ = (model.items.count, model.isRunning, model.notice, model.hasPending)
+            } onChange: {
+                changes.update { $0 += 1 }
+            }
+        }
+
+        watch()
+        model.add([clip, file("notes.txt")])
+        XCTAssertEqual(changes.value, 1, "adding files must redraw a view that reads items or notice")
+        XCTAssertEqual(model.items.map(\.url), [clip])
+        XCTAssertNotNil(model.notice)
+
+        watch()
+        model.mute()
+        XCTAssertEqual(changes.value, 2, "starting a run must redraw a view that reads isRunning")
+        XCTAssertTrue(model.isRunning)
+        try await waitUntil(timeout: .seconds(30), "the run ends") { !model.isRunning }
+        XCTAssertEqual(model.items.first?.isFailed, true, "an empty file is not a video that can be muted")
+    }
 }

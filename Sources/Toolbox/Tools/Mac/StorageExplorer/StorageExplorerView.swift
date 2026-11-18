@@ -179,7 +179,7 @@ private struct HogDetail: View {
     private var canClear: Bool { if case .notHere = hog.clearing { false } else { true } }
 
     @ViewBuilder private var footer: some View {
-        if model.isClearing {
+        if model.clearingHogID == hog.id {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(isTrash ? "Deleting…" : "Moving to the Trash…").font(.callout).foregroundStyle(.secondary)
