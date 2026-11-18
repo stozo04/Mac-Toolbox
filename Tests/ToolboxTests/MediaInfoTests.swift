@@ -154,6 +154,60 @@ final class MediaInfoTests: XCTestCase {
         }
     }
 
+    private typealias HeldRead = CheckedContinuation<MediaReport, Error>
+
+    @MainActor private func makeModelWithHeldReads(_ held: Locked<[HeldRead]>, cancelled: Locked<Int>) -> MediaInfoModel {
+        MediaInfoModel { _ in
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { read in held.update { $0.append(read) } }
+            } onCancel: {
+                cancelled.update { $0 += 1 }
+            }
+        }
+    }
+
+    private func makeEmptyClip() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mediainfo-queue-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let clip = dir.appendingPathComponent("clip.mov")
+        try Data().write(to: clip)
+        return clip
+    }
+
+    @MainActor func testClearStopsTheReadsAndALateResultDoesNotLandOnTheSameFileAddedAgain() async throws {
+        let clip = try makeEmptyClip()
+        let held = Locked<[HeldRead]>([]), cancelled = Locked(0)
+        let model = makeModelWithHeldReads(held, cancelled: cancelled)
+        model.add([clip])
+        try await waitUntil("the first read starts") { held.value.count == 1 }
+
+        model.clear()
+        XCTAssertEqual(cancelled.value, 1, "clearing the list cancels the read in flight")
+        model.add([clip])
+        try await waitUntil("the second read starts") { held.value.count == 2 }
+        try held.value.element(at: 0).resume(throwing: CocoaError(.fileReadCorruptFile))
+        try await pause(for: .milliseconds(50), because: "the old result would land on a later main-actor turn")
+
+        XCTAssertEqual(model.items.map(\.state), [.reading])
+        try held.value.element(at: 1).resume(throwing: CocoaError(.fileReadCorruptFile))
+        try await waitUntil("the second read lands") { model.items.first?.state != .reading }
+        XCTAssertEqual(cancelled.value, 1)
+    }
+
+    @MainActor func testRemovingAFileStopsItsRead() async throws {
+        let clip = try makeEmptyClip()
+        let held = Locked<[HeldRead]>([]), cancelled = Locked(0)
+        let model = makeModelWithHeldReads(held, cancelled: cancelled)
+        model.add([clip])
+        try await waitUntil("the read starts") { held.value.count == 1 }
+
+        model.remove(try XCTUnwrap(model.items.first).id)
+
+        XCTAssertEqual(cancelled.value, 1)
+        try held.value.element(at: 0).resume(throwing: CancellationError())
+    }
+
     @MainActor func testFolderYieldsOnlyAudioAndVideoButAFileIsAlwaysTried() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mediainfo-folder-\(UUID())")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

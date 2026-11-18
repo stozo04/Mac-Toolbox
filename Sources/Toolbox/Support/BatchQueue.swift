@@ -54,20 +54,14 @@ final class BatchQueue<Item: BatchItem> {
 
     @discardableResult
     func add(_ urls: [URL], make: (URL) -> Item?) -> [Item] {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let files = tool.files(url)
-            if files.isEmpty { skipped += 1 }
-            found += files
-        }
+        var (found, skipped) = BatchFiles.gather(urls, files: tool.files)
         var known = Set(items.map { BatchFiles.identity($0.url) })
         var added: [Item] = []
         for url in found where known.insert(BatchFiles.identity(url)).inserted {
             if let item = make(url) { added.append(item) } else { skipped += 1 }
         }
         items += added
-        notice = skipped == 0 ? nil : "\(skipped) item(s) \(tool.skippedBecause) and were skipped."
+        notice = BatchFiles.skippedNotice(skipped, because: tool.skippedBecause)
         return added
     }
 
