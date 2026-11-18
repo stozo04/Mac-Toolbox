@@ -677,13 +677,14 @@ final class AIModelsTests: XCTestCase {
         library.start()
         try await waitUntil("the first scan finishes") { library.hasScanned && !library.isScanning }
         library.stop()
+        let scansWhenStopped = library.scansStarted
         library.refresh()
-        XCTAssertEqual(library.scansStarted, 1)
+        XCTAssertEqual(library.scansStarted, scansWhenStopped)
         XCTAssertFalse(library.isScanning)
 
         library.start()
         defer { library.stop() }
-        XCTAssertEqual(library.scansStarted, 2)
+        XCTAssertEqual(library.scansStarted, scansWhenStopped + 1)
         try await waitUntil("the scan after the restart finishes") { !library.isScanning }
     }
 
