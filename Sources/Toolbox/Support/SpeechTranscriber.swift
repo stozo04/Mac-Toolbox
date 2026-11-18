@@ -66,29 +66,85 @@ enum SpeechTranscriber {
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
 
-        final class Box: @unchecked Sendable { var task: SFSpeechRecognitionTask?; var done = false }
-        let box = Box()
+        let answer = CancellableAnswer<[TimedWord]>()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<[TimedWord], Error>) in
-                box.task = recognizer.recognitionTask(with: request) { result, error in
-                    guard !box.done else { return }
-                    if let result {
-                        let words = result.bestTranscription.segments.map { TimedWord(text: $0.substring, start: $0.timestamp, duration: $0.duration) }
-                        if result.isFinal {
-                            box.done = true
-                            words.isEmpty ? c.resume(throwing: SpeechError.noSpeech) : c.resume(returning: words)
-                        } else if let last = words.last {
-                            progress(0.1 + 0.9 * min(last.end / total, 1))
-                        }
-                    } else if let error {
-                        box.done = true
-                        let code = (error as NSError).code
-                        c.resume(throwing: Task.isCancelled ? CancellationError() : (code == 1110 || code == 203) ? SpeechError.noSpeech : SpeechError.failed)
+                guard answer.wait(with: c) else { return }
+                let task = recognizer.recognitionTask(with: request) { result, error in
+                    let words = result?.bestTranscription.segments.map { TimedWord(text: $0.substring, start: $0.timestamp, duration: $0.duration) }
+                    let finalWords = result?.isFinal == true ? words : nil
+                    if let outcome = outcome(finalWords: finalWords, error: error, cancelled: answer.isCancelled) {
+                        answer.resume(with: outcome)
+                    } else if let last = words?.last {
+                        progress(0.1 + 0.9 * min(last.end / total, 1))
                     }
                 }
+                answer.onCancel { task.cancel() }
             }
         } onCancel: {
-            box.task?.cancel()
+            answer.cancel()
         }
+    }
+
+    private static let noSpeechErrorCodes: Set<Int> = [1110, 203]
+
+    /// What one recognizer callback means for the caller, or nil while the recognizer is still working.
+    static func outcome(finalWords: [TimedWord]?, error: Error?, cancelled: Bool) -> Result<[TimedWord], Error>? {
+        if cancelled { return .failure(CancellationError()) }
+        if let finalWords { return finalWords.isEmpty ? .failure(SpeechError.noSpeech) : .success(finalWords) }
+        guard let error else { return nil }
+        return .failure(noSpeechErrorCodes.contains((error as NSError).code) ? SpeechError.noSpeech : SpeechError.failed)
+    }
+}
+
+/// Carries the answer of a callback API to the task waiting for it, exactly once.
+///
+/// A callback runs outside the Swift task, so `Task.isCancelled` is always false there; the cancel is recorded here instead.
+/// Cancelling answers the waiting task at once, because the API may never call back after it is told to stop.
+final class CancellableAnswer<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var stopWork: (() -> Void)?
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+
+    /// False when the wait was cancelled before it began: the continuation is already answered and the work must not start.
+    func wait(with continuation: CheckedContinuation<Value, Error>) -> Bool {
+        lock.lock()
+        let begin = !cancelled
+        if begin { self.continuation = continuation }
+        lock.unlock()
+        if !begin { continuation.resume(throwing: CancellationError()) }
+        return begin
+    }
+
+    func onCancel(_ stop: @escaping () -> Void) {
+        lock.lock()
+        let stopNow = cancelled
+        if !stopNow { stopWork = stop }
+        lock.unlock()
+        if stopNow { stop() }
+    }
+
+    func resume(with result: Result<Value, Error>) {
+        lock.lock()
+        let waiting = continuation
+        continuation = nil
+        stopWork = nil
+        lock.unlock()
+        waiting?.resume(with: result)
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let stop = stopWork
+        lock.unlock()
+        stop?()
+        resume(with: .failure(CancellationError()))
     }
 }

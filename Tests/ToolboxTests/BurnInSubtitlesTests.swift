@@ -392,3 +392,95 @@ final class BurnInSubtitlesTests: XCTestCase {
                        || Locale.current.language.languageCode?.identifier == "ja", true)
     }
 }
+
+final class SpeechCancellationTests: XCTestCase {
+    private let words = [TimedWord(text: "hello", start: 0, duration: 0.5)]
+    private let recognizerStopped = NSError(domain: "kAFAssistantErrorDomain", code: 216)
+
+    private func assertThrows<E: Error & Equatable>(_ outcome: Result<[TimedWord], Error>?, _ expected: E, file: StaticString = #filePath, line: UInt = #line) {
+        guard case .failure(let error) = outcome else { return XCTFail("got \(String(describing: outcome))", file: file, line: line) }
+        XCTAssertEqual(error as? E, expected, "threw \(error)", file: file, line: line)
+    }
+
+    private func assertCancelled<Value>(_ outcome: Result<Value, Error>?, file: StaticString = #filePath, line: UInt = #line) {
+        guard case .failure(let error) = outcome else { return XCTFail("got \(String(describing: outcome))", file: file, line: line) }
+        XCTAssertTrue(error is CancellationError, "threw \(error)", file: file, line: line)
+    }
+
+    func testAnErrorAfterACancelIsACancellationNotAFailure() {
+        assertCancelled(SpeechTranscriber.outcome(finalWords: nil, error: recognizerStopped, cancelled: true))
+        assertCancelled(SpeechTranscriber.outcome(finalWords: words, error: nil, cancelled: true))
+    }
+
+    func testAnErrorWithoutACancelIsAFailure() {
+        assertThrows(SpeechTranscriber.outcome(finalWords: nil, error: recognizerStopped, cancelled: false), SpeechError.failed)
+    }
+
+    func testTheRecognizersNoSpeechErrorsSayNoSpeech() {
+        for code in [1110, 203] {
+            let error = NSError(domain: "kAFAssistantErrorDomain", code: code)
+            assertThrows(SpeechTranscriber.outcome(finalWords: nil, error: error, cancelled: false), SpeechError.noSpeech)
+        }
+    }
+
+    func testFinalWordsAreTheAnswerAndNoWordsMeanNoSpeech() throws {
+        XCTAssertEqual(try XCTUnwrap(SpeechTranscriber.outcome(finalWords: words, error: nil, cancelled: false)).get(), words)
+        assertThrows(SpeechTranscriber.outcome(finalWords: [], error: nil, cancelled: false), SpeechError.noSpeech)
+    }
+
+    func testAPartialResultKeepsWaiting() {
+        XCTAssertNil(SpeechTranscriber.outcome(finalWords: nil, error: nil, cancelled: false))
+    }
+
+    private func wait(on answer: CancellableAnswer<Int>, began: Locked<Bool>, stopped: Locked<Bool>) -> Task<Int, Error> {
+        Task.detached {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    guard answer.wait(with: continuation) else { return }
+                    answer.onCancel { stopped.set(true) }
+                    began.set(true)
+                }
+            } onCancel: {
+                answer.cancel()
+            }
+        }
+    }
+
+    func testCancellingAnswersTheWaitEvenWhenTheWorkNeverCallsBack() async throws {
+        let answer = CancellableAnswer<Int>()
+        let (began, stopped) = (Locked(false), Locked(false))
+        let waiting = wait(on: answer, began: began, stopped: stopped)
+        try await waitUntil("the wait has begun") { began.value }
+
+        waiting.cancel()
+
+        assertCancelled(await waiting.result)
+        XCTAssertTrue(stopped.value)
+        XCTAssertTrue(answer.isCancelled)
+        answer.resume(with: .success(1))
+    }
+
+    func testAWaitCancelledBeforeItBeginsNeverStartsTheWork() async {
+        let answer = CancellableAnswer<Int>()
+        let (began, stopped) = (Locked(false), Locked(false))
+        answer.cancel()
+
+        assertCancelled(await wait(on: answer, began: began, stopped: stopped).result)
+        XCTAssertFalse(began.value)
+    }
+
+    func testOnlyTheFirstAnswerCounts() async throws {
+        let answer = CancellableAnswer<Int>()
+        let (began, stopped) = (Locked(false), Locked(false))
+        let waiting = wait(on: answer, began: began, stopped: stopped)
+        try await waitUntil("the wait has begun") { began.value }
+
+        answer.resume(with: .success(1))
+        answer.resume(with: .success(2))
+        answer.cancel()
+
+        let value = try await waiting.value
+        XCTAssertEqual(value, 1)
+        XCTAssertFalse(stopped.value, "an answered wait has nothing left to stop")
+    }
+}
