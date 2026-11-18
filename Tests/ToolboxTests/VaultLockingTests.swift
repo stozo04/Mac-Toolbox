@@ -294,6 +294,39 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertTrue(second, "the owner asked to quit twice and was still held")
     }
 
+    func testAQuitDuringAPasswordChangeSaysThePasswordIsStillBeingChanged() async throws {
+        let stand = DoorStandIn()
+        let model = try await makeOpenVault("changing-password", stand: stand, bounds: Self.shortBounds)
+        let preparation = QuitPreparation()
+        model.quitGuard.prepare(in: preparation)
+        stand.play("chpass", as: .hangs)
+        let changing = Task { await model.changePassword(current: Self.vaultPassword, new: "newer-pass", confirmation: "newer-pass") }
+        try await waitUntil("the password change is running") { stand.isHanging("chpass") && model.door.isChangingPassword }
+
+        let first = try await answerToQuit(preparation)
+
+        XCTAssertFalse(first)
+        XCTAssertEqual(model.message, VaultNotices.quitRefusedWhilePasswordChanges)
+        XCTAssertFalse(model.message?.contains("taking too long to eject") ?? true, "the refusal blamed the eject for waiting on the password change")
+        XCTAssertTrue(model.door.isChangingPassword, "quitting stopped the password change")
+        XCTAssertEqual(stand.stopped.value, [])
+
+        model.lockBeforeSleep()
+        XCTAssertTrue(model.door.isChangingPassword, "sleep stopped the password change")
+        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: model.door.isChangingPassword, failure: model.lastLockFailure),
+                       "the password is still being changed")
+
+        let second = try await answerToQuit(preparation)
+        XCTAssertTrue(second, "the owner asked to quit twice and was still held")
+        changing.cancel()
+    }
+
+    func testTheReasonForAnUnfinishedLockNamesWhatItWaitsFor() {
+        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: false, failure: nil), "the lock had not finished")
+        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: false, failure: "Resource busy"), "Resource busy")
+        XCTAssertEqual(VaultNotices.whyNotLocked(changingPassword: true, failure: "Resource busy"), "the password is still being changed")
+    }
+
     func testQuittingWhileTheVaultIsBeingCreatedNeverStopsTheCreation() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("create"))
         let pidFile = dir.appendingPathComponent("create.pid")

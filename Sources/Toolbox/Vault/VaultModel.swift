@@ -619,7 +619,10 @@ extension VaultModel {
     func lockBeforeSleep() {
         if lockInFlight == nil { beginLocking() } else { door.interruptUnlock() }
         let pending = door.startLock()
-        _ = pending.wait(upTo: door.bounds.lock)
+        if pending.wait(upTo: door.bounds.lock) == nil {
+            Log.error("Mac went to sleep before the vault locked", category: VaultLog.category,
+                      ["reason": VaultNotices.whyNotLocked(changingPassword: door.isChangingPassword, failure: lastLockFailure)])
+        }
         if lockInFlight == nil { lockInFlight = Task { settle(await pending.value()) } }
     }
 

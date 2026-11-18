@@ -41,13 +41,15 @@ final class VaultQuitGuard {
             refusal = nil
             return true
         }
-        let details = ["door": "\(vault.door.state)", "reason": vault.lastLockFailure ?? "the lock had not finished"]
+        let changingPassword = vault.door.isChangingPassword
+        let details = ["door": "\(vault.door.state)",
+                       "reason": VaultNotices.whyNotLocked(changingPassword: changingPassword, failure: vault.lastLockFailure)]
         guard !quitsAnywayIfStillOpen else {
             Log.error("Quit with the vault still open", category: VaultLog.category, details)
             return true
         }
         Log.error("Quit refused because the vault is still open", category: VaultLog.category, details)
-        let refused = VaultNotices.quitRefused(reason: vault.lastLockFailure)
+        let refused = changingPassword ? VaultNotices.quitRefusedWhilePasswordChanges : VaultNotices.quitRefused(reason: vault.lastLockFailure)
         refusal = refused
         vault.message = refused
         showVaultPage?()

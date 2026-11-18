@@ -70,6 +70,7 @@ final class VaultDoor: @unchecked Sendable {
     private let guardLock = NSLock()
     private var current: State
     private var lockRequests = 0
+    private var passwordChanges = 0
     private var attaching: Task<Shell.Result, Error>?
     private var lastOperation: Task<Void, Never>?
     private var ownership: Int32?
@@ -88,6 +89,9 @@ final class VaultDoor: @unchecked Sendable {
     }
 
     var state: State { guardLock.withLock { current } }
+
+    /// A lock waits behind a password change, which is never cut short.
+    var isChangingPassword: Bool { guardLock.withLock { passwordChanges > 0 } }
 
     /// Whether this copy holds the lock file that says "the vault is mine while I have it open".
     var holdsOwnership: Bool { guardLock.withLock { ownership != nil } }
@@ -363,6 +367,8 @@ final class VaultDoor: @unchecked Sendable {
     }
 
     private func changeImagePassword(from old: String, to new: String) async -> VaultError? {
+        guardLock.withLock { passwordChanges += 1 }
+        defer { guardLock.withLock { passwordChanges -= 1 } }
         let borrowed = guardLock.withLock { ownership == nil }
         if borrowed, !takeOwnership() { return .openInAnotherCopy }
         defer { if borrowed { guardLock.withLock { releaseOwnership() } } }

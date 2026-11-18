@@ -15,6 +15,15 @@ enum VaultNotices {
         return notice + " Unlock to continue."
     }
 
+    static let quitRefusedWhilePasswordChanges = "The vault's password is still being changed, so Toolbox didn't quit. "
+        + "Wait for it to finish, then quit again. Quit again now to quit anyway; the change will still finish, "
+        + "and the vault will stay open until you eject it or restart."
+
+    /// For the log when quit or sleep could not wait for the lock.
+    static func whyNotLocked(changingPassword: Bool, failure: String?) -> String {
+        changingPassword ? "the password is still being changed" : failure ?? "the lock had not finished"
+    }
+
     static func quitRefused(reason: String?) -> String {
         let said = (reason ?? "").lowercased()
         let why = reason == nil ? "It is taking too long to eject."
