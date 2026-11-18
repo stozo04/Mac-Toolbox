@@ -70,12 +70,10 @@ final class NetworkSpeedTests: XCTestCase {
     }
 
     @MainActor func testModelKeepsAndClearsHistory() async throws {
-        let suite = "toolbox.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeScratchDefaults()
         let m = NetworkSpeedTestModel(defaults: defaults, runTest: { _ in SpeedResult(downloadMbps: 50, uploadMbps: 20, responsiveness: 500, latencyMs: 12) })
         m.start()
-        while m.isRunning || m.latest == nil { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(30), "the speed test has a result") { !m.isRunning && m.latest != nil }
         XCTAssertEqual(m.history.count, 1)
         XCTAssertEqual(NetworkSpeedTestModel(defaults: defaults).history.count, 1, "history is saved")
         m.clearHistory()
@@ -83,10 +81,10 @@ final class NetworkSpeedTests: XCTestCase {
     }
 
     @MainActor func testModelReportsFailure() async throws {
-        let defaults = UserDefaults(suiteName: "toolbox.tests.\(UUID().uuidString)")!
+        let defaults = try makeScratchDefaults()
         let m = NetworkSpeedTestModel(defaults: defaults, runTest: { _ in throw NetworkQuality.QualityError.failed("offline") })
         m.start()
-        while m.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(30), "the speed test has stopped") { !m.isRunning }
         XCTAssertEqual(m.state, .failed("offline"))
         XCTAssertTrue(m.history.isEmpty)
     }
@@ -195,9 +193,9 @@ final class EjectTests: XCTestCase {
         struct Busy: Error {}
         let m = EjectAllDisksModel(scan: { return [a, b] }, eject: { url in if url.lastPathComponent == "A" { throw Busy() } })
         m.refresh()
-        while m.volumes.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        try await waitUntil(timeout: .seconds(30), "the volumes are listed") { !m.volumes.isEmpty }
         m.ejectAll()
-        while m.isEjecting || m.status.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        try await waitUntil(timeout: .seconds(30), "both ejects have finished") { !m.isEjecting && m.status.count >= 2 }
         guard case .failed = m.status[a.id] else { return XCTFail("A should be busy") }
         XCTAssertEqual(m.status[b.id], .ejected)
         XCTAssertEqual(m.remaining.map(\.name), ["A"])

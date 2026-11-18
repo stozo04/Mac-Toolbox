@@ -188,9 +188,9 @@ final class MediaInfoTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             memset(CVPixelBufferGetBaseAddress(b), Int32(i * 2 % 256), CVPixelBufferGetDataSize(b))

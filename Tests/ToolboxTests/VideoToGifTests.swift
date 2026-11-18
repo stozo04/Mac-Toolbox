@@ -8,7 +8,7 @@ final class VideoToGifTests: XCTestCase {
         let t = GifPlan.frameTimes(start: 2, length: 1, fps: 10)
         XCTAssertEqual(t.count, 10)
         XCTAssertEqual(t.first, 2)
-        XCTAssertEqual(t.last!, 2.9, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(t.last), 2.9, accuracy: 1e-9)
         XCTAssertEqual(GifPlan.frameTimes(start: 0, length: 0.01, fps: 10).count, 1)
     }
 
@@ -86,9 +86,9 @@ final class VideoToGifTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             memset(CVPixelBufferGetBaseAddress(b), Int32(i * 2 % 256), CVPixelBufferGetDataSize(b))

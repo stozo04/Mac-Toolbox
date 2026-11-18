@@ -434,20 +434,20 @@ final class RedactPDFTests: XCTestCase {
         ]))
         model.query = "Jane"
         model.redactAll()
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { !model.isFinding }
         XCTAssertEqual(model.regions.count, 3)
         XCTAssertEqual(model.regions.map(\.page).sorted(), [0, 0, 1])
         XCTAssertTrue(model.regions.allSatisfy { $0.label?.lowercased().contains("jane") ?? false })
         XCTAssertEqual(model.findMessage, "Covered 3 matches on 2 pages.")
 
         model.redactAll()
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { !model.isFinding }
         XCTAssertEqual(model.regions.count, 3, "searching again does not stack boxes")
         XCTAssertEqual(model.findMessage, "Every match is already covered.")
 
         model.query = "Zebra"
         model.redactAll()
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { !model.isFinding }
         XCTAssertEqual(model.findMessage, "No matches for “Zebra”.")
     }
 
@@ -459,14 +459,14 @@ final class RedactPDFTests: XCTestCase {
         ]))
         model.query = " Jane "
         model.redactAll()
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
         model.query = "jane"
         model.redactAll()
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
         XCTAssertEqual(model.redactedQueries, ["Jane"])
 
         model.export(to: dir.appendingPathComponent("all-covered.pdf"))
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
         XCTAssertNil(model.notice)
         XCTAssertEqual(try XCTUnwrap(model.saved).leftUncovered, [])
         XCTAssertNil(RedactPDFModel.leftUncoveredNote(try XCTUnwrap(model.saved).leftUncovered))
@@ -474,7 +474,7 @@ final class RedactPDFTests: XCTestCase {
         model.remove(try XCTUnwrap(model.regions.first { $0.page == 1 }).id)
         XCTAssertNil(model.saved)
         model.export(to: dir.appendingPathComponent("one-left.pdf"))
-        try await waitUntilDone(model)
+        try await waitUntil(timeout: .seconds(30), "the search or export has finished") { !model.isBusy }
         XCTAssertNil(model.notice, "a match left uncovered on purpose is not an error")
         let saved = try XCTUnwrap(model.saved)
         XCTAssertEqual(saved.leftUncovered, [RedactPDFLeftover(query: "Jane", matches: 1)])
@@ -566,7 +566,7 @@ final class RedactPDFTests: XCTestCase {
     private func makeScannedPDF(text: String, size: CGFloat, stamp: String? = nil) throws -> URL {
         let (w, h) = (1224, 1584)
         let bitmap = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                                             space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         bitmap.setFillColor(gray: 1, alpha: 1)
         bitmap.fill(CGRect(x: 0, y: 0, width: w, height: h))
         let font = CTFontCreateWithName("Helvetica" as CFString, size * 2, nil)
@@ -678,11 +678,6 @@ final class RedactPDFTests: XCTestCase {
         let (w, h) = (CGFloat(image.width), CGFloat(image.height))
         let area = CGRect(x: rect.minX * w, y: rect.minY * h, width: rect.width * w, height: rect.height * h)
         return try darkPixels(image).filter { area.contains(CGPoint(x: $0.x, y: $0.y)) }.count
-    }
-
-    @MainActor private func waitUntilDone(_ model: RedactPDFModel) async throws {
-        for _ in 0..<400 where model.isBusy { try await Task.sleep(nanoseconds: 25_000_000) }
-        XCTAssertFalse(model.isBusy, "the search or export never finished")
     }
 }
 

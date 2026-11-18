@@ -24,9 +24,9 @@ final class LoggingTests: XCTestCase {
         Log.info("a"); Log.warning("b"); Log.error("c", category: "x", ["k": "v"]); Log.critical("d")
         XCTAssertEqual(all.events.map(\.message), ["a", "b", "c", "d"])
         XCTAssertEqual(serious.events.map(\.message), ["c", "d"])
-        XCTAssertEqual(serious.events[0].category, "x")
-        XCTAssertEqual(serious.events[0].metadata["k"], "v")
-        XCTAssertNotNil(serious.events[0].metadata["page"], "failures always say where the user was")
+        XCTAssertEqual(try XCTUnwrap(serious.events.first).category, "x")
+        XCTAssertEqual(try XCTUnwrap(serious.events.first).metadata["k"], "v")
+        XCTAssertNotNil(try XCTUnwrap(serious.events.first).metadata["page"], "failures always say where the user was")
     }
 
     func testSupabaseRequestShape() throws {
@@ -40,10 +40,10 @@ final class LoggingTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "pub")
         XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer pub")
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(req.httpBody)) as? [[String: Any]])
-        XCTAssertEqual(json[0]["level"] as? String, "error")
-        XCTAssertEqual(json[0]["install_id"] as? String, "i")
-        XCTAssertEqual(json[0]["timestamp"] as? String, "1970-01-01T00:00:00Z")
-        XCTAssertEqual((json[0]["metadata"] as? [String: String])?["host"], "youtu.be")
+        XCTAssertEqual(try XCTUnwrap(json.first)["level"] as? String, "error")
+        XCTAssertEqual(try XCTUnwrap(json.first)["install_id"] as? String, "i")
+        XCTAssertEqual(try XCTUnwrap(json.first)["timestamp"] as? String, "1970-01-01T00:00:00Z")
+        XCTAssertEqual((try XCTUnwrap(json.first)["metadata"] as? [String: String])?["host"], "youtu.be")
     }
 
     // MARK: Dev runs stay out of Supabase
@@ -128,14 +128,14 @@ final class LoggingTests: XCTestCase {
         }
     }
 
-    func testFailuresGetThePageAndTheStepsBeforeThem() {
+    func testFailuresGetThePageAndTheStepsBeforeThem() throws {
         let sink = MemorySink(minimumLevel: .info)
         Log.configure(sinks: [sink])
         defer { Log.configure(sinks: []) }
         Log.navigate(to: "Images/Convert Images")
         Log.info("Image converted", category: "convert-images")
         Log.error("Image conversion failed", category: "convert-images")
-        let failure = sink.events.last!
+        let failure = try XCTUnwrap(sink.events.last)
         XCTAssertEqual(failure.metadata["page"], "Images/Convert Images")
         let recent = failure.metadata["recent"] ?? ""
         XCTAssertTrue(recent.contains("[nav] Opened page"))
@@ -164,6 +164,6 @@ final class LoggingLiveTests: XCTestCase {
         Log.configure(sinks: [SupabaseLogSink(config: config, minimumLevel: .warning)])
         defer { Log.configure(sinks: []) }
         Log.error("live sink test", category: "live-test", ["host": "example.com"])
-        try await Task.sleep(nanoseconds: 3_000_000_000)
+        try await pause(for: .seconds(3), because: "the sink sends in the background and exposes nothing to wait on")
     }
 }

@@ -49,13 +49,19 @@ enum BatchFiles {
         return (walker?.compactMap { $0 as? URL } ?? []).filter(isImage).sorted { $0.path < $1.path }
     }
 
-    /// A new dated folder in Downloads (or in `parent`), e.g. "Toolbox GIFs 2026-10-26 14.30.05".
+    /// A new dated folder in Downloads (or in `parent`), e.g. "Toolbox GIFs 2026-10-26 14.30.05", or "… 14.30.05 2" when that one exists.
     static func makeOutputFolder(named prefix: String, in parent: URL? = nil) throws -> URL {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
         let parent = parent ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let dir = parent.appendingPathComponent("\(prefix) \(f.string(from: Date()))")
+        let name = "\(prefix) \(f.string(from: Date()))"
+        var dir = parent.appendingPathComponent(name)
+        var n = 2
+        while FileManager.default.fileExists(atPath: dir.path) {
+            dir = parent.appendingPathComponent("\(name) \(n)")
+            n += 1
+        }
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {

@@ -67,10 +67,10 @@ final class BlurFacesTests: XCTestCase {
         let hidden = try XCTUnwrap(FaceBlur.render(photo, faces: [face], settings: FaceBlurSettings(style: .blackBox)))
         let px = try rgba(hidden)
 
-        XCTAssertEqual(px.at(100, 100), [0, 0, 0])
-        XCTAssertEqual(px.at(40, 100), [0, 0, 0], "the margin is covered too")
-        XCTAssertEqual(px.at(20, 100), [255, 0, 0], "pixels outside the margin stay as they were")
-        XCTAssertEqual(px.at(5, 5), [255, 0, 0])
+        XCTAssertEqual(try px.rgb(100, 100), [0, 0, 0])
+        XCTAssertEqual(try px.rgb(40, 100), [0, 0, 0], "the margin is covered too")
+        XCTAssertEqual(try px.rgb(20, 100), [255, 0, 0], "pixels outside the margin stay as they were")
+        XCTAssertEqual(try px.rgb(5, 5), [255, 0, 0])
     }
 
     func testBlurSoftensTheFaceAndLeavesTheRestSharp() throws {
@@ -80,8 +80,8 @@ final class BlurFacesTests: XCTestCase {
         let hidden = try XCTUnwrap(FaceBlur.render(photo, faces: [face], settings: FaceBlurSettings(style: .blur, strength: 60)))
         let px = try rgba(hidden)
 
-        XCTAssertTrue((60...195).contains(px.at(100, 100)[0]), "the centre should be a soft gray")
-        XCTAssertEqual(px.at(5, 5), [255, 255, 255], "outside the face the squares stay sharp")
+        XCTAssertTrue((60...195).contains(try XCTUnwrap(try px.rgb(100, 100).first)), "the centre should be a soft gray")
+        XCTAssertEqual(try px.rgb(5, 5), [255, 255, 255], "outside the face the squares stay sharp")
     }
 
     func testPixelateTurnsTheFaceIntoBlocks() throws {
@@ -91,8 +91,8 @@ final class BlurFacesTests: XCTestCase {
         let px = try rgba(hidden)
 
         // Inside a block every pixel matches; the 4 px squares are gone from the face.
-        XCTAssertEqual(px.at(100, 100), px.at(101, 101))
-        XCTAssertEqual(px.at(5, 5), [255, 255, 255])
+        XCTAssertEqual(try px.rgb(100, 100), try px.rgb(101, 101))
+        XCTAssertEqual(try px.rgb(5, 5), [255, 255, 255])
     }
 
     // MARK: Finding
@@ -137,27 +137,5 @@ final class BlurFacesTests: XCTestCase {
         return source
     }
 
-    /// The pixels as RGBA bytes, row 0 at the top.
-    private struct Pixels {
-        let bytes: [UInt8]
-        let width: Int
-
-        func at(_ x: Int, _ y: Int) -> [UInt8] {
-            let i = (y * width + x) * 4
-            return Array(bytes[i..<(i + 3)])
-        }
-    }
-
-    private func rgba(_ image: CGImage) throws -> Pixels {
-        let (w, h) = (image.width, image.height)
-        var bytes = [UInt8](repeating: 0, count: w * h * 4)
-        try bytes.withUnsafeMutableBytes { raw in
-            guard let context = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
-                throw CocoaError(.fileReadUnknown)
-            }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        }
-        return Pixels(bytes: bytes, width: w)
-    }
+    private func rgba(_ image: CGImage) throws -> RGBAPixels { try RGBAPixels(image, alpha: .noneSkipLast) }
 }

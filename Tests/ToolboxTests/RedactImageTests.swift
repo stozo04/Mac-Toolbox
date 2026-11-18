@@ -102,10 +102,10 @@ final class RedactImageTests: XCTestCase {
 
         XCTAssertEqual(hidden.width, 200)
         XCTAssertEqual(hidden.height, 100)
-        XCTAssertEqual(px.at(100, 50), [0, 0, 0])
-        XCTAssertEqual(px.at(55, 30), [0, 0, 0], "inside the region")
-        XCTAssertEqual(px.at(40, 50), [255, 0, 0], "left of the region")
-        XCTAssertEqual(px.at(100, 10), [255, 0, 0], "above the region")
+        XCTAssertEqual(try px.rgb(100, 50), [0, 0, 0])
+        XCTAssertEqual(try px.rgb(55, 30), [0, 0, 0], "inside the region")
+        XCTAssertEqual(try px.rgb(40, 50), [255, 0, 0], "left of the region")
+        XCTAssertEqual(try px.rgb(100, 10), [255, 0, 0], "above the region")
     }
 
     func testRegionsAreMeasuredFromTheTop() throws {
@@ -114,8 +114,8 @@ final class RedactImageTests: XCTestCase {
         let hidden = try XCTUnwrap(RedactImage.render(photo, regions: [CGRect(x: 0, y: 0, width: 1, height: 0.2)], settings: RedactSettings(style: .blackBox)))
         let px = try rgba(hidden)
 
-        XCTAssertEqual(px.at(50, 5), [0, 0, 0], "the top rows are covered")
-        XCTAssertEqual(px.at(50, 95), [255, 0, 0], "the bottom rows are not")
+        XCTAssertEqual(try px.rgb(50, 5), [0, 0, 0], "the top rows are covered")
+        XCTAssertEqual(try px.rgb(50, 95), [255, 0, 0], "the bottom rows are not")
     }
 
     func testBlurSoftensTheRegionAndLeavesTheRestSharp() throws {
@@ -124,8 +124,8 @@ final class RedactImageTests: XCTestCase {
         let hidden = try XCTUnwrap(RedactImage.render(photo, regions: [middle], settings: RedactSettings(style: .blur, strength: 60)))
         let px = try rgba(hidden)
 
-        XCTAssertTrue((60...195).contains(px.at(100, 100)[0]), "the centre should be a soft gray")
-        XCTAssertEqual(px.at(5, 5), [255, 255, 255], "outside the region the squares stay sharp")
+        XCTAssertTrue((60...195).contains(try XCTUnwrap(try px.rgb(100, 100).first)), "the centre should be a soft gray")
+        XCTAssertEqual(try px.rgb(5, 5), [255, 255, 255], "outside the region the squares stay sharp")
     }
 
     func testPixelateTurnsTheRegionIntoBlocks() throws {
@@ -134,8 +134,8 @@ final class RedactImageTests: XCTestCase {
         let hidden = try XCTUnwrap(RedactImage.render(photo, regions: [middle], settings: RedactSettings(style: .pixelate, strength: 60)))
         let px = try rgba(hidden)
 
-        XCTAssertEqual(px.at(100, 100), px.at(101, 101), "inside a block every pixel matches")
-        XCTAssertEqual(px.at(5, 5), [255, 255, 255])
+        XCTAssertEqual(try px.rgb(100, 100), try px.rgb(101, 101), "inside a block every pixel matches")
+        XCTAssertEqual(try px.rgb(5, 5), [255, 255, 255])
     }
 
     func testNothingToCoverReturnsTheImageItself() throws {
@@ -169,9 +169,9 @@ final class RedactImageTests: XCTestCase {
         let result = try RedactImage.save(source: source, regions: [CGRect(x: 0, y: 0, width: 1, height: 0.5)], settings: RedactSettings(style: .blackBox), into: out)
 
         let px = try rgba(try XCTUnwrap(CGImageSourceCreateImageAtIndex(try reader(result.url), 0, nil)))
-        XCTAssertEqual(px.at(10, 10), [0, 0, 0])
-        XCTAssertEqual(px.at(80, 10), [0, 0, 0])
-        XCTAssertEqual(px.at(10, 90), [0, 255, 0], "below the region the picture is exact (PNG is lossless)")
+        XCTAssertEqual(try px.rgb(10, 10), [0, 0, 0])
+        XCTAssertEqual(try px.rgb(80, 10), [0, 0, 0])
+        XCTAssertEqual(try px.rgb(10, 90), [0, 255, 0], "below the region the picture is exact (PNG is lossless)")
     }
 
     func testSavedPictureIsUprightWhenTheOriginalIsRotatedByItsTag() throws {
@@ -402,27 +402,5 @@ final class RedactImageTests: XCTestCase {
         return source
     }
 
-    /// The pixels as RGBA bytes, row 0 at the top.
-    private struct Pixels {
-        let bytes: [UInt8]
-        let width: Int
-
-        func at(_ x: Int, _ y: Int) -> [UInt8] {
-            let i = (y * width + x) * 4
-            return Array(bytes[i..<(i + 3)])
-        }
-    }
-
-    private func rgba(_ image: CGImage) throws -> Pixels {
-        let (w, h) = (image.width, image.height)
-        var bytes = [UInt8](repeating: 0, count: w * h * 4)
-        try bytes.withUnsafeMutableBytes { raw in
-            guard let context = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
-                throw CocoaError(.fileReadUnknown)
-            }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        }
-        return Pixels(bytes: bytes, width: w)
-    }
+    private func rgba(_ image: CGImage) throws -> RGBAPixels { try RGBAPixels(image, alpha: .noneSkipLast) }
 }

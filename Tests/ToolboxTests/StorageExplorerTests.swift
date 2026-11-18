@@ -23,7 +23,7 @@ final class StorageExplorerTests: XCTestCase {
         try? fm.removeItem(at: home)
     }
 
-    private func hog(_ id: String, now: Date = Date()) -> SpaceHog { SpaceHog.all(home: home, now: now).first { $0.id == id }! }
+    private func hog(_ id: String, now: Date = Date()) throws -> SpaceHog { try XCTUnwrap(SpaceHog.all(home: home, now: now).first { $0.id == id }) }
 
     func testListMatchesTheDesign() {
         let hogs = SpaceHog.all(home: home)
@@ -31,16 +31,16 @@ final class StorageExplorerTests: XCTestCase {
         XCTAssertEqual(Set(hogs.map(\.id)).count, hogs.count)
     }
 
-    func testAppCachesExcludeHomebrewSoItIsNotCountedTwice() {
-        let r = StorageScanner.measure(hog("caches"))
+    func testAppCachesExcludeHomebrewSoItIsNotCountedTwice() throws {
+        let r = StorageScanner.measure(try hog("caches"))
         XCTAssertEqual(Set(r.items.map { $0.url.lastPathComponent }), ["com.big.app", "com.small.app"])
-        XCTAssertGreaterThanOrEqual(r.items[0].bytes, r.items[1].bytes, "biggest first")
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(r.items.first).bytes, try r.items.element(at: 1).bytes, "biggest first")
         XCTAssertGreaterThanOrEqual(r.total, 320_000)
-        XCTAssertEqual(StorageScanner.measure(hog("homebrew")).items.map { $0.url.lastPathComponent }, ["pkg.tar"])
+        XCTAssertEqual(StorageScanner.measure(try hog("homebrew")).items.map { $0.url.lastPathComponent }, ["pkg.tar"])
     }
 
     func testMissingFolderIsEmptyAndUnreadableFolderNeedsAccess() throws {
-        XCTAssertEqual(StorageScanner.measure(hog("docker")), HogResult(items: [], needsAccess: false))
+        XCTAssertEqual(StorageScanner.measure(try hog("docker")), HogResult(items: [], needsAccess: false))
         let locked = home.appendingPathComponent("Library/Caches/locked")
         try fm.createDirectory(at: locked, withIntermediateDirectories: true)
         try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
@@ -49,9 +49,9 @@ final class StorageExplorerTests: XCTestCase {
     }
 
     func testOldDownloadsUsesTheNinetyDayCutoff() {
-        XCTAssertTrue(StorageScanner.measure(hog("downloads")).items.isEmpty, "a file added just now is not old")
+        XCTAssertTrue(StorageScanner.measure(try hog("downloads")).items.isEmpty, "a file added just now is not old")
         let later = Date().addingTimeInterval(100 * 24 * 3600)
-        XCTAssertEqual(StorageScanner.measure(hog("downloads", now: later)).items.map { $0.url.lastPathComponent }, ["installer.dmg"])
+        XCTAssertEqual(StorageScanner.measure(try hog("downloads", now: later)).items.map { $0.url.lastPathComponent }, ["installer.dmg"])
     }
 
     func testItemsMustBeInsideTheFolder() {
@@ -63,10 +63,10 @@ final class StorageExplorerTests: XCTestCase {
         XCTAssertFalse(StorageCleaner.isInside(URL(fileURLWithPath: root.path + "-evil/x"), root: root), "a sibling with the same prefix")
     }
 
-    func testClearingUsesTheRightActionPerKind() {
+    func testClearingUsesTheRightActionPerKind() throws {
         var trashed: [String] = [], deleted: [String] = []
         let item = { (hog: SpaceHog, name: String) in HogItem(url: hog.root.appendingPathComponent(name), bytes: 10) }
-        let caches = hog("caches"), trash = hog("trash"), docker = hog("docker")
+        let caches = try hog("caches"), trash = try hog("trash"), docker = try hog("docker")
 
         var o = StorageCleaner.clear([item(caches, "a")], from: caches, trash: { trashed.append($0.lastPathComponent) }, delete: { deleted.append($0.lastPathComponent) })
         XCTAssertEqual(trashed, ["a"]); XCTAssertTrue(deleted.isEmpty); XCTAssertEqual(o.freed, 10)
@@ -81,9 +81,9 @@ final class StorageExplorerTests: XCTestCase {
         XCTAssertEqual(o.failures, ["secret"], "outside the folder: refused")
     }
 
-    func testFailureIsReportedAndTheRestStillRun() {
+    func testFailureIsReportedAndTheRestStillRun() throws {
         struct Nope: Error {}
-        let caches = hog("caches")
+        let caches = try hog("caches")
         let items = ["a", "b"].map { HogItem(url: caches.root.appendingPathComponent($0), bytes: 7) }
         let o = StorageCleaner.clear(items, from: caches, trash: { if $0.lastPathComponent == "a" { throw Nope() } }, delete: { _ in })
         XCTAssertEqual(o.failures, ["a"])
@@ -95,16 +95,16 @@ final class StorageExplorerTests: XCTestCase {
                                      trash: { try FileManager.default.removeItem(at: $0) }, // stands in for the Trash
                                      delete: { try FileManager.default.removeItem(at: $0) })
         m.measureAll()
-        while m.isMeasuring || m.measures.count < 7 { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(60), "every space hog is measured") { !m.isMeasuring && m.measures.count >= 7 }
         let before = m.found
         XCTAssertGreaterThanOrEqual(before, 320_000 + 100_000 + 40_000)
-        let caches = m.hogs.first { $0.id == "caches" }!
+        let caches = try XCTUnwrap(m.hogs.first { $0.id == "caches" })
         m.open(caches)
         let big = try XCTUnwrap(m.result(caches)?.items.first)
         m.toggle(big)
         XCTAssertEqual(m.selectedBytes, big.bytes)
         m.clearSelected()
-        while m.measures["caches"] == .measuring { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(60), "the caches are measured again") { m.measures["caches"] != .measuring }
         XCTAssertEqual(m.lastOutcome?.freed, big.bytes)
         XCTAssertFalse(fm.fileExists(atPath: big.url.path))
         XCTAssertEqual(m.result(caches)?.items.count, 1)
@@ -115,7 +115,7 @@ final class StorageExplorerTests: XCTestCase {
     @MainActor func testExplorerSortsBySizeAndStopsAtHome() async throws {
         let e = FolderExplorer(home: home)
         e.go(to: home.appendingPathComponent("Library/Caches"))
-        while e.entries.contains(where: { $0.bytes == nil }) { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(60), "every entry has a size") { !e.entries.contains(where: { $0.bytes == nil }) }
         XCTAssertEqual(e.entries.first?.url.lastPathComponent, "com.big.app")
         XCTAssertTrue(e.entries.first?.isFolder ?? false)
         XCTAssertTrue(e.canGoUp)

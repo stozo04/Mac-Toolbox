@@ -41,3 +41,35 @@ function_parameter_count:
 large_tuple:
   warning: 4
   error: 8   # AVAsset track.load(...) returns wide tuples
+
+custom_rules:
+  test_literal_subscript:
+    name: "Literal subscript in a test"
+    included: "Tests/.*\\.swift"
+    regex: "(?<=[\\w\\)\\]\\?!])\\[\\d+\\](?!\\s*[-+*/^|&]?=[^=])"
+    excluded_match_kinds: [comment, doccomment, string]
+    message: "A wrong count traps and kills the whole test run. Use try XCTUnwrap(x.first) or try x.element(at:)."
+    severity: error
+  test_unshared_wait:
+    name: "Task.sleep in a test"
+    included: "Tests/.*\\.swift"
+    excluded: "Tests/ToolboxTests/TestSupport\\.swift"
+    regex: "Task\\s*\\.\\s*sleep"
+    excluded_match_kinds: [comment, doccomment, string]
+    message: "Wait with waitUntil in TestSupport.swift, which fails the test at its deadline."
+    severity: error
+  test_general_pasteboard:
+    name: "NSPasteboard.general in a test"
+    included: "Tests/.*\\.swift"
+    regex: "NSPasteboard\\s*\\.\\s*general"
+    excluded_match_kinds: [comment, doccomment, string]
+    message: "This is the user's clipboard. Inject makeScratchPasteboard() from TestSupport.swift."
+    severity: error
+  test_unmanaged_defaults:
+    name: "UserDefaults(suiteName:) in a test"
+    included: "Tests/.*\\.swift"
+    excluded: "Tests/ToolboxTests/TestSupport\\.swift"
+    regex: "UserDefaults\\s*(\\.init)?\\s*\\(\\s*suiteName"
+    excluded_match_kinds: [comment, doccomment, string]
+    message: "Use makeScratchDefaults in TestSupport.swift, which keeps the suite out of ~/Library/Preferences and removes it afterwards."
+    severity: error

@@ -230,7 +230,7 @@ final class ExtractAudioTests: XCTestCase {
         let job = Task {
             try await AudioExtractor.extract(source: source, into: out, settings: .init(format: format), ffmpeg: ffmpeg) { reports.add($0) }
         }
-        for _ in 0..<400 where reports.all.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        try await waitUntil(timeout: .seconds(30), "progress is reported") { !reports.all.isEmpty }
         XCTAssertFalse(reports.all.isEmpty, "progress was reported before cancelling")
         job.cancel()
 
@@ -251,14 +251,15 @@ final class ExtractAudioTests: XCTestCase {
         model.settings = .init(format: .wav)
         model.add([long])
         model.extract()
-        for _ in 0..<400 where !isExtracting(model.items.first?.status) { try await Task.sleep(for: .milliseconds(5)) }
+        removeAfterTest(model.folder)
+        try await waitUntil("the first file is being extracted") { isExtracting(model.items.first?.status) }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add([short])
         model.extract()
-        for _ in 0..<200 where model.isRunning { try await Task.sleep(for: .milliseconds(50)) }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
+        removeAfterTest(model.folder)
+        try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
 
         XCTAssertEqual(model.items.count, 1)
         XCTAssertEqual(model.results.map(\.url.lastPathComponent), ["Short.wav"])
@@ -274,16 +275,17 @@ final class ExtractAudioTests: XCTestCase {
         XCTAssertEqual(model.items.count, 1)
 
         model.extract()
-        for _ in 0..<200 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
-        XCTAssertTrue(model.items[0].isFailed)
+        removeAfterTest(model.folder)
+        try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
+        XCTAssertTrue(try XCTUnwrap(model.items.first).isFailed)
         XCTAssertTrue(model.hasPending, "a failed video can be tried again")
 
         try await makeVideo(at: dir.appendingPathComponent("Fixed.mov"), sound: .aac(channels: 2))
         try FileManager.default.removeItem(at: broken)
         try FileManager.default.moveItem(at: dir.appendingPathComponent("Fixed.mov"), to: broken)
         model.extract()
-        for _ in 0..<200 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        removeAfterTest(model.folder)
+        try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
         XCTAssertEqual(model.results.count, 1)
     }
 
@@ -324,8 +326,8 @@ final class ExtractAudioTests: XCTestCase {
         XCTAssertEqual(model.items.count, 3, "the same file is not added twice")
 
         model.extract()
-        for _ in 0..<200 where model.isRunning { try await Task.sleep(for: .milliseconds(50)) }
-        defer { if let f = model.folder { try? FileManager.default.removeItem(at: f) } }
+        removeAfterTest(model.folder)
+        try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
 
         XCTAssertEqual(model.results.map(\.url.lastPathComponent), ["One.wav", "Two.wav"])
         XCTAssertEqual(model.items.last?.status, .noSoundtrack)
@@ -355,7 +357,7 @@ final class ExtractAudioTests: XCTestCase {
             .appendingPathComponent("../../build/tools/ffmpeg").standardizedFileURL
         let candidates = [built, MediaTools.ffmpeg()].compactMap { $0 }
         guard let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) && hasLAME($0) }) else {
-            throw XCTSkip("no ffmpeg with libmp3lame; run scripts/fetch-tools.sh")
+            throw missingTools("no ffmpeg with libmp3lame; run scripts/fetch-tools.sh")
         }
         return found
     }
@@ -460,10 +462,10 @@ final class ExtractAudioTests: XCTestCase {
         let pictureAsset = AVURLAsset(url: picture), toneAsset = AVURLAsset(url: tone)
         let two = CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600))
         let v = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
-        try v.insertTimeRange(two, of: try await pictureAsset.loadTracks(withMediaType: .video)[0], at: .zero)
+        try v.insertTimeRange(two, of: try await pictureAsset.loadTracks(withMediaType: .video).element(at: 0), at: .zero)
         let a = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
         let soundRange = CMTimeRange(start: .zero, duration: CMTime(seconds: seconds, preferredTimescale: 600))
-        try a.insertTimeRange(soundRange, of: try await toneAsset.loadTracks(withMediaType: .audio)[0], at: .zero)
+        try a.insertTimeRange(soundRange, of: try await toneAsset.loadTracks(withMediaType: .audio).element(at: 0), at: .zero)
 
         let exporter = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough))
         exporter.outputURL = url
@@ -486,7 +488,7 @@ final class ExtractAudioTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<60 {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
