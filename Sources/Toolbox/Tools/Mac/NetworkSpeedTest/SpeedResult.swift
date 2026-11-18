@@ -72,7 +72,7 @@ enum NetworkQuality {
     }
 
     static func run(_ mode: Mode) async throws -> SpeedResult {
-        let result = try await Shell.run("/usr/bin/networkQuality", arguments(for: mode), timeout: 180)
+        let result = try await Shell.run("/usr/bin/networkQuality", arguments(for: mode), timeout: .untilCancelled)
         guard result.succeeded else { throw QualityError.failed(result.err.trimmingCharacters(in: .whitespacesAndNewlines)) }
         return try parse(Data(result.out.utf8))
     }
@@ -80,7 +80,7 @@ enum NetworkQuality {
     /// "Wi-Fi", "Ethernet" or nil, from the interface the test used.
     static func connectionKind(interface: String?) async -> String? {
         guard let interface,
-              let ports = try? await Shell.run("/usr/sbin/networksetup", ["-listallhardwareports"]).out else { return nil }
+              let ports = try? await Shell.run("/usr/sbin/networksetup", ["-listallhardwareports"], timeout: .quick).out else { return nil }
         return portName(for: interface, in: ports)
     }
 

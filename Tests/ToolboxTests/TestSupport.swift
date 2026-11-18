@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import XCTest
+@testable import Toolbox
 
 struct TestSupportFailure: LocalizedError, CustomStringConvertible {
     let description: String
@@ -47,7 +48,38 @@ func pause(for duration: Duration, because reason: String) async throws {
     try await Task.sleep(for: duration)
 }
 
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+
+    var value: Value {
+        lock.lock(); defer { lock.unlock() }
+        return stored
+    }
+
+    func set(_ value: Value) { update { $0 = value } }
+
+    func update(_ change: (inout Value) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        change(&stored)
+    }
+}
+
+func isRunning(_ pid: Int32) -> Bool { kill(pid, 0) == 0 }
+
 extension XCTestCase {
+    func killAfterTest(_ pid: Locked<Int32?>) {
+        addTeardownBlock { if let pid = pid.value { kill(pid, SIGKILL) } }
+    }
+
+    func killProgramsLeftRunning(file: StaticString = #filePath, line: UInt = #line) {
+        let left = Shell.livePIDs
+        left.forEach { kill($0, SIGKILL) }
+        XCTAssertEqual(left, [], "programs were still running when the test ended", file: file, line: line)
+    }
+
     // A suite named by an absolute path keeps its plist there, so cfprefsd never writes one into ~/Library/Preferences.
     func makeScratchDefaultsDomain(prefix: String = "toolbox.tests") throws -> String {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("\(prefix).\(UUID().uuidString)")

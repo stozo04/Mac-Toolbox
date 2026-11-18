@@ -83,9 +83,11 @@ enum ModelAssociations {
 
     private static func isFolder(_ url: URL) -> Bool { (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
 
+    private static let lsofTimeout = Shell.Timeout.seconds(8)
+
     /// Programs that have each file open (lsof also sees files a program has mapped into memory, how models are usually loaded).
     static func runningUsers(of paths: [String], index: AppIndex) async -> [String: [AssociatedApp]] {
-        guard !paths.isEmpty, let result = try? await Shell.run("/usr/sbin/lsof", ["-nP", "-F", "pcn", "--"] + paths, timeout: 8) else { return [:] }
+        guard !paths.isEmpty, let result = try? await Shell.run("/usr/sbin/lsof", ["-nP", "-F", "pcn", "--"] + paths, timeout: lsofTimeout) else { return [:] }
         return parse(lsof: result.out, index: index)
     }
 

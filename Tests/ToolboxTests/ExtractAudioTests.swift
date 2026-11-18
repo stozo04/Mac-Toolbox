@@ -394,7 +394,7 @@ final class ExtractAudioTests: XCTestCase {
 
     private func decoded(_ url: URL, with ffmpeg: URL) async throws -> Data {
         let pcm = dir.appendingPathComponent("decoded-\(UUID()).raw")
-        let result = try await Shell.run(ffmpeg.path, ["-v", "error", "-i", url.path, "-map", "0:a:0", "-f", "s16le", pcm.path])
+        let result = try await Shell.run(ffmpeg.path, ["-v", "error", "-i", url.path, "-map", "0:a:0", "-f", "s16le", pcm.path], timeout: .quick)
         XCTAssertTrue(result.succeeded, result.err)
         return try Data(contentsOf: pcm)
     }

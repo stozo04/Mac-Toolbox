@@ -56,7 +56,7 @@ enum AppInspector {
         let bundle = Bundle(url: url)
         let name = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? url.deletingPathExtension().lastPathComponent
-        let spctl = try? await Shell.run("/usr/sbin/spctl", ["--assess", "--type", "execute", "-vv", url.path], timeout: 30)
+        let spctl = try? await Shell.run("/usr/sbin/spctl", ["--assess", "--type", "execute", "-vv", url.path], timeout: .quick)
         let assessment = spctl.map { parseAssessment(status: $0.status, output: $0.out + $0.err) } ?? .unknown
         return AppDetails(url: url, name: name, bundleID: bundle?.bundleIdentifier,
                           version: bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,

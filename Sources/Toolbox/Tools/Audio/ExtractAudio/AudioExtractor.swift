@@ -194,7 +194,7 @@ enum AudioExtractor {
         let parser = FFmpegProgress(total: duration, report: progress)
         let result: Shell.Result
         do {
-            result = try await Shell.run(ffmpeg.path, arguments) { parser.feed($0) }
+            result = try await Shell.run(ffmpeg.path, arguments, timeout: .untilCancelled) { parser.feed($0) }
         } catch {
             try? FileManager.default.removeItem(at: output)
             throw error

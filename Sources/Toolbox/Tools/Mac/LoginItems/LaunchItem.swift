@@ -109,7 +109,7 @@ enum LaunchItems {
     }
 
     static func currentOverrides() async -> [String: Bool] {
-        guard let result = try? await Shell.run("/bin/launchctl", ["print-disabled", domain()]), result.succeeded else { return [:] }
+        guard let result = try? await Shell.run("/bin/launchctl", ["print-disabled", domain()], timeout: .quick), result.succeeded else { return [:] }
         return parseDisabledOverrides(result.out)
     }
 
@@ -118,7 +118,7 @@ enum LaunchItems {
         guard item.scope.canToggle else { throw ToggleError.needsAdmin }
         let commands = enabled ? enableCommands(label: item.label, plist: item.plist) : disableCommands(label: item.label)
         for (index, args) in commands.enumerated() {
-            let result = try await Shell.run("/bin/launchctl", args, timeout: 20)
+            let result = try await Shell.run("/bin/launchctl", args, timeout: .quick)
             // Stopping something that isn't running, or starting something already running, is not a failure.
             if !result.succeeded && index == 0 { throw ToggleError.failed(result.err.trimmingCharacters(in: .whitespacesAndNewlines)) }
         }

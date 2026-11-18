@@ -63,7 +63,7 @@ struct VaultDisk {
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "create", "blank", "--encrypt",
                                                          "--size", Self.maximumSize, "--volumeName", Self.volumeName,
                                                          "--fs", "APFS", location.image.path],
-                                         input: Data(password.utf8))
+                                         input: Data(password.utf8), timeout: .diskImage)
         guard result.succeeded else {
             try? FileManager.default.removeItem(at: location.image)
             throw VaultError.diskTool(action: "be created", message: Self.reason(result))
@@ -77,7 +77,7 @@ struct VaultDisk {
         }
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "attach", "--nobrowse",
                                                          "--mountPoint", location.mountPoint.path, location.image.path],
-                                         input: Data(password.utf8))
+                                         input: Data(password.utf8), timeout: .diskImage)
         guard result.succeeded else {
             removeEmptyMountPoint()
             if Self.isWrongPassword(result) { throw VaultError.wrongPassword }
@@ -88,9 +88,9 @@ struct VaultDisk {
 
     func lock() async throws {
         guard isOpen else { return }
-        let eject = try await Shell.run(Self.diskutil, ["eject", location.mountPoint.path])
+        let eject = try await Shell.run(Self.diskutil, ["eject", location.mountPoint.path], timeout: .diskImage)
         if eject.succeeded || !isOpen { return removeEmptyMountPoint() }
-        let forced = try await Shell.run(Self.hdiutil, ["detach", "-force", location.mountPoint.path])
+        let forced = try await Shell.run(Self.hdiutil, ["detach", "-force", location.mountPoint.path], timeout: .diskImage)
         guard forced.succeeded || !isOpen else { throw VaultError.diskTool(action: "lock", message: Self.reason(forced)) }
         removeEmptyMountPoint()
     }
@@ -110,7 +110,7 @@ struct VaultDisk {
 
     func changePassword(from old: String, to new: String) async throws {
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "chpass", location.image.path],
-                                         input: Data("\(old)\n\(new)\n".utf8))
+                                         input: Data("\(old)\n\(new)\n".utf8), timeout: .diskImage)
         guard result.succeeded else {
             if Self.isWrongPassword(result) { throw VaultError.wrongPassword }
             throw VaultError.diskTool(action: "change its password", message: Self.reason(result))
