@@ -111,6 +111,22 @@ final class WifiServiceTests: XCTestCase {
         XCTAssertNotNil(WifiService.pngData(image))
     }
 
+    @MainActor func testSavingTheQRCodeWritesAPNGOrSaysItCouldNot() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wifi-qr-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let image = try XCTUnwrap(WifiService.qrImage("WIFI:T:WPA;S:Home;P:secret;;", side: 200))
+        let model = WifiPasswordModel()
+
+        model.saveQR(image, to: dir.appendingPathComponent("no-such-folder/Home Wi-Fi.png"))
+        XCTAssertEqual(model.qrSaveNotice, "The QR code could not be saved. Choose another place and try again.")
+
+        let saved = dir.appendingPathComponent("Home Wi-Fi.png")
+        model.saveQR(image, to: saved)
+        XCTAssertNil(model.qrSaveNotice)
+        XCTAssertNotNil(NSImage(contentsOf: saved))
+    }
+
     func testParsesNetworkListAndInterface() {
         let out = "Preferred networks on en1:\n\tHome Studio\n\tCafe Wi-Fi\n\t5G Guest\n"
         XCTAssertEqual(WifiService.parseNetworks(out), ["Home Studio", "Cafe Wi-Fi", "5G Guest"])

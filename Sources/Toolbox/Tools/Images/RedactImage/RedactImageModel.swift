@@ -17,6 +17,7 @@ final class RedactImageModel {
         let id = UUID()
         /// Normalized to the upright image, origin at the top left.
         var rect: CGRect
+        var coversFoundText = false
     }
 
     struct Item: Identifiable {
@@ -48,6 +49,10 @@ final class RedactImageModel {
         var id: String { rawValue }
     }
 
+    private let outputParent: URL?
+
+    init(outputParent: URL? = nil) { self.outputParent = outputParent }
+
     private(set) var items: [Item] = []
     private(set) var isRunning = false
     private(set) var finding: RedactFind?
@@ -59,6 +64,7 @@ final class RedactImageModel {
     var selectedRegionID: UUID?
 
     var settings = RedactSettings()
+    private(set) var styleWasChosen = false
     var scope = Scope.thisImage
 
     private var task: Task<Void, Never>?
@@ -73,6 +79,20 @@ final class RedactImageModel {
     /// Images with nothing covered, which Export leaves out.
     var untouchedCount: Int { items.filter { $0.regions.isEmpty }.count }
     var regionCount: Int { items.reduce(0) { $0 + $1.regions.count } }
+    var needsRecoverableTextCaution: Bool {
+        settings.style != .blackBox && items.contains { $0.regions.contains(where: \.coversFoundText) }
+    }
+
+    func chooseStyle(_ style: RedactStyle) {
+        apply(style)
+        styleWasChosen = true
+    }
+
+    private func apply(_ style: RedactStyle) {
+        guard settings.style != style else { return }
+        settings.style = style
+        for i in items.indices where !items[i].regions.isEmpty { reopen(i) }
+    }
 
     // MARK: Queue
 
@@ -207,7 +227,7 @@ final class RedactImageModel {
                 }.value
                 switch outcome {
                 case .success(let boxes):
-                    let n = merge(boxes, into: target.id)
+                    let n = merge(boxes, into: target.id, areText: kind != .faces)
                     added += n
                     if n > 0 { images += 1 }
                 case .failure(let error):
@@ -223,14 +243,23 @@ final class RedactImageModel {
     }
 
     /// Adds the boxes that are not already covered. Returns how many were added.
-    private func merge(_ boxes: [CGRect], into id: UUID) -> Int {
+    private func merge(_ boxes: [CGRect], into id: UUID, areText: Bool) -> Int {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return 0 }
         var added = 0
-        for box in boxes where !items[i].regions.contains(where: { RedactImage.overlaps($0.rect, box) }) {
-            items[i].regions.append(Region(rect: box))
-            added += 1
+        var coversFoundText = false
+        for box in boxes {
+            let covering = items[i].regions.indices.filter { RedactImage.overlaps(items[i].regions[$0].rect, box) }
+            if covering.isEmpty {
+                items[i].regions.append(Region(rect: box, coversFoundText: areText))
+                added += 1
+            } else if areText {
+                for index in covering { items[i].regions[index].coversFoundText = true }
+            }
+            coversFoundText = coversFoundText || areText
         }
         if added > 0 { reopen(i) }
+        // Blurred or pixelated text can sometimes be made out again; a black box cannot.
+        if added > 0 || coversFoundText, !styleWasChosen { apply(.blackBox) }
         return added
     }
 
@@ -246,8 +275,14 @@ final class RedactImageModel {
     /// Saves a copy of every image that has regions, with them covered, into one new dated folder in Downloads.
     func export() {
         guard !isBusy, hasExportable else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images", in: outputParent) } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "redact-image", Log.details(error))
+            return
+        }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Redacted Images")
         self.folder = folder
         let settings = self.settings
         let work = items.filter(\.isExportable).map { (id: $0.id, url: $0.url, rects: $0.rects) }

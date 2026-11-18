@@ -256,10 +256,10 @@ final class TrimAudioModel {
         saveState = .saving(0)
         let job = TrimAudioJob(source: file, start: selection.start, end: selection.end,
                                sample: info?.sample ?? SourceSampleFormat(), settings: settings)
-        let folder = BatchFiles.makeOutputFolder(named: Self.outputFolderName)
         saveTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let folder = try BatchFiles.makeOutputFolder(named: Self.outputFolderName)
                 let result = try await AudioTrimmer.trim(job, into: folder) { p in
                     Task { @MainActor in
                         if case .saving = self.saveState { self.saveState = .saving(p) }

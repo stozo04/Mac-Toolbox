@@ -104,8 +104,14 @@ final class BeautifyScreenshotModel {
     /// Saves every waiting screenshot framed with the current settings, into one new dated folder in Downloads.
     func beautify() {
         guard !isRunning, hasPending, !isLoading else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Beautified Screenshots") } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "beautify-screenshot", Log.details(error))
+            return
+        }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Beautified Screenshots")
         self.folder = folder
         let settings = self.settings
         let work = items.filter { $0.status == .waiting }.map { (id: $0.id, url: $0.url) }

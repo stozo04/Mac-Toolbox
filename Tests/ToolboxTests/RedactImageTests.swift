@@ -252,7 +252,116 @@ final class RedactImageTests: XCTestCase {
         XCTAssertTrue(lines.allSatisfy { CGRect(x: 0, y: 0, width: 1, height: 1).contains($0) })
     }
 
+    // MARK: Style
+
+    @MainActor func testTextUnderARegionDrawnByHandCountsAsFoundText() async throws {
+        let model = RedactImageModel()
+        model.add([try writeTextPage(named: "page.png")])
+        model.chooseStyle(.blur)
+        _ = model.addRegion(CGRect(x: 0, y: 0, width: 1, height: 1))
+
+        model.find(.text)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
+
+        XCTAssertEqual(model.selected?.regions.count, 1, "the text was already covered, so nothing is added")
+        XCTAssertEqual(model.selected?.regions.filter(\.coversFoundText).count, 1)
+        XCTAssertTrue(model.needsRecoverableTextCaution, "a blurred region drawn by hand over text is just as recoverable")
+    }
+
+    @MainActor func testTextUnderARegionDrawnByHandSwitchesAnUnchosenStyleToBlackBox() async throws {
+        let model = RedactImageModel()
+        model.add([try writeTextPage(named: "page.png")])
+        _ = model.addRegion(CGRect(x: 0, y: 0, width: 1, height: 1))
+
+        model.find(.text)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
+
+        XCTAssertEqual(model.settings.style, .blackBox)
+    }
+
+    @MainActor func testChangingTheStyleAfterSavingMakesTheImageExportAgain() async throws {
+        let model = RedactImageModel(outputParent: dir)
+        model.add([try writeTextPage(named: "page.png")])
+        _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+        model.export()
+        try await waitUntil(timeout: .seconds(30), "the export has finished") { !model.isRunning }
+        XCTAssertEqual(model.doneCount, 1)
+
+        model.chooseStyle(.blackBox)
+
+        XCTAssertEqual(model.doneCount, 0, "the saved copy no longer matches what the preview shows")
+        XCTAssertTrue(model.hasExportable)
+    }
+
+    @MainActor func testAFolderFailureNoticeGoesOnceAnExportWorks() async throws {
+        let parent = dir.appendingPathComponent("parent")
+        try Data().write(to: parent)
+        let model = RedactImageModel(outputParent: parent)
+        model.add([try writeTextPage(named: "page.png")])
+        _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+
+        model.export()
+        XCTAssertNotNil(model.notice, "a folder cannot be made inside a file")
+        XCTAssertEqual(model.doneCount, 0)
+
+        try FileManager.default.removeItem(at: parent)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        model.export()
+        try await waitUntil(timeout: .seconds(30), "the export has finished") { !model.isRunning }
+
+        XCTAssertEqual(model.doneCount, 1)
+        XCTAssertNil(model.notice)
+    }
+
+    @MainActor func testFindAndCoverSwitchesToBlackBoxUntilAStyleIsChosen() async throws {
+        let model = RedactImageModel()
+        model.add([try writeTextPage(named: "page.png")])
+        XCTAssertEqual(model.settings.style, .blur)
+        _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+        XCTAssertEqual(model.settings.style, .blur, "a region drawn by hand keeps the style")
+        XCTAssertFalse(model.needsRecoverableTextCaution)
+
+        model.find(.text)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
+        XCTAssertEqual(model.selected?.regions.filter(\.coversFoundText).count, 3)
+        XCTAssertEqual(model.settings.style, .blackBox)
+        XCTAssertFalse(model.needsRecoverableTextCaution)
+
+        model.chooseStyle(.pixelate)
+        XCTAssertTrue(model.needsRecoverableTextCaution)
+        model.chooseStyle(.blackBox)
+        XCTAssertFalse(model.needsRecoverableTextCaution)
+        model.chooseStyle(.blur)
+        XCTAssertTrue(model.needsRecoverableTextCaution)
+
+        model.clearRegions()
+        XCTAssertFalse(model.needsRecoverableTextCaution, "with no found text left there is nothing to warn about")
+        model.find(.sensitive)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
+        XCTAssertEqual(model.selected?.regions.count, 1)
+        XCTAssertEqual(model.settings.style, .blur, "a style the user picked is not changed behind their back")
+        XCTAssertTrue(model.needsRecoverableTextCaution)
+    }
+
+    @MainActor func testAFindThatAddsNothingLeavesTheStyleAlone() async throws {
+        let model = RedactImageModel()
+        let wall = dir.appendingPathComponent("wall.png")
+        try write(try image(160, 120) { _, _ in (128, 128, 128) }, type: .png, to: wall)
+        model.add([wall])
+
+        model.find(.text)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
+        XCTAssertEqual(model.selected?.regions, [])
+        XCTAssertEqual(model.settings.style, .blur)
+    }
+
     // MARK: Helpers
+
+    private func writeTextPage(named name: String) throws -> URL {
+        let url = dir.appendingPathComponent(name)
+        try write(try textPage(["Meeting notes for Monday", "Email jane.doe@example.com", "Thanks and see you there"]), type: .png, to: url)
+        return url
+    }
 
     private func assertRect(_ r: CGRect, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(r.minX, x, accuracy: 1e-9, file: file, line: line)

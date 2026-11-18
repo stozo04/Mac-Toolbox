@@ -343,12 +343,15 @@ enum DocumentScanner {
     // MARK: Reading the text
 
     /// Every line of text Vision can read on the page picture.
-    static func recognizeText(in image: CGImage) -> [RecognizedLine] {
+    static func recognizeText(in image: CGImage, logCategory: String = "scan-document") -> [RecognizedLine] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
         request.automaticallyDetectsLanguage = true
-        guard (try? VNImageRequestHandler(cgImage: image).perform([request])) != nil else { return [] }
+        do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch {
+            Log.warning("Page text could not be read, so the page has no text layer", category: logCategory, Log.details(error))
+            return []
+        }
         return (request.results ?? []).compactMap { line in
             guard let text = line.topCandidates(1).first?.string, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
             return RecognizedLine(text: text, box: line.boundingBox)

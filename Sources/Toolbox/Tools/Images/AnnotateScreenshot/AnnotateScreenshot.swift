@@ -617,10 +617,10 @@ enum AnnotateFormat: String, CaseIterable, Identifiable {
     var type: UTType { self == .png ? .png : .jpeg }
 }
 
-enum AnnotateError: LocalizedError {
+enum AnnotateError: LocalizedError, CustomNSError, Equatable {
     case unreadable
     case encodeFailed
-    case saveFailed
+    case saveFailed(underlying: NSError? = nil)
 
     var errorDescription: String? {
         switch self {
@@ -628,6 +628,10 @@ enum AnnotateError: LocalizedError {
         case .encodeFailed: "The image could not be put together."
         case .saveFailed: "The image could not be saved."
         }
+    }
+
+    var errorUserInfo: [String: Any] {
+        if case .saveFailed(let underlying?) = self { [NSUnderlyingErrorKey: underlying] } else { [:] }
     }
 }
 
@@ -672,7 +676,7 @@ enum AnnotateScreenshot {
     static func save(_ image: CGImage, name: String, format: AnnotateFormat, quality: Double, into folder: URL) throws -> URL {
         let data = try encode(image, as: format, quality: quality)
         let url = BatchFiles.uniqueURL(in: folder, name: name, ext: format.ext)
-        do { try data.write(to: url, options: .atomic) } catch { throw AnnotateError.saveFailed }
+        do { try data.write(to: url, options: .atomic) } catch { throw AnnotateError.saveFailed(underlying: error as NSError) }
         return url
     }
 

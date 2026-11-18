@@ -68,11 +68,17 @@ final class ExtractAudioModel {
 
     func extract() {
         guard !isRunning, hasPending else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: Self.outputFolderName) } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "extractAudio", Log.details(error))
+            return
+        }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         for i in items.indices where items[i].isFailed { items[i].status = .waiting }
         let run = UUID()
         currentRun = run
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: Self.outputFolderName)
         self.folder = folder
         let settings = self.settings
         task = Task { [weak self] in

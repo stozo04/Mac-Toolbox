@@ -4,13 +4,21 @@ import Foundation
 /// there to work out what went wrong. File names, error text and the steps just before the failure are
 /// allowed; file contents, and the user's account name, are not.
 enum LogText {
-    /// One line, no account name, at most `limit` characters.
+    /// One line, no account name, no link query strings or credentials, at most `limit` characters.
     static func clean(_ text: String, limit: Int) -> String {
         var s = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
         s = s.replacingOccurrences(of: "/Users/[^/\\s\"']+", with: "/Users/me", options: .regularExpression)
+        s = withoutLinkSecrets(s)
         if s.count > limit { s = String(s.prefix(max(0, limit - 1))) + "…" }
         return s
+    }
+
+    static func withoutLinkSecrets(_ text: String) -> String {
+        let options: String.CompareOptions = [.regularExpression, .caseInsensitive]
+        return text
+            .replacingOccurrences(of: "(https?://)[^/?#\\s\"'<>@]*@", with: "$1", options: options)
+            .replacingOccurrences(of: "(https?://[^\\s\"'<>?#]*)[?#][^\\s\"'<>]*?([.,;:!?)\\]]*)(?=[\\s\"'<>]|$)", with: "$1$2", options: options)
     }
 
     /// A link without its query string or credentials, which is where tokens live.

@@ -114,6 +114,10 @@ struct WifiPasswordView: View {
                     }
                     Button("Save…") { save(image, name: model.selected ?? "Wi-Fi") }
                 }
+                if let notice = model.qrSaveNotice {
+                    Label(notice, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.yellow)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.inset).frame(width: 240, height: 240)
                     .overlay(Text("Show the password to make a QR code.").font(.caption).foregroundStyle(.secondary).padding())
@@ -125,6 +129,6 @@ struct WifiPasswordView: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "\(name) Wi-Fi.png"
-        if panel.runModal() == .OK, let url = panel.url, let data = WifiService.pngData(image) { try? data.write(to: url) }
+        if panel.runModal() == .OK, let url = panel.url { model.saveQR(image, to: url) }
     }
 }

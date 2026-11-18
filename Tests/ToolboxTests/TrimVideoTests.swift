@@ -30,7 +30,7 @@ final class TrimVideoTests: XCTestCase {
 
     func testOutputNaming() {
         let src = URL(fileURLWithPath: "/a/My Clip.MOV")
-        XCTAssertEqual(VideoTrimmer.outputName(for: src, ext: "mov"), "My Clip (Trimmed).mov")
+        XCTAssertEqual(VideoTrimmer.outputBase(for: src), "My Clip (Trimmed)")
         XCTAssertEqual(VideoTrimmer.outputType(forExtension: "MP4").ext, "mp4")
         XCTAssertEqual(VideoTrimmer.outputType(forExtension: "avi").ext, "mov")
     }
@@ -51,6 +51,28 @@ final class TrimVideoTests: XCTestCase {
         let length = try await AVURLAsset(url: result.url).load(.duration).seconds
         XCTAssertEqual(length, 2, accuracy: 0.5)
         XCTAssertEqual(try Data(contentsOf: source), before)
+    }
+
+    func testTrimmingIntoAFolderThatHoldsAClipOfThatNameKeepsIt() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("trim-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = dir.appendingPathComponent("clip.mov")
+        try await makeClip(at: source, seconds: 4)
+        let out = dir.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+
+        let first = try await VideoTrimmer.trim(source: source, start: 1, end: 3, into: out) { _ in }
+        let firstBytes = try Data(contentsOf: first.url)
+        let second = try await VideoTrimmer.trim(source: source, start: 0, end: 1, into: out) { _ in }
+
+        XCTAssertEqual(first.url.lastPathComponent, "clip (Trimmed).mov")
+        XCTAssertEqual(second.url.lastPathComponent, "clip (Trimmed) 2.mov")
+        XCTAssertFalse(second.reencoded, "the second trim only worked through the fallback, which removes the file in its way")
+        XCTAssertEqual(try Data(contentsOf: first.url), firstBytes)
+        let length = try await AVURLAsset(url: second.url).load(.duration).seconds
+        XCTAssertEqual(length, 1, accuracy: 0.5)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: out.path).count, 2)
     }
 
     func testRejectsFileWithoutVideo() async throws {

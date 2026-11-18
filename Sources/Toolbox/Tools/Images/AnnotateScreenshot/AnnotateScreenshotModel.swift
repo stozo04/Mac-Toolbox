@@ -408,12 +408,19 @@ final class AnnotateScreenshotModel {
     }
 
     /// A file to drag into a chat or an email, in the chosen format.
-    func dragFile() -> URL? {
+    func dragFile(into folder: URL = FileManager.default.temporaryDirectory.appendingPathComponent("Toolbox Annotated", isDirectory: true)) -> URL? {
         commitEditing()
         guard let doc = document, let image = rendered() else { return nil }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Toolbox Annotated", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return try? AnnotateScreenshot.save(image, name: doc.name, format: format, quality: jpegQuality, into: folder)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = try AnnotateScreenshot.save(image, name: doc.name, format: format, quality: jpegQuality, into: folder)
+            notice = nil
+            return url
+        } catch {
+            notice = "The image could not be made ready to drag. Use Save or Copy instead."
+            Log.error("Annotated image drag failed", category: "annotate-screenshot", Log.details(error, ["format": format.rawValue, "image_name": doc.name]))
+            return nil
+        }
     }
 
     func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }

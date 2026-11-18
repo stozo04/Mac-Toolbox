@@ -118,9 +118,15 @@ final class BurnInSubtitlesModel {
 
     func burn() {
         guard !isRunning, hasRunnable else { return }
+        let folder: URL
+        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Subtitled Videos") } catch {
+            notice = error.localizedDescription
+            Log.error("Output folder failed", category: "burn-in", Log.details(error))
+            return
+        }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        let folder = self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Subtitled Videos")
         self.folder = folder
         let (source, style, save) = (self.source, self.style, alsoSaveSubtitles)
         let locale = Locale(identifier: languageID)

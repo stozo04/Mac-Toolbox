@@ -307,7 +307,7 @@ final class ExtractFramesModel {
         }
         let parent = video.deletingLastPathComponent()
         if FileManager.default.isWritableFile(atPath: parent.path) { return parent }
-        return BatchFiles.makeOutputFolder(named: "Toolbox Frames")
+        return try BatchFiles.makeOutputFolder(named: "Toolbox Frames")
     }
 
     // MARK: Finder
