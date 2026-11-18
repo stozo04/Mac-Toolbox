@@ -561,7 +561,7 @@ final class VaultModel {
     static func isUnexpected(_ error: Error) -> Bool {
         guard let moveError = error as? VaultMoveError else { return true }
         switch moveError {
-        case .copyDiffers, .unreadable, .originalKept: return true
+        case .copyDiffers, .unreadable, .vaultNotOpen, .notSaved, .originalKept: return true
         case .interrupted, .changedWhileMoving: return false
         case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
         }

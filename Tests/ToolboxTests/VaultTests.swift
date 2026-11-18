@@ -32,7 +32,7 @@ final class VaultTests: XCTestCase {
         let photo = try makePhoto("beach.png")
         let original = try Data(contentsOf: photo)
 
-        let moved = try await VaultMover.move(photo, into: vault)
+        let moved = try await VaultMover.move(photo, into: vault, requiresMountedVolume: false)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: photo.path))
         XCTAssertEqual(moved.lastPathComponent, "beach.png")
@@ -40,8 +40,8 @@ final class VaultTests: XCTestCase {
     }
 
     func testMoveKeepsBothFilesWhenTheNameIsTaken() async throws {
-        _ = try await VaultMover.move(try makePhoto("cat.png"), into: vault)
-        let second = try await VaultMover.move(try makePhoto("cat.png"), into: vault)
+        _ = try await VaultMover.move(try makePhoto("cat.png"), into: vault, requiresMountedVolume: false)
+        let second = try await VaultMover.move(try makePhoto("cat.png"), into: vault, requiresMountedVolume: false)
         XCTAssertEqual(second.lastPathComponent, "cat 2.png")
         XCTAssertEqual(VaultLibrary.items(in: vault).count, 2)
     }
@@ -98,7 +98,7 @@ final class VaultTests: XCTestCase {
         let vault = try XCTUnwrap(vault)
         let stopped = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await VaultMover.move(photo, into: vault)
+            return try await VaultMover.move(photo, into: vault, requiresMountedVolume: false)
         }
         do {
             _ = try await stopped.value
@@ -112,7 +112,7 @@ final class VaultTests: XCTestCase {
 
     func testAHiddenPhotoGetsAVisibleNameInTheVault() async throws {
         let hidden = try makePhoto(".private.png")
-        let moved = try await VaultMover.move(hidden, into: vault)
+        let moved = try await VaultMover.move(hidden, into: vault, requiresMountedVolume: false)
         XCTAssertEqual(moved.lastPathComponent, "private.png")
         XCTAssertEqual(VaultLibrary.items(in: vault).map(\.name), ["private.png"])
     }
@@ -139,6 +139,88 @@ final class VaultTests: XCTestCase {
         await assertMoveFails(truncated, with: .unreadable)
         XCTAssertTrue(FileManager.default.fileExists(atPath: truncated.path))
         XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
+    }
+
+    func testAMoveIntoAVaultThatWasDetachedKeepsTheOriginal() async throws {
+        let disk = try await makeOpenDisk("detached")
+        try await detachFromOutside(disk)
+        let photo = try makePhoto("secret.png")
+
+        do {
+            _ = try await VaultMover.move(photo, into: disk.location.mountPoint)
+            XCTFail("The move went into a plain folder on the startup disk")
+        } catch {
+            XCTAssertEqual(error as? VaultMoveError, .vaultNotOpen)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+        XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: disk.location.mountPoint.path)) ?? [], [])
+    }
+
+    func testAVaultDetachedWhileAFileMovesInKeepsTheOriginal() async throws {
+        let disk = try await makeOpenDisk("detached-midway")
+        let photo = try makePhoto("secret.png")
+
+        do {
+            _ = try await VaultMover.move(photo, into: disk.location.mountPoint) { copy in
+                try VaultMover.flushToDisk(copy)
+                disk.lockAndWait()
+            }
+            XCTFail("The original was deleted although the vault had closed")
+        } catch {
+            XCTAssertEqual(error as? VaultMoveError, .vaultNotOpen)
+        }
+
+        XCTAssertFalse(disk.isOpen)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: disk.location.mountPoint.path), "something was left in the mount point folder")
+    }
+
+    func testACopyThatCannotBeSavedToDiskKeepsTheOriginal() async throws {
+        let photo = try makePhoto("unsaved.png")
+        let vault = try XCTUnwrap(vault)
+
+        do {
+            _ = try await VaultMover.move(photo, into: vault, requiresMountedVolume: false) { _ in throw VaultMoveError.notSaved("disk error") }
+            XCTFail("The original was deleted although its copy was never saved to the disk")
+        } catch {
+            XCTAssertEqual(error as? VaultMoveError, .notSaved("disk error"))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photo.path))
+        XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
+    }
+
+    func testAMovedFileIsFlushedBeforeTheOriginalIsDeleted() async throws {
+        let photo = try makePhoto("flushed.png")
+        let vault = try XCTUnwrap(vault)
+        let originalExistedAtFlush = Flag()
+
+        _ = try await VaultMover.move(photo, into: vault, requiresMountedVolume: false) { copy in
+            if FileManager.default.fileExists(atPath: photo.path) { originalExistedAtFlush.set() }
+            try VaultMover.flushToDisk(copy)
+        }
+
+        XCTAssertTrue(originalExistedAtFlush.isSet)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: photo.path))
+        XCTAssertThrowsError(try VaultMover.flushToDisk(vault.appendingPathComponent("missing.png")))
+    }
+
+    func testACopyThatRunsOutOfSpaceLeavesNothingBehind() async throws {
+        let tiny = try await attachTinyVolume()
+        let big = source.appendingPathComponent("big.png")
+        try Data((0..<24 * 1024 * 1024).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 >> 8) }).write(to: big)
+        let before = try FileManager.default.contentsOfDirectory(atPath: tiny.path).sorted()
+
+        do {
+            _ = try await VaultMover.move(big, into: tiny)
+            XCTFail("A 24 MB file fitted on a 2 MB volume")
+        } catch {
+            XCTAssertNil(error as? VaultMoveError, "the copy itself should have failed: \(error)")
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: big.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: tiny.path).sorted(), before, "the failed copy left files behind")
     }
 
     @MainActor
@@ -438,9 +520,43 @@ final class VaultTests: XCTestCase {
         XCTAssertFalse(disk.isOpen)
     }
 
+    private static let toolTimeout: TimeInterval = 60
+
+    private func makeOpenDisk(_ name: String) async throws -> VaultDisk {
+        let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent(name)))
+        try await disk.create(password: "disk-pass")
+        addTeardownBlock { disk.lockAndWait() }
+        try await disk.unlock(password: "disk-pass")
+        XCTAssertTrue(disk.isOpen)
+        XCTAssertTrue(disk.location.mountPoint.path.hasPrefix(dir.path + "/"))
+        return disk
+    }
+
+    private func detachFromOutside(_ disk: VaultDisk) async throws {
+        let detach = try await Shell.run(VaultDisk.hdiutil, ["detach", "-force", disk.location.mountPoint.path], timeout: Self.toolTimeout)
+        XCTAssertTrue(detach.succeeded, detach.err)
+        XCTAssertFalse(disk.isOpen)
+    }
+
+    private func attachTinyVolume() async throws -> URL {
+        let image = dir.appendingPathComponent("tiny.dmg")
+        let mountPoint = dir.appendingPathComponent("tiny")
+        try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: false)
+        let created = try await Shell.run(VaultDisk.hdiutil, ["create", "-size", "2m", "-fs", "APFS", "-volname", "Tiny", image.path],
+                                          timeout: Self.toolTimeout)
+        XCTAssertTrue(created.succeeded, created.err)
+        addTeardownBlock {
+            _ = try? await Shell.run(VaultDisk.hdiutil, ["detach", "-force", mountPoint.path], timeout: Self.toolTimeout)
+        }
+        let attached = try await Shell.run(VaultDisk.hdiutil, ["attach", "-nobrowse", "-mountpoint", mountPoint.path, image.path],
+                                           timeout: Self.toolTimeout)
+        XCTAssertTrue(attached.succeeded, attached.err)
+        return mountPoint
+    }
+
     private func assertMoveFails(_ url: URL, with expected: VaultMoveError, line: UInt = #line) async {
         do {
-            _ = try await VaultMover.move(url, into: vault)
+            _ = try await VaultMover.move(url, into: vault, requiresMountedVolume: false)
             XCTFail("Move should have failed", line: line)
         } catch {
             XCTAssertEqual(error as? VaultMoveError, expected, line: line)
@@ -465,4 +581,11 @@ final class VaultTests: XCTestCase {
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return url
     }
+}
+
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raised = false
+    var isSet: Bool { lock.withLock { raised } }
+    func set() { lock.withLock { raised = true } }
 }
