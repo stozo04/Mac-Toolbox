@@ -97,11 +97,6 @@ extension XCTestCase {
         return defaults
     }
 
-    func removeAfterTest(_ url: URL?) {
-        guard let url else { return }
-        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
-    }
-
     func makeScratchPasteboard() -> NSPasteboard {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("toolbox.tests.\(UUID().uuidString)"))
         addTeardownBlock { pasteboard.releaseGlobally() }
