@@ -335,6 +335,26 @@ final class VaultDiskTests: XCTestCase {
         XCTAssertEqual(model.message, "The vault couldn't open. the other copy's attach won")
     }
 
+    func testUnlockNeverEjectsAMountThatAppearedWhileAnotherCopyIsRunning() async throws {
+        let disk = try await makeOpenDisk("appeared-meanwhile")
+        let ran = Locked<[String]>([])
+        var second = disk
+        second.tool = VaultTool { _, arguments, _, _ in
+            ran.set(ran.value + [arguments.first ?? ""])
+            return Shell.Result(status: 0, out: "", err: "")
+        }
+
+        do {
+            try await second.unlock(password: Self.password, mayEject: false)
+            XCTFail("An unlock went ahead over another copy's mount")
+        } catch {
+            XCTAssertEqual(error as? VaultError, .openInAnotherCopy)
+        }
+
+        XCTAssertTrue(disk.isOpen)
+        XCTAssertEqual(ran.value, [], "no disk tool may run against a mount this copy did not make")
+    }
+
     func testAFailedAttachLeavesAloneAVolumeThatWasMountedBeforeItBegan() async throws {
         let disk = try await makeOpenDisk("mounted-before")
         var late = disk

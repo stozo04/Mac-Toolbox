@@ -30,6 +30,7 @@ enum VaultError: LocalizedError, Equatable {
     case passwordsDiffer
     case alreadyExists
     case filesLeftOutside(count: Int, folder: String)
+    case openInAnotherCopy
     case diskTool(action: String, message: String)
 
     static let minimumPasswordLength = 6
@@ -40,6 +41,7 @@ enum VaultError: LocalizedError, Equatable {
         case .passwordTooShort: "Use at least \(Self.minimumPasswordLength) characters."
         case .passwordsDiffer: "The two passwords don't match."
         case .alreadyExists: "A vault already exists."
+        case .openInAnotherCopy: "The vault is open in another copy of Toolbox. Lock it there first."
         case .filesLeftOutside(let count, let folder):
             "\(count == 1 ? "1 file was" : "\(count) files were") found in the vault's open folder, outside the vault: \(folder). "
                 + "Move \(count == 1 ? "it" : "them") somewhere else, then unlock again."
@@ -122,8 +124,11 @@ struct VaultDisk {
         }
     }
 
-    func unlock(password: String, ejectsIfItFails: Bool = true) async throws {
-        if isOpen { try await lock() }
+    func unlock(password: String, mayEject: Bool = true) async throws {
+        if isOpen {
+            guard mayEject else { throw VaultError.openInAnotherCopy }
+            try await lock()
+        }
         try refuseFilesLeftOutside()
         if !FileManager.default.fileExists(atPath: location.mountPoint.path) {
             try FileManager.default.createDirectory(at: location.mountPoint, withIntermediateDirectories: false)
@@ -137,7 +142,7 @@ struct VaultDisk {
                 throw Self.isWrongPassword(result) ? VaultError.wrongPassword : VaultError.diskTool(action: "open", message: Self.reason(result))
             }
         } catch {
-            if ejectsIfItFails, !wasMountedByOthers { try? await lock() }
+            if mayEject, !wasMountedByOthers { try? await lock() }
             removeEmptyMountPoint()
             throw Self.diskToolError(error, action: "open")
         }

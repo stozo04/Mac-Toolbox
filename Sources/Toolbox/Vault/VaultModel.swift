@@ -125,7 +125,7 @@ final class VaultModel {
             try await self.disk.create(password: password)
             Log.info("Vault created", category: VaultLog.category)
             self.phase = .locked
-            try await self.disk.unlock(password: password, ejectsIfItFails: !self.anotherCopyIsRunning())
+            try await self.disk.unlock(password: password, mayEject: !self.anotherCopyIsRunning())
             self.ownsMount = true
             self.openUnlessLockedMeanwhile(since: locksBefore)
         }
@@ -142,7 +142,7 @@ final class VaultModel {
         defer { isWorking = false }
         let locksBefore = lockCount
         do {
-            try await disk.unlock(password: password, ejectsIfItFails: !anotherCopyIsRunning())
+            try await disk.unlock(password: password, mayEject: !anotherCopyIsRunning())
             ownsMount = true
             openUnlessLockedMeanwhile(since: locksBefore)
         } catch VaultError.wrongPassword {
@@ -681,7 +681,7 @@ extension VaultModel {
         }
     }
 
-    static let openInAnotherCopyMessage = "The vault is open in another copy of Toolbox. Lock it there first."
+    static let openInAnotherCopyMessage = VaultError.openInAnotherCopy.localizedDescription
 
     static func anotherCopyOfThisAppIsRunning() -> Bool {
         guard let identifier = Bundle.main.bundleIdentifier else { return false }
