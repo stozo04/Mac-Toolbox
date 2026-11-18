@@ -88,6 +88,7 @@ final class VaultModel {
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
     private var openGeneration = 0
+    @ObservationIgnored private(set) var libraryReloads = 0
     private static let duplicatePause: Duration = .milliseconds(400)
     private static let typingPause: Duration = .milliseconds(250)
 
@@ -225,6 +226,7 @@ final class VaultModel {
 
     func reload() {
         guard disk.isOpen else { return }
+        libraryReloads += 1
         items = VaultLibrary.items(in: root)
         selection.formIntersection(Set(items.map(\.id)))
         if let viewing, !items.contains(where: { $0.id == viewing }) { self.viewing = nil }
@@ -347,22 +349,29 @@ final class VaultModel {
             for file in files {
                 if Task.isCancelled || !disk.isOpen { break }
                 do {
-                    _ = try await VaultMover.move(file, into: root)
+                    let moved = try await VaultMover.move(file, into: root)
+                    if moveID == id { showMovedIn(moved) }
                 } catch {
                     moveFailures.append(VaultMoveFailure(name: file.lastPathComponent, reason: error.localizedDescription))
                     if Self.isUnexpected(error) { VaultLog.failure("Vault move failed", error, file: file) }
                 }
                 moveProgress?.done += 1
-                reload()
             }
             Log.info("Moved into vault", category: VaultLog.category,
                      ["count": String(files.count), "failed": String(moveFailures.count)])
-            refreshIndex()
             guard moveID == id else { return }
+            if !isLocking { reload() }
+            refreshIndex()
             moveProgress = nil
             moveTask = nil
             moveID = nil
         }
+    }
+
+    private func showMovedIn(_ url: URL) {
+        guard !isLocking, let item = VaultLibrary.item(movedTo: url) else { return }
+        items = VaultLibrary.inserting(item, into: items)
+        if item.kind == .video { loadDurations() }
     }
 
     func delete(_ ids: Set<VaultItem.ID>) async {

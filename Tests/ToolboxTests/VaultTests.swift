@@ -241,6 +241,37 @@ final class VaultTests: XCTestCase {
     }
 
     @MainActor
+    func testMovingManyFilesInReadsTheWholeLibraryOnce() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("batch"))
+        let model = VaultModel(location: location, watchesSystem: false)
+        await model.create(password: "batch-pass", confirmation: "batch-pass")
+        model.finishOpening()
+        defer { model.lockImmediately() }
+        let files = try (0..<12).map { try makePhoto("new-\($0).png") }
+        let reloadsBefore = model.libraryReloads
+
+        model.add(files)
+        try await waitUntil(timeout: .seconds(60), "the files are in the vault") { model.moveProgress == nil }
+
+        XCTAssertTrue(model.moveFailures.isEmpty)
+        XCTAssertEqual(model.items, VaultLibrary.items(in: model.root))
+        XCTAssertEqual(model.items.count, files.count)
+        XCTAssertEqual(model.libraryReloads - reloadsBefore, 1, "moving \(files.count) files in read the whole library once per file")
+    }
+
+    func testAnItemAddedToTheListMatchesWhatReadingTheLibraryFinds() async throws {
+        let vault = try XCTUnwrap(vault)
+        _ = try makePhoto("older.png", in: vault)
+        let before = VaultLibrary.items(in: vault)
+        let moved = try await VaultMover.move(try makePhoto("newer.png"), into: vault, requiresMountedVolume: false)
+
+        let added = try XCTUnwrap(VaultLibrary.item(movedTo: moved))
+
+        XCTAssertEqual(VaultLibrary.inserting(added, into: before), VaultLibrary.items(in: vault))
+        XCTAssertNil(VaultLibrary.item(movedTo: vault.appendingPathComponent("missing.png")))
+    }
+
+    @MainActor
     func testDuplicatesNotKeptGoToTheVaultTrashAndComeBack() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("trash"))
         let model = VaultModel(location: location, watchesSystem: false)
