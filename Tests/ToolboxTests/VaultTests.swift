@@ -4,20 +4,63 @@ import XCTest
 @testable import Toolbox
 
 final class VaultTests: XCTestCase {
-    func testAFailedCopyOnlyRemovesAFileThisMoveMade() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vault-unfinished-\(UUID())")
+    private func makeScratchFolder(_ name: String) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
-        let someoneElses = folder.appendingPathComponent("photo.png")
-        try Data("theirs".utf8).write(to: someoneElses)
-        let closedVault = NSObject()
+        return folder
+    }
 
-        XCTAssertFalse(VaultMover.isOurUnfinishedCopy(someoneElses, on: closedVault, since: Date().addingTimeInterval(60)),
-                       "a file that was already in the plain folder under the vault is not this move's to delete")
-        XCTAssertTrue(VaultMover.isOurUnfinishedCopy(someoneElses, on: closedVault, since: Date().addingTimeInterval(-60)),
-                      "a copy this move began after it started is its own stray")
-        XCTAssertTrue(VaultMover.isOurUnfinishedCopy(someoneElses, on: nil, since: Date()))
-        XCTAssertFalse(VaultMover.isOurUnfinishedCopy(folder.appendingPathComponent("gone.png"), on: closedVault, since: Date()))
+    func testTheCopyIsMadeAsANewFileAndNeverOverAnExistingOne() throws {
+        let folder = try makeScratchFolder("vault-exclusive")
+        let taken = folder.appendingPathComponent("photo.png")
+        try Data("theirs".utf8).write(to: taken)
+
+        XCTAssertThrowsError(try VaultMover.createEmptyFile(at: taken)) { error in
+            XCTAssertEqual((error as? CocoaError)?.code, .fileWriteFileExists)
+        }
+        XCTAssertEqual(try Data(contentsOf: taken), Data("theirs".utf8))
+    }
+
+    func testTheCopyKeepsTheIdentityOfTheFileThisMoveMade() throws {
+        let folder = try makeScratchFolder("vault-identity")
+        let source = folder.appendingPathComponent("source.png"), copy = folder.appendingPathComponent("copy.png")
+        try Data("picture".utf8).write(to: source)
+
+        let made = try VaultMover.createEmptyFile(at: copy)
+        try VaultMover.copyContents(of: source, onto: copy)
+
+        XCTAssertEqual(VaultMover.fileIdentity(of: copy), made)
+        XCTAssertEqual(try Data(contentsOf: copy), Data("picture".utf8))
+    }
+
+    func testAnotherFileThatTookThePathIsNotTheFileThisMoveMade() throws {
+        let folder = try makeScratchFolder("vault-replaced")
+        let path = folder.appendingPathComponent("photo.png"), other = folder.appendingPathComponent("other.png")
+        let made = try VaultMover.createEmptyFile(at: path)
+        try Data("theirs".utf8).write(to: other)
+
+        try FileManager.default.removeItem(at: path)
+        try FileManager.default.moveItem(at: other, to: path)
+
+        XCTAssertNotEqual(VaultMover.fileIdentity(of: path), made)
+    }
+
+    func testAMoveThatFailsRemovesItsCopyEvenWhenTheOriginalIsOld() async throws {
+        let folder = try makeScratchFolder("vault-old-original")
+        let vault = folder.appendingPathComponent("vault")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        let source = try makePhoto("old.png", in: folder)
+        try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: 1_000_000_000)], ofItemAtPath: source.path)
+        struct CannotSave: Error {}
+
+        do {
+            _ = try await VaultMover.move(source, into: vault, requiresMountedVolume: false, flush: { _ in throw CannotSave() })
+            XCTFail("the move should have failed")
+        } catch is CannotSave {}
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: vault.path), [], "an unfinished copy is never left behind")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
     private var dir: URL!

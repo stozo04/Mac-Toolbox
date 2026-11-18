@@ -702,7 +702,8 @@ extension VaultModel {
                     ["still_to_move": String(filesStillToMove.count), "unconfirmed": String(unconfirmed.count)])
         moveFailures += filesStillToMove.map {
             VaultMoveFailure(name: $0.lastPathComponent,
-                             reason: unconfirmed.contains($0) ? Self.finishedAsVaultClosedReason : VaultMoveError.vaultNotOpen.localizedDescription)
+                             reason: unconfirmed.contains($0) ? Self.finishedAsVaultClosedReason : VaultMoveError.vaultNotOpen.localizedDescription,
+                             source: $0)
         }
         outsideCloseNotice = (duringImport, unconfirmed.count)
         beginLocking()
@@ -719,8 +720,8 @@ extension VaultModel {
     fileprivate func correctReportIfMovedAfterAll(_ file: URL) {
         let kept = VaultMoveError.vaultNotOpen.localizedDescription
         guard !FileManager.default.fileExists(atPath: file.path), let notice = outsideCloseNotice,
-              let listed = moveFailures.firstIndex(where: { $0.name == file.lastPathComponent && $0.reason == kept }) else { return }
-        moveFailures[listed] = VaultMoveFailure(name: file.lastPathComponent, reason: Self.finishedAsVaultClosedReason)
+              let listed = moveFailures.firstIndex(where: { $0.source == file && $0.reason == kept }) else { return }
+        moveFailures[listed] = VaultMoveFailure(name: file.lastPathComponent, reason: Self.finishedAsVaultClosedReason, source: file)
         let noticeShown = message == Self.closedFromOutsideMessage(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed)
         outsideCloseNotice = (notice.duringImport, notice.unconfirmed + 1)
         if noticeShown { message = Self.closedFromOutsideMessage(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed + 1) }

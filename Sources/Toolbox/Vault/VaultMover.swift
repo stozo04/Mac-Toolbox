@@ -39,6 +39,7 @@ struct VaultMoveFailure: Identifiable, Equatable {
     let id = UUID()
     let name: String
     let reason: String
+    var source: URL?
 }
 
 enum VaultMover {
@@ -80,18 +81,16 @@ enum VaultMover {
         let vaultVolume = try requiresMountedVolume ? mountedVolume(at: vaultRoot) : nil
         let before = try fingerprint(source)
         let destination = uniqueDestination(for: visibleName(source.lastPathComponent), in: vaultRoot)
-        let began = Date()
+        let created = try createEmptyFile(at: destination)
         do {
-            try FileManager.default.copyItem(at: source, to: destination)
+            try copyContents(of: source, onto: destination)
             try await verify(copy: destination, of: source)
             guard !Task.isCancelled, copyIsStillThere(destination, matching: source) else { throw VaultMoveError.interrupted }
             guard try fingerprint(source) == before else { throw VaultMoveError.changedWhileMoving }
             try flush(destination)
             if let vaultVolume { try require(destination, isOn: vaultVolume, mountedAt: vaultRoot) }
-        } catch let nameTaken as CocoaError where nameTaken.code == .fileWriteFileExists {
-            throw nameTaken
         } catch {
-            if isOurUnfinishedCopy(destination, on: vaultVolume, since: began) { try? FileManager.default.removeItem(at: destination) }
+            if fileIdentity(of: destination) == created { try? FileManager.default.removeItem(at: destination) }
             throw error
         }
         do {
@@ -102,11 +101,35 @@ enum VaultMover {
         return destination
     }
 
-    /// If the vault closed mid-copy, the same path now names a file in the plain folder underneath, which may not be ours.
-    static func isOurUnfinishedCopy(_ destination: URL, on vaultVolume: NSObject?, since began: Date) -> Bool {
-        guard let vaultVolume, volumeIdentifier(of: destination)?.isEqual(vaultVolume) != true else { return true }
-        let created = (try? URL(fileURLWithPath: destination.path).resourceValues(forKeys: [.creationDateKey]))?.creationDate
-        return created.map { $0 >= began.addingTimeInterval(-1) } ?? false
+    struct FileIdentity: Equatable {
+        let device: dev_t
+        let node: ino_t
+    }
+
+    /// Made with O_EXCL, so the file is this move's own: if the vault closes mid-copy the same path names another file,
+    /// in the plain folder underneath, and its identity will not match.
+    static func createEmptyFile(at url: URL) throws -> FileIdentity {
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        guard descriptor >= 0 else {
+            if errno == EEXIST { throw CocoaError(.fileWriteFileExists) }
+            throw VaultMoveError.notSaved(String(cString: strerror(errno)))
+        }
+        defer { close(descriptor) }
+        var facts = stat()
+        guard fstat(descriptor, &facts) == 0 else { throw VaultMoveError.notSaved(String(cString: strerror(errno))) }
+        return FileIdentity(device: facts.st_dev, node: facts.st_ino)
+    }
+
+    static func fileIdentity(of url: URL) -> FileIdentity? {
+        var facts = stat()
+        guard lstat(url.path, &facts) == 0 else { return nil }
+        return FileIdentity(device: facts.st_dev, node: facts.st_ino)
+    }
+
+    static func copyContents(of source: URL, onto destination: URL) throws {
+        guard copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_ALL)) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
     }
 
     static func mountedVolume(at vaultRoot: URL) throws -> NSObject {
