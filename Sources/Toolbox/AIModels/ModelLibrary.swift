@@ -38,12 +38,16 @@ final class ModelLibrary {
     private var lastActivationRescan: ContinuousClock.Instant?
     @ObservationIgnored private(set) var scansStarted = 0
 
+    typealias Finder = @Sendable (ModelScanner, URL) async -> [InstalledModel]
+    private let find: Finder
+
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser, central: URL? = nil, spotlight: Bool = true,
-         now: @escaping () -> ContinuousClock.Instant = { .now }) {
+         now: @escaping () -> ContinuousClock.Instant = { .now }, find: @escaping Finder = { await ModelLibrary.findModels($0, home: $1) }) {
         self.home = home
         self.central = central ?? home.appendingPathComponent("Library/Application Support/Toolbox/AI Models")
         self.useSpotlight = spotlight
         self.now = now
+        self.find = find
     }
 
     // MARK: Lifecycle
@@ -89,18 +93,22 @@ final class ModelLibrary {
         observers = []
     }
 
-    /// Looks again now, or right after the scan that is running.
+    /// Looks again now, or right after the scan that is running. Does nothing while stopped: `start()` always scans.
     func refresh() {
+        guard started else { return }
         guard scanning == nil else { rescanAfter = true; return }
         scan()
     }
 
     /// Looks again because Toolbox came to the front, unless it already did so within `activationRescanInterval`.
-    func appBecameActive() {
+    /// True when it asked for a look.
+    @discardableResult
+    func appBecameActive() -> Bool {
         let time = now()
-        if let last = lastActivationRescan, time - last < Self.activationRescanInterval { return }
+        if let last = lastActivationRescan, time - last < Self.activationRescanInterval { return false }
         lastActivationRescan = time
         refresh()
+        return true
     }
 
     /// Looks again in a moment: many file events arrive together while a model downloads or is deleted.
@@ -120,12 +128,8 @@ final class ModelLibrary {
         isScanning = true
         scansStarted += 1
         let scanner = ModelScanner(home: home, central: central, extraPaths: spotlightPaths)
-        let home = self.home
-        scanning = Task { [weak self] in
-            let found = await Task.detached(priority: .utility) { () -> [InstalledModel] in
-                let scanned = scanner.scan()
-                return await ModelAssociations.apply(to: scanned, index: AppIndex.build(home: home))
-            }.value
+        scanning = Task(priority: .utility) { [weak self, find, home] in
+            let found = await find(scanner, home)
             guard let self, !Task.isCancelled else { return }
             if found != models {
                 if hasScanned { announce(from: models, to: found) }
@@ -140,6 +144,15 @@ final class ModelLibrary {
                 refresh()
             }
         }
+    }
+
+    /// The walk over the disk. It runs in the scanning task itself, off the main actor, so that cancelling the task stops the walk.
+    nonisolated static func findModels(_ scanner: ModelScanner, home: URL) async -> [InstalledModel] {
+        let scanned = scanner.scan()
+        if Task.isCancelled { return [] }
+        let index = AppIndex.build(home: home)
+        if Task.isCancelled { return [] }
+        return await ModelAssociations.apply(to: scanned, index: index)
     }
 
     /// Says what was added or removed, so a model appearing or vanishing doesn't go unnoticed.
