@@ -55,7 +55,7 @@ final class CleanKeyboardTests: XCTestCase {
         m.seconds = 30
         m.start()
         clock = clock.addingTimeInterval(31)
-        for _ in 0..<100 where m.isCleaning { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil("cleaning has ended") { !m.isCleaning }
         XCTAssertEqual(m.state, .idle)
         XCTAssertFalse(b.isBlocking)
         XCTAssertFalse(o.shown)
@@ -127,7 +127,7 @@ final class ScrollMathTests: XCTestCase {
         }
         XCTAssertEqual(steps.reduce(0, +), 96, "no distance is lost or invented")
         XCTAssertGreaterThan(steps.count, 8, "spread over several frames")
-        XCTAssertEqual(steps.firstIndex(of: steps.max()!)!, 0, "it starts with the biggest step")
+        XCTAssertEqual(steps.firstIndex(of: try XCTUnwrap(steps.max())), 0, "it starts with the biggest step")
         XCTAssertGreaterThan(steps.prefix(4).reduce(0, +), steps.suffix(4).reduce(0, +) * 3, "and tails off")
         XCTAssertTrue(s.isIdle)
     }
@@ -167,15 +167,8 @@ final class FakeTap: ScrollTapping {
 
 @MainActor
 final class MouseFixesModelTests: XCTestCase {
-    private func defaults() -> UserDefaults {
-        let name = "toolbox.tests.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: name)!
-        d.removePersistentDomain(forName: name)
-        return d
-    }
-
-    func testTurningOnAFixStartsTheTapAndTurningAllOffStopsIt() {
-        let tap = FakeTap(), m = MouseFixesModel(tap: tap, defaults: defaults())
+    func testTurningOnAFixStartsTheTapAndTurningAllOffStopsIt() throws {
+        let tap = FakeTap(), m = MouseFixesModel(tap: tap, defaults: try makeScratchDefaults())
         XCTAssertEqual(m.status, .off)
         m.settings.reverse = true
         XCTAssertEqual(m.status, .on)
@@ -189,8 +182,8 @@ final class MouseFixesModelTests: XCTestCase {
         XCTAssertFalse(tap.isRunning)
     }
 
-    func testMissingPermissionIsReportedAndRecovers() {
-        let tap = FakeTap(), m = MouseFixesModel(tap: tap, defaults: defaults())
+    func testMissingPermissionIsReportedAndRecovers() throws {
+        let tap = FakeTap(), m = MouseFixesModel(tap: tap, defaults: try makeScratchDefaults())
         tap.allow = false
         m.settings.smooth = true
         XCTAssertEqual(m.status, .needsPermission)
@@ -200,8 +193,8 @@ final class MouseFixesModelTests: XCTestCase {
         XCTAssertEqual(m.status, .on)
     }
 
-    func testSettingsSurviveARestartAndAreRestoredOnLaunch() {
-        let d = defaults()
+    func testSettingsSurviveARestartAndAreRestoredOnLaunch() throws {
+        let d = try makeScratchDefaults()
         let first = MouseFixesModel(tap: FakeTap(), defaults: d)
         first.settings = ScrollSettings(reverse: true, speed: 3, smooth: true)
         let tap = FakeTap()

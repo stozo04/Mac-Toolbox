@@ -187,15 +187,8 @@ final class VaultPlayableTests: XCTestCase {
         let tools = MediaTools(ffmpeg: built.appendingPathComponent("ffmpeg"), ffprobe: built.appendingPathComponent("ffprobe"))
         guard FileManager.default.isExecutableFile(atPath: tools.ffmpeg.path),
               FileManager.default.isExecutableFile(atPath: tools.ffprobe.path) else {
-            let missing = "ffmpeg not found: run scripts/fetch-tools.sh or brew install ffmpeg"
-            if ProcessInfo.processInfo.environment["CI"] == "true" { throw ToolsMissing(message: missing) }
-            throw XCTSkip(missing)
+            throw missingTools("ffmpeg not found: run scripts/fetch-tools.sh or brew install ffmpeg")
         }
         return tools
     }
-}
-
-private struct ToolsMissing: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
 }

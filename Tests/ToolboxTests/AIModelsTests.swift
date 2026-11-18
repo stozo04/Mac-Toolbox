@@ -508,15 +508,19 @@ final class AIModelsTests: XCTestCase {
         let watcher = FileWatcher(paths: [folder.path], latency: 0.2) { paths in seen.add(paths) }
         XCTAssertTrue(watcher.start())
         defer { watcher.stop() }
-        try await Task.sleep(for: .milliseconds(500))
+        try await waitUntil("the watcher is listening") {
+            FileManager.default.createFile(atPath: folder.appendingPathComponent("warm-up-\(UUID().uuidString)").path, contents: nil)
+            return !seen.paths.isEmpty
+        }
 
         let file = folder.appendingPathComponent("new.gguf")
+        let reports = { seen.paths.filter { $0.hasSuffix("new.gguf") }.count }
         FileManager.default.createFile(atPath: file.path, contents: Data("x".utf8))
-        try await waitUntil { seen.paths.contains { $0.hasSuffix("new.gguf") } }
+        try await waitUntil("the new file is reported") { reports() > 0 }
 
-        let before = seen.paths.count
+        let before = reports()
         try FileManager.default.removeItem(at: file)
-        try await waitUntil { seen.paths.count > before }
+        try await waitUntil("the removal is reported") { reports() > before }
     }
 
     @MainActor func testThePageLearnsAboutAddedAndRemovedModelsByItself() async throws {
@@ -524,17 +528,17 @@ final class AIModelsTests: XCTestCase {
         let library = ModelLibrary(home: home, spotlight: false)
         library.start()
         defer { library.stop() }
-        try await waitUntil { library.hasScanned && library.models.count == 2 }
+        try await waitUntil("the first scan finds both models") { library.hasScanned && library.models.count == 2 }
 
         // A model is downloaded into an app's folder...
         try makeGGUF(support.appendingPathComponent("LM Studio/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf"), arch: "qwen2", megabytes: 4)
-        try await waitUntil(seconds: 15) { library.models.count == 3 }
+        try await waitUntil(timeout: .seconds(15), "the added model is listed") { library.models.count == 3 }
         XCTAssertTrue(library.models.contains { $0.name == "Qwen2.5 7B Instruct" || $0.owner == "LM Studio" })
         XCTAssertTrue(library.changeNote?.hasPrefix("Added") == true, "\(library.changeNote ?? "nil")")
 
         // ...and one is deleted.
         try FileManager.default.removeItem(at: digUpModels.appendingPathComponent("mmproj-embeddinggemma-2-Q8_0.gguf"))
-        try await waitUntil(seconds: 15) { library.models.count == 2 }
+        try await waitUntil(timeout: .seconds(15), "the removed model is gone") { library.models.count == 2 }
         XCTAssertTrue(library.changeNote?.contains("Removed") == true, "\(library.changeNote ?? "nil")")
         XCTAssertFalse(library.models.contains { $0.name.contains("images and audio") })
     }
@@ -544,12 +548,12 @@ final class AIModelsTests: XCTestCase {
         let library = ModelLibrary(home: home, spotlight: false)
         library.start()
         defer { library.stop() }
-        try await waitUntil { library.models.count == 2 }
+        try await waitUntil("both models are listed") { library.models.count == 2 }
         let model = try XCTUnwrap(library.models.first { $0.name == "EmbeddingGemma 2 (text)" })
 
         try ModelMover(central: library.central).move(model)
 
-        try await waitUntil(seconds: 15) { library.models.first { $0.name == "EmbeddingGemma 2 (text)" }?.movability == .central }
+        try await waitUntil(timeout: .seconds(15), "the moved model shows as central") { library.models.first { $0.name == "EmbeddingGemma 2 (text)" }?.movability == .central }
         XCTAssertEqual(library.models.count, 2)
     }
 
@@ -567,13 +571,6 @@ final class AIModelsTests: XCTestCase {
         func add(_ new: [String]) { lock.lock(); all += new; lock.unlock() }
     }
 
-    @MainActor private func waitUntil(seconds: Double = 8, _ condition: @MainActor () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
-        let end = Date().addingTimeInterval(seconds)
-        while !condition() {
-            if Date() > end { return XCTFail("timed out", file: file, line: line) }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-    }
 }
 
 final class AIModelsWordingTests: XCTestCase {

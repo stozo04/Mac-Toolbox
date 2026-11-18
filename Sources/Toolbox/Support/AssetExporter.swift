@@ -15,9 +15,28 @@ enum AssetExportError: LocalizedError {
 /// Runs an `AVAssetExportSession` as an async call with progress and cancellation.
 /// A cancelled or failed export leaves no partial file behind.
 enum AssetExporter {
+    /// Starting and cancelling take the same lock: AVAssetExportSession raises an exception when asked to start after a cancel.
     private final class Session: @unchecked Sendable {
         let value: AVAssetExportSession
+        private let lock = NSLock()
+        private var isStarted = false
+        private var isCancelled = false
+
         init(_ value: AVAssetExportSession) { self.value = value }
+
+        func start(_ finished: @escaping @Sendable () -> Void) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !isCancelled else { return false }
+            isStarted = true
+            value.exportAsynchronously(completionHandler: finished)
+            return true
+        }
+
+        func cancel() {
+            lock.lock(); defer { lock.unlock() }
+            isCancelled = true
+            if isStarted { value.cancelExport() }
+        }
     }
 
     static func export(_ asset: AVAsset, preset: String, type: AVFileType, metadata: [AVMetadataItem] = [],
@@ -38,10 +57,11 @@ enum AssetExporter {
                     try? await Task.sleep(for: .milliseconds(100))
                 }
             }
-            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                session.value.exportAsynchronously { done.resume() }
+            let started = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+                if !session.start({ done.resume(returning: true) }) { done.resume(returning: false) }
             }
             poll.cancel()
+            guard started else { throw CancellationError() }
             switch session.value.status {
             case .completed: progress(1)
             case .cancelled:
@@ -52,7 +72,7 @@ enum AssetExporter {
                 throw session.value.error ?? AssetExportError.failed
             }
         } onCancel: {
-            session.value.cancelExport()
+            session.cancel()
         }
     }
 }

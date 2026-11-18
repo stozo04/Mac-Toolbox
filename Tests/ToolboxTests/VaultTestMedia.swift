@@ -16,7 +16,7 @@ enum VaultTestMedia {
         XCTAssertTrue(writer.startWriting())
         writer.startSession(atSourceTime: .zero)
         for frame in 0..<(seconds * Int(fps)) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let pixels = try XCTUnwrap(buffer)
@@ -58,7 +58,7 @@ enum VaultTestMedia {
         XCTAssertTrue(writer.startWriting())
         writer.startSession(atSourceTime: .zero)
         for frame in 0..<(seconds * Int(fps)) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let pixels = try XCTUnwrap(buffer)

@@ -57,9 +57,9 @@ final class BeautifyScreenshotTests: XCTestCase {
         let shot = try image(200, 100) { _, _ in (255, 0, 0) }
         let px = try rgba(try XCTUnwrap(BeautifyScreenshot.frame(shot, settings: settings, background: nil)))
 
-        XCTAssertEqual(px.at(110, 60), [255, 0, 0], "the screenshot is drawn as it is, unscaled")
-        XCTAssertNotEqual(px.at(2, 2), [255, 0, 0], "the padding shows the background")
-        XCTAssertEqual(px.alpha(2, 2), 255, "the built-in gradients are opaque")
+        XCTAssertEqual(try px.rgb(110, 60), [255, 0, 0], "the screenshot is drawn as it is, unscaled")
+        XCTAssertNotEqual(try px.rgb(2, 2), [255, 0, 0], "the padding shows the background")
+        XCTAssertEqual(try px.rgba(2, 2).last, 255, "the built-in gradients are opaque")
     }
 
     func testTransparentBackgroundLeavesThePaddingSeeThrough() throws {
@@ -69,8 +69,8 @@ final class BeautifyScreenshotTests: XCTestCase {
         let shot = try image(200, 100) { _, _ in (255, 0, 0) }
         let px = try rgba(try XCTUnwrap(BeautifyScreenshot.frame(shot, settings: settings, background: nil)))
 
-        XCTAssertEqual(px.alpha(2, 2), 0)
-        XCTAssertEqual(px.alpha(110, 60), 255)
+        XCTAssertEqual(try px.rgba(2, 2).last, 0)
+        XCTAssertEqual(try px.rgba(110, 60).last, 255)
     }
 
     func testCustomColorFillsThePadding() throws {
@@ -81,7 +81,7 @@ final class BeautifyScreenshotTests: XCTestCase {
         let shot = try image(200, 100) { _, _ in (255, 0, 0) }
         let px = try rgba(try XCTUnwrap(BeautifyScreenshot.frame(shot, settings: settings, background: nil)))
 
-        XCTAssertEqual(px.at(2, 2), [0, 0, 255])
+        XCTAssertEqual(try px.rgb(2, 2), [0, 0, 255])
     }
 
     func testSixteenByNineRatioIsHonoured() throws {
@@ -121,7 +121,7 @@ final class BeautifyScreenshotTests: XCTestCase {
         }
         return try bytes.withUnsafeMutableBytes { raw in
             guard let context = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
+                                          space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
                   let made = context.makeImage() else { throw CocoaError(.fileReadUnknown) }
             return made
         }
@@ -135,29 +135,5 @@ final class BeautifyScreenshotTests: XCTestCase {
         guard CGImageDestinationFinalize(writer) else { throw CocoaError(.fileWriteUnknown) }
     }
 
-    /// The pixels as premultiplied RGBA bytes, row 0 at the top, read with alpha kept.
-    private struct Pixels {
-        let bytes: [UInt8]
-        let width: Int
-
-        func at(_ x: Int, _ y: Int) -> [UInt8] {
-            let i = (y * width + x) * 4
-            return Array(bytes[i..<(i + 3)])
-        }
-
-        func alpha(_ x: Int, _ y: Int) -> UInt8 { bytes[(y * width + x) * 4 + 3] }
-    }
-
-    private func rgba(_ image: CGImage) throws -> Pixels {
-        let (w, h) = (image.width, image.height)
-        var bytes = [UInt8](repeating: 0, count: w * h * 4)
-        try bytes.withUnsafeMutableBytes { raw in
-            guard let context = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                throw CocoaError(.fileReadUnknown)
-            }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        }
-        return Pixels(bytes: bytes, width: w)
-    }
+    private func rgba(_ image: CGImage) throws -> RGBAPixels { try RGBAPixels(image, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), alpha: .premultipliedLast) }
 }

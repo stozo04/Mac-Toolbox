@@ -79,8 +79,8 @@ final class BurnInSubtitlesTests: XCTestCase {
     func testLoadsUTF16AndLatin1Files() throws {
         let body = "1\n00:00:01,000 --> 00:00:02,000\nCafé ñ\n"
         let utf16 = dir.appendingPathComponent("u16.srt"), latin = dir.appendingPathComponent("l1.srt")
-        try body.data(using: .utf16)!.write(to: utf16)
-        try body.data(using: .isoLatin1)!.write(to: latin)
+        try XCTUnwrap(body.data(using: .utf16)).write(to: utf16)
+        try XCTUnwrap(body.data(using: .isoLatin1)).write(to: latin)
         XCTAssertEqual(try SubtitleFile.load(utf16).first?.text, "Café ñ")
         XCTAssertEqual(try SubtitleFile.load(latin).first?.text, "Café ñ")
     }
@@ -153,11 +153,11 @@ final class BurnInSubtitlesTests: XCTestCase {
     func testBlackBoxLookDrawsADarkBoxBehindTheText() throws {
         var style = CaptionStyle(); style.look = .box
         let boxed = try XCTUnwrap(CaptionRenderer.render("Hello", style: style, videoSize: CGSize(width: 1280, height: 720)))
-        let corner = pixel(boxed.image, x: 12, y: 12)
+        let corner = try pixel(boxed.image, x: 12, y: 12)
         XCTAssertGreaterThan(corner.a, 150, "the box is mostly opaque at its corner")
         XCTAssertLessThan(corner.r, 20)
         let plain = try XCTUnwrap(CaptionRenderer.render("Hello", style: CaptionStyle(), videoSize: CGSize(width: 1280, height: 720)))
-        XCTAssertEqual(pixel(plain.image, x: 2, y: 2).a, 0, "shadow look has nothing behind the text")
+        XCTAssertEqual(try pixel(plain.image, x: 2, y: 2).a, 0, "shadow look has nothing behind the text")
     }
 
     func testEmptyTextDrawsNothing() {
@@ -166,7 +166,7 @@ final class BurnInSubtitlesTests: XCTestCase {
 
     func testVisibleCuesAreCutAtTheEndOfTheVideo() {
         let cues = [SubtitleCue(start: 1, end: 2, text: "a"), SubtitleCue(start: 9, end: 12, text: "b"), SubtitleCue(start: 20, end: 21, text: "c")]
-        XCTAssertEqual(SubtitleBurner.visible(cues, duration: 10), [cues[0], SubtitleCue(start: 9, end: 10, text: "b")])
+        XCTAssertEqual(SubtitleBurner.visible(cues, duration: 10), [try XCTUnwrap(cues.first), SubtitleCue(start: 9, end: 10, text: "b")])
     }
 
     // MARK: Burning
@@ -218,7 +218,7 @@ final class BurnInSubtitlesTests: XCTestCase {
         let source = dir.appendingPathComponent("Portrait.mov")
         try await makeVideo(at: source, seconds: 2, size: CGSize(width: 320, height: 180), rotation: .pi / 2)
         let result = try await SubtitleBurner.burn(source: source, cues: [SubtitleCue(start: 0, end: 2, text: "Hi")], style: CaptionStyle(), into: dir) { _ in }
-        let track = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video)[0]
+        let track = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video).element(at: 0)
         let natural = try await track.load(.naturalSize), transform = try await track.load(.preferredTransform)
         let size = natural.applying(transform)
         XCTAssertEqual([abs(size.width), abs(size.height)], [180, 320], "still upright")
@@ -243,12 +243,13 @@ final class BurnInSubtitlesTests: XCTestCase {
 
     private func duration(of url: URL) async throws -> Double { try await AVURLAsset(url: url).load(.duration).seconds }
 
-    private func pixel(_ image: CGImage, x: Int, y: Int) -> (r: Int, g: Int, b: Int, a: Int) {
+    private func pixel(_ image: CGImage, x: Int, y: Int) throws -> (r: Int, g: Int, b: Int, a: Int) {
         var px = [UInt8](repeating: 0, count: 4)
-        let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let ctx = try XCTUnwrap(CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.draw(image, in: CGRect(x: -x, y: -(image.height - 1 - y), width: image.width, height: image.height))
-        return (Int(px[0]), Int(px[1]), Int(px[2]), Int(px[3]))
+        let p = try RGBAPixels(bytes: px, width: 1, height: 1).components(0, 0)
+        return (Int(p.r), Int(p.g), Int(p.b), Int(p.a))
     }
 
     private func frame(_ asset: AVAsset, at seconds: Double) throws -> (pixels: [UInt8], width: Int, height: Int) {
@@ -258,14 +259,17 @@ final class BurnInSubtitlesTests: XCTestCase {
         generator.requestedTimeToleranceAfter = .zero
         let image = try generator.copyCGImage(at: CMTime(seconds: seconds, preferredTimescale: 600), actualTime: nil)
         var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
-        let ctx = CGContext(data: &data, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let ctx = try XCTUnwrap(CGContext(data: &data, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         return (data, image.width, image.height)
     }
 
     /// How many pixels differ in the top and the bottom fifth of the frame.
-    private func changes(from a: (pixels: [UInt8], width: Int, height: Int), to b: (pixels: [UInt8], width: Int, height: Int)) -> (top: Int, bottom: Int) {
+    private func changes(from a: (pixels: [UInt8], width: Int, height: Int), to b: (pixels: [UInt8], width: Int, height: Int)) throws -> (top: Int, bottom: Int) {
+        guard a.width == b.width, a.height == b.height, a.pixels.count == b.pixels.count, a.pixels.count >= a.width * a.height * 4 else {
+            throw TestSupportFailure("The two frames differ in size", file: #filePath, line: #line)
+        }
         func count(rows: Range<Int>) -> Int {
             var n = 0
             for row in rows { for col in 0..<a.width {
@@ -290,9 +294,9 @@ final class BurnInSubtitlesTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             memset(CVPixelBufferGetBaseAddress(b), 40, CVPixelBufferGetDataSize(b))  // dark grey
@@ -330,15 +334,15 @@ final class BurnInSubtitlesTests: XCTestCase {
         model.add([plain, named, plain])
 
         XCTAssertEqual(model.items.count, 2, "no duplicates")
-        XCTAssertFalse(model.isReady(model.items[0]), "no subtitles for Plain")
-        XCTAssertTrue(model.isReady(model.items[1]), "Named.srt is picked up")
-        XCTAssertEqual(model.subtitleFile(for: model.items[1])?.lastPathComponent, "Named.srt")
+        XCTAssertFalse(model.isReady(try XCTUnwrap(model.items.first)), "no subtitles for Plain")
+        XCTAssertTrue(model.isReady(try model.items.element(at: 1)), "Named.srt is picked up")
+        XCTAssertEqual(model.subtitleFile(for: try model.items.element(at: 1))?.lastPathComponent, "Named.srt")
 
         let shared = dir.appendingPathComponent("Shared.vtt")
         try "WEBVTT\n\n00:01.000 --> 00:02.000\nHi\n".write(to: shared, atomically: true, encoding: .utf8)
         model.setSubtitleFile(shared)
-        XCTAssertTrue(model.isReady(model.items[0]), "the chosen file covers videos without their own")
-        XCTAssertEqual(model.subtitleFile(for: model.items[1])?.lastPathComponent, "Named.srt", "a file beside the video wins")
+        XCTAssertTrue(model.isReady(try XCTUnwrap(model.items.first)), "the chosen file covers videos without their own")
+        XCTAssertEqual(model.subtitleFile(for: try model.items.element(at: 1))?.lastPathComponent, "Named.srt", "a file beside the video wins")
         XCTAssertTrue(model.hasRunnable)
     }
 

@@ -240,8 +240,7 @@ final class TrimAudioTests: XCTestCase {
 
         model.load(first)
         model.load(second)
-        for _ in 0..<100 where model.isLoading { try await Task.sleep(for: .milliseconds(20)) }
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil(timeout: .seconds(30), "the file is loaded and ready to play") { !model.isLoading && model.isReadyToPlay }
 
         XCTAssertEqual(model.file, second)
         XCTAssertEqual(model.selection.duration, 2, accuracy: 0.01)
@@ -288,7 +287,7 @@ final class TrimAudioTests: XCTestCase {
         let file = try AVAudioFile(forReading: url)
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
         try file.read(into: buffer)
-        let data = try XCTUnwrap(buffer.floatChannelData?[0])
+        let data = try XCTUnwrap(buffer.floatChannelData?.pointee)
         return Array(UnsafeBufferPointer(start: data, count: Int(buffer.frameLength)))
     }
 

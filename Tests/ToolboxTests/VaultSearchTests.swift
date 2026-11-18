@@ -196,12 +196,12 @@ final class VaultSearchTests: XCTestCase {
         _ = try await VaultMover.move(blue, into: model.root)
         model.reload()
         model.retrySearch()
-        try await waitUntil { if case .ready = model.searchState { true } else { false } }
+        try await waitUntil(timeout: .seconds(60), "search is ready") { if case .ready = model.searchState { true } else { false } }
 
         model.selection = Set(model.items.map(\.id))
         model.viewing = model.items.first { $0.name == "blue square.png" }?.id
         model.query = "red"
-        try await waitUntil { model.searchResult != nil }
+        try await waitUntil(timeout: .seconds(60), "the search has a result") { model.searchResult != nil }
 
         XCTAssertEqual(model.displayedItems.map(\.name), ["red square.png"])
         XCTAssertEqual(model.selection, Set(model.displayedItems.map(\.id)))
@@ -225,15 +225,6 @@ final class VaultSearchTests: XCTestCase {
 
     private func makeVideo(_ name: String, seconds: Int) async throws -> URL {
         try await VaultTestMedia.video(at: root.appendingPathComponent(name), seconds: seconds)
-    }
-
-    @MainActor
-    private func waitUntil(seconds: Double = 60, _ condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail("Timed out waiting") }
-            try await Task.sleep(for: .milliseconds(100))
-        }
     }
 
     private func makePhoto(_ name: String, red: UInt8, green: UInt8, blue: UInt8) throws -> URL {

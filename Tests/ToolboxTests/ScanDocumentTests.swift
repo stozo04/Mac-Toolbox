@@ -46,7 +46,7 @@ final class ScanDocumentTests: XCTestCase {
         // Inside the cut-out every corner is paper; the dark desk is gone.
         for (fx, fy) in [(0.03, 0.03), (0.97, 0.03), (0.03, 0.97), (0.97, 0.97), (0.5, 0.5)] {
             let p = try pixel(straight, x: Int(Double(straight.width) * fx), y: Int(Double(straight.height) * fy))
-            XCTAssertGreaterThan(Int(p[0]) + Int(p[1]) + Int(p[2]), 3 * 150, "corner (\(fx), \(fy)) is not paper: \(p)")
+            XCTAssertGreaterThan(Int(try XCTUnwrap(p.first)) + Int(try p.element(at: 1)) + Int(try p.element(at: 2)), 3 * 150, "corner (\(fx), \(fy)) is not paper: \(p)")
         }
     }
 
@@ -86,33 +86,33 @@ final class ScanDocumentTests: XCTestCase {
         let image = try XCTUnwrap(DocumentScanner.bitmap(page, turns: 0, look: .color, maxPixel: 4096))
         // The dark left edge of the paper (about 55% bright before) is white now.
         let paper = try pixel(image, x: 20, y: 500)
-        XCTAssertGreaterThan(Int(paper[0]), 235); XCTAssertGreaterThan(Int(paper[1]), 235); XCTAssertGreaterThan(Int(paper[2]), 235)
+        XCTAssertGreaterThan(Int(try XCTUnwrap(paper.first)), 235); XCTAssertGreaterThan(Int(try paper.element(at: 1)), 235); XCTAssertGreaterThan(Int(try paper.element(at: 2)), 235)
         // The red patch stays red.
         let red = try pixel(image, x: 600, y: 235)
-        XCTAssertGreaterThan(Int(red[0]), 170)
-        XCTAssertLessThan(Int(red[1]), 110)
-        XCTAssertLessThan(Int(red[2]), 110)
+        XCTAssertGreaterThan(Int(try XCTUnwrap(red.first)), 170)
+        XCTAssertLessThan(Int(try red.element(at: 1)), 110)
+        XCTAssertLessThan(Int(try red.element(at: 2)), 110)
         // Ink stays dark.
-        XCTAssertLessThan(Int(try pixel(image, x: 100, y: 745)[0]), 90)
+        XCTAssertLessThan(Int(try XCTUnwrap(pixel(image, x: 100, y: 745).first)), 90)
     }
 
     func testGrayscaleIsOneChannelWithEvenPaper() throws {
         let page = try makeShadedPage()
         let image = try XCTUnwrap(DocumentScanner.bitmap(page, turns: 0, look: .grayscale, maxPixel: 4096))
         XCTAssertEqual(image.colorSpace?.model, .monochrome)
-        XCTAssertGreaterThan(Int(try pixel(image, x: 20, y: 500)[0]), 235)
-        XCTAssertGreaterThan(Int(try pixel(image, x: 780, y: 500)[0]), 235)
+        XCTAssertGreaterThan(Int(try XCTUnwrap(pixel(image, x: 20, y: 500).first)), 235)
+        XCTAssertGreaterThan(Int(try XCTUnwrap(pixel(image, x: 780, y: 500).first)), 235)
     }
 
     func testBlackAndWhiteHasOnlyBlackAndWhite() throws {
         let page = try makeShadedPage()
         let image = try XCTUnwrap(DocumentScanner.bitmap(page, turns: 0, look: .blackAndWhite, maxPixel: 4096))
         XCTAssertEqual(image.colorSpace?.model, .monochrome)
-        XCTAssertEqual(try pixel(image, x: 20, y: 500)[0], 255)
-        XCTAssertEqual(try pixel(image, x: 100, y: 745)[0], 0)
+        XCTAssertEqual(try XCTUnwrap(pixel(image, x: 20, y: 500).first), 255)
+        XCTAssertEqual(try XCTUnwrap(pixel(image, x: 100, y: 745).first), 0)
         var other = 0
         for y in stride(from: 0, to: image.height, by: 7) {
-            for x in stride(from: 0, to: image.width, by: 7) where ![0, 255].contains(try pixel(image, x: x, y: y)[0]) { other += 1 }
+            for x in stride(from: 0, to: image.width, by: 7) where ![0, 255].contains(try XCTUnwrap(pixel(image, x: x, y: y).first)) { other += 1 }
         }
         XCTAssertEqual(other, 0)
     }
@@ -136,8 +136,8 @@ final class ScanDocumentTests: XCTestCase {
         context.setFillColor(gray: 0, alpha: 1); context.fill(CGRect(x: 0, y: 560, width: 400, height: 40))
         let page = try XCTUnwrap(context.makeImage())
         let turned = try XCTUnwrap(DocumentScanner.bitmap(page, turns: 1, look: .color, maxPixel: 4096))
-        XCTAssertLessThan(Int(try pixel(turned, x: turned.width - 10, y: turned.height / 2)[0]), 100)
-        XCTAssertGreaterThan(Int(try pixel(turned, x: 10, y: turned.height / 2)[0]), 200)
+        XCTAssertLessThan(Int(try XCTUnwrap(pixel(turned, x: turned.width - 10, y: turned.height / 2).first)), 100)
+        XCTAssertGreaterThan(Int(try XCTUnwrap(pixel(turned, x: 10, y: turned.height / 2).first)), 200)
     }
 
     // MARK: PDF
@@ -206,7 +206,7 @@ final class ScanDocumentTests: XCTestCase {
         let pdfPages = DocumentScanner.scan(file: pdfURL)
         XCTAssertEqual(pdfPages.count, 2)
         // A PDF page is drawn white, not clear.
-        XCTAssertGreaterThan(Int(try pixel(pdfPages[0].image, x: 5, y: 5)[0]), 240)
+        XCTAssertGreaterThan(Int(try XCTUnwrap(pixel(try XCTUnwrap(pdfPages.first).image, x: 5, y: 5).first)), 240)
         XCTAssertEqual(DocumentScanner.scan(file: notes).count, 0)
         XCTAssertEqual(DocumentScanner.scan(file: dir.appendingPathComponent("missing.jpg")).count, 0)
         XCTAssertEqual(DocumentScanner.scan(file: dir).count, 3)
@@ -226,7 +226,7 @@ final class ScanDocumentTests: XCTestCase {
         let model = ScanDocumentModel()
         let sizes = [(400, 500), (420, 520), (440, 540)]
         model.enqueue(try sizes.map { .photo(try makePage(width: $0.0, height: $0.1, text: nil)) })
-        try await settle(model)
+        try await waitUntil(timeout: .seconds(60), "the pages are added") { !model.isAdding }
 
         XCTAssertEqual(model.pages.count, 3)
         let ids = model.pages.map(\.id)
@@ -234,23 +234,23 @@ final class ScanDocumentTests: XCTestCase {
         XCTAssertEqual(model.pages.map(\.image.width).sorted(), model.pages.map(\.image.width))
         XCTAssertTrue(zip(model.pages.map(\.image.width), [400, 420, 440]).allSatisfy { abs($0 - $1) < 20 })
 
-        model.move(ids[0], to: ids[2])
-        XCTAssertEqual(model.pages.map(\.id), [ids[1], ids[2], ids[0]])
-        model.move(ids[0], to: ids[1])
-        XCTAssertEqual(model.pages.map(\.id), [ids[0], ids[1], ids[2]])
-        model.move(ids[1], to: ids[1])
-        XCTAssertEqual(model.pages.map(\.id), [ids[0], ids[1], ids[2]])
-        XCTAssertEqual(model.number(of: ids[2]), 3)
+        model.move(try XCTUnwrap(ids.first), to: try ids.element(at: 2))
+        XCTAssertEqual(model.pages.map(\.id), [try ids.element(at: 1), try ids.element(at: 2), try XCTUnwrap(ids.first)])
+        model.move(try XCTUnwrap(ids.first), to: try ids.element(at: 1))
+        XCTAssertEqual(model.pages.map(\.id), [try XCTUnwrap(ids.first), try ids.element(at: 1), try ids.element(at: 2)])
+        model.move(try ids.element(at: 1), to: try ids.element(at: 1))
+        XCTAssertEqual(model.pages.map(\.id), [try XCTUnwrap(ids.first), try ids.element(at: 1), try ids.element(at: 2)])
+        XCTAssertEqual(model.number(of: try ids.element(at: 2)), 3)
 
-        model.rotate(ids[1], by: 1)
-        model.rotate(ids[1], by: 1)
-        model.rotate(ids[1], by: 3)
-        XCTAssertEqual(model.pages[1].turns, 1)
-        model.rotate(ids[0], by: -1)
-        XCTAssertEqual(model.pages[0].turns, 3)
+        model.rotate(try ids.element(at: 1), by: 1)
+        model.rotate(try ids.element(at: 1), by: 1)
+        model.rotate(try ids.element(at: 1), by: 3)
+        XCTAssertEqual(try model.pages.element(at: 1).turns, 1)
+        model.rotate(try XCTUnwrap(ids.first), by: -1)
+        XCTAssertEqual(try XCTUnwrap(model.pages.first).turns, 3)
 
-        model.remove(ids[1])
-        XCTAssertEqual(model.pages.map(\.id), [ids[0], ids[2]])
+        model.remove(try ids.element(at: 1))
+        XCTAssertEqual(model.pages.map(\.id), [try XCTUnwrap(ids.first), try ids.element(at: 2)])
         model.clear()
         XCTAssertTrue(model.pages.isEmpty)
     }
@@ -258,16 +258,16 @@ final class ScanDocumentTests: XCTestCase {
     @MainActor func testThumbnailsFollowTheLookAndTurns() async throws {
         let model = ScanDocumentModel()
         model.enqueue([.photo(try makePage(width: 400, height: 600, text: nil))])
-        try await settle(model)
+        try await waitUntil(timeout: .seconds(60), "the pages are added") { !model.isAdding }
         let id = try XCTUnwrap(model.pages.first?.id)
-        try await until { model.thumbnails[id] != nil }
+        try await waitUntil(timeout: .seconds(60), "the page has a thumbnail") { model.thumbnails[id] != nil }
         XCTAssertEqual(model.thumbnails[id]?.colorSpace?.model, .rgb)
 
         model.settings.look = .blackAndWhite
-        try await until { model.thumbnails[id]?.colorSpace?.model == .monochrome }
+        try await waitUntil(timeout: .seconds(60), "the thumbnail is black and white") { model.thumbnails[id]?.colorSpace?.model == .monochrome }
 
         model.rotate(id, by: 1)
-        try await until { (model.thumbnails[id]?.width ?? 0) > (model.thumbnails[id]?.height ?? 1) }
+        try await waitUntil(timeout: .seconds(60), "the thumbnail is turned on its side") { (model.thumbnails[id]?.width ?? 0) > (model.thumbnails[id]?.height ?? 1) }
     }
 
     @MainActor func testScannedPDFsFromAnIPhoneAddOnePagePerSheet() async throws {
@@ -276,7 +276,7 @@ final class ScanDocumentTests: XCTestCase {
                                                look: .color, pageSize: .a4, searchable: false)
         let model = ScanDocumentModel()
         model.enqueue([.pdf(data)])
-        try await settle(model)
+        try await waitUntil(timeout: .seconds(60), "the pages are added") { !model.isAdding }
         XCTAssertEqual(model.pages.count, 2)
         XCTAssertTrue(model.pages.allSatisfy(\.foundEdges))
     }
@@ -286,7 +286,7 @@ final class ScanDocumentTests: XCTestCase {
         let notes = dir.appendingPathComponent("notes.txt")
         try Data("hello".utf8).write(to: notes)
         model.add([notes, dir.appendingPathComponent("gone.jpg")])
-        try await settle(model)
+        try await waitUntil(timeout: .seconds(60), "the pages are added") { !model.isAdding }
         XCTAssertTrue(model.pages.isEmpty)
         XCTAssertEqual(model.notice, "2 items had no pages and were skipped.")
     }
@@ -300,18 +300,6 @@ final class ScanDocumentTests: XCTestCase {
 
     // MARK: Helpers
 
-    @MainActor private func settle(_ model: ScanDocumentModel) async throws {
-        try await until { !model.isAdding }
-    }
-
-    @MainActor private func until(timeout: TimeInterval = 60, _ condition: @MainActor () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            if Date() > deadline { XCTFail("timed out"); return }
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
     private func pdf(_ pages: [ScanExportPage], pageSize: ScanPageSize, searchable: Bool = false) throws -> PDFDocument {
         let data = try DocumentScanner.makePDF(pages: pages, look: .color, pageSize: pageSize, searchable: searchable)
         return try XCTUnwrap(PDFDocument(data: data))
@@ -319,7 +307,7 @@ final class ScanDocumentTests: XCTestCase {
 
     private func bitmapContext(width: Int, height: Int) throws -> CGContext {
         try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                                space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
     }
 
     /// A white page, with a line of large black text near the top when `text` is given.
@@ -379,7 +367,7 @@ final class ScanDocumentTests: XCTestCase {
     private func pixel(_ image: CGImage, x: Int, y: Int) throws -> [UInt8] {
         var out = [UInt8](repeating: 0, count: 4)
         let context = try XCTUnwrap(CGContext(data: &out, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         // Draw the image shifted so that pixel (x, y) lands on the single pixel.
         context.draw(image, in: CGRect(x: -x, y: -(image.height - 1 - y), width: image.width, height: image.height))
         return out

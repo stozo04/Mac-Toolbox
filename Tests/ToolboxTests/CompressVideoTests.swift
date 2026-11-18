@@ -113,13 +113,13 @@ final class CompressVideoTests: XCTestCase {
         XCTAssertGreaterThan(result.savedFraction, 0.5)
         XCTAssertEqual(result.size, CGSize(width: 640, height: 360))
         let asset = AVURLAsset(url: result.url)
-        let track = try await asset.loadTracks(withMediaType: .video)[0]
+        let track = try await asset.loadTracks(withMediaType: .video).element(at: 0)
         let natural = try await track.load(.naturalSize)
         let formats = try await track.load(.formatDescriptions)
         let audioCount = try await asset.loadTracks(withMediaType: .audio).count
         let duration = try await asset.load(.duration).seconds
         XCTAssertEqual(natural, CGSize(width: 640, height: 360))
-        XCTAssertEqual(formats[0].mediaSubType.rawValue, kCMVideoCodecType_H264)
+        XCTAssertEqual(try XCTUnwrap(formats.first).mediaSubType.rawValue, kCMVideoCodecType_H264)
         XCTAssertEqual(audioCount, 1)
         XCTAssertEqual(duration, 2, accuracy: 0.2)
         XCTAssertEqual(try Data(contentsOf: source), before, "the original must not change")
@@ -131,14 +131,14 @@ final class CompressVideoTests: XCTestCase {
         let source = dir.appendingPathComponent("tail.mov")
         try await makeSource(at: source, size: CGSize(width: 1280, height: 720), pictureSeconds: 1)
         let original = AVURLAsset(url: source)
-        let sourceVideoEnd = try await original.loadTracks(withMediaType: .video)[0].load(.timeRange).end.seconds
+        let sourceVideoEnd = try await original.loadTracks(withMediaType: .video).element(at: 0).load(.timeRange).end.seconds
         let sourceLength = try await original.load(.duration).seconds
         XCTAssertEqual(sourceVideoEnd, 1, accuracy: 0.05)
         XCTAssertEqual(sourceLength, 2, accuracy: 0.05, "the sound must run past the picture for this test to mean anything")
         let result = try compressed(await VideoCompressor.compress(
             source: source, settings: VideoCompressSettings(maxSize: .p480), into: dir) { _ in })
         let asset = AVURLAsset(url: result.url)
-        let video = try await asset.loadTracks(withMediaType: .video)[0]
+        let video = try await asset.loadTracks(withMediaType: .video).element(at: 0)
         let end = try await video.load(.timeRange).end.seconds
         XCTAssertEqual(end, 1, accuracy: 0.1)
         let audioCount = try await asset.loadTracks(withMediaType: .audio).count
@@ -151,9 +151,9 @@ final class CompressVideoTests: XCTestCase {
         for hardware in [false, true] {
             let result = try compressed(await VideoCompressor.compress(
                 source: source, settings: VideoCompressSettings(codec: .hevc, hardwareEncoder: hardware), into: dir) { _ in })
-            let track = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video)[0]
+            let track = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video).element(at: 0)
             let formats = try await track.load(.formatDescriptions)
-            XCTAssertEqual(formats[0].mediaSubType.rawValue, kCMVideoCodecType_HEVC, "hardware \(hardware)")
+            XCTAssertEqual(try XCTUnwrap(formats.first).mediaSubType.rawValue, kCMVideoCodecType_HEVC, "hardware \(hardware)")
             XCTAssertLessThan(result.newBytes, result.originalBytes)
         }
     }
@@ -176,7 +176,7 @@ final class CompressVideoTests: XCTestCase {
         let result = try compressed(await VideoCompressor.compress(
             source: source, settings: VideoCompressSettings(maxSize: .p480), into: dir) { _ in })
         XCTAssertEqual(result.size, CGSize(width: 852, height: 480))
-        let track = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video)[0]
+        let track = try await AVURLAsset(url: result.url).loadTracks(withMediaType: .video).element(at: 0)
         let natural = try await track.load(.naturalSize)
         XCTAssertEqual(natural, CGSize(width: 852, height: 480))
     }
@@ -188,7 +188,7 @@ final class CompressVideoTests: XCTestCase {
 
         let same = try compressed(await VideoCompressor.compress(source: source, settings: VideoCompressSettings(), into: dir) { _ in })
         XCTAssertEqual(same.size, CGSize(width: 720, height: 1280))
-        let sameTrack = try await AVURLAsset(url: same.url).loadTracks(withMediaType: .video)[0]
+        let sameTrack = try await AVURLAsset(url: same.url).loadTracks(withMediaType: .video).element(at: 0)
         let shown = try await sameTrack.load(.naturalSize).applying(sameTrack.load(.preferredTransform))
         XCTAssertEqual([abs(shown.width), abs(shown.height)], [720, 1280], "still turned, not squashed")
 
@@ -198,8 +198,8 @@ final class CompressVideoTests: XCTestCase {
         let image = try await frame(of: smaller.url)
         XCTAssertEqual([image.width, image.height], [480, 852])
         // The stored picture is light on top and dark below; turned a quarter, one side of the upright picture is light and the other dark.
-        XCTAssertGreaterThan(abs(luma(image, x: 60, y: 426) - luma(image, x: 420, y: 426)), 100, "the picture is turned, not blank or squashed")
-        XCTAssertLessThan(abs(luma(image, x: 240, y: 100) - luma(image, x: 240, y: 750)), 60)
+        XCTAssertGreaterThan(abs(try luma(image, x: 60, y: 426) - luma(image, x: 420, y: 426)), 100, "the picture is turned, not blank or squashed")
+        XCTAssertLessThan(abs(try luma(image, x: 240, y: 100) - luma(image, x: 240, y: 750)), 60)
     }
 
     func testNoNewFileIsKeptWhenItWouldNotBeSmaller() async throws {
@@ -211,9 +211,9 @@ final class CompressVideoTests: XCTestCase {
 
         // AVAssetWriter's own scratch file ("….sb-…") takes a moment to disappear after a run.
         var after = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
-        for _ in 0..<30 where after.contains(where: { $0.contains(".sb-") }) {
-            try await Task.sleep(for: .milliseconds(100))
+        try await waitUntil(timeout: .seconds(30), "the writer's scratch file is gone") {
             after = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+            return !after.contains(where: { $0.contains(".sb-") })
         }
         switch outcome {
         case .compressed(let r):
@@ -283,12 +283,13 @@ final class CompressVideoTests: XCTestCase {
         return try await generator.image(at: CMTime(seconds: 1, preferredTimescale: 600)).image
     }
 
-    private func luma(_ image: CGImage, x: Int, y: Int) -> Int {
+    private func luma(_ image: CGImage, x: Int, y: Int) throws -> Int {
         var px = [UInt8](repeating: 0, count: 4)
-        let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let ctx = try XCTUnwrap(CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.draw(image, in: CGRect(x: -x, y: -(image.height - 1 - y), width: image.width, height: image.height))
-        return (Int(px[0]) * 3 + Int(px[1]) * 6 + Int(px[2])) / 10
+        let p = try RGBAPixels(bytes: px, width: 1, height: 1).components(0, 0)
+        return (Int(p.r) * 3 + Int(p.g) * 6 + Int(p.b)) / 10
     }
 
     /// Two seconds of noisy picture at a high bitrate, so there is plenty to save; optionally with a tone and a rotation flag.
@@ -300,7 +301,7 @@ final class CompressVideoTests: XCTestCase {
         let range = CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600))
         let v = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
         let pictureRange = CMTimeRange(start: .zero, duration: CMTime(seconds: pictureSeconds, preferredTimescale: 600))
-        try v.insertTimeRange(pictureRange, of: try await pictureAsset.loadTracks(withMediaType: .video)[0], at: .zero)
+        try v.insertTimeRange(pictureRange, of: try await pictureAsset.loadTracks(withMediaType: .video).element(at: 0), at: .zero)
         v.preferredTransform = CGAffineTransform(rotationAngle: rotation)
         var toneAsset: AVURLAsset?
         if sound {
@@ -309,7 +310,7 @@ final class CompressVideoTests: XCTestCase {
             let asset = AVURLAsset(url: tone)
             toneAsset = asset
             let a = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
-            try a.insertTimeRange(range, of: try await asset.loadTracks(withMediaType: .audio)[0], at: .zero)
+            try a.insertTimeRange(range, of: try await asset.loadTracks(withMediaType: .audio).element(at: 0), at: .zero)
         }
         let exporter = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough))
         exporter.outputURL = url
@@ -343,9 +344,9 @@ final class CompressVideoTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(b))
@@ -379,7 +380,7 @@ final class CompressVideoTests: XCTestCase {
                 AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1])
             let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 88200))
             buffer.frameLength = 88200
-            let samples = try XCTUnwrap(buffer.floatChannelData)[0]
+            let samples = try XCTUnwrap(buffer.floatChannelData).pointee
             for i in 0..<88200 { samples[i] = Float(sin(Double(i) * 0.1) * 0.4) }
             try file.write(from: buffer)
         }
