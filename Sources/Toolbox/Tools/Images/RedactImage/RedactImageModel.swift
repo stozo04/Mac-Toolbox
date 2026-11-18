@@ -259,7 +259,7 @@ final class RedactImageModel {
         }
         if added > 0 { reopen(i) }
         // Blurred or pixelated text can sometimes be made out again; a black box cannot.
-        if (added > 0 || coversFoundText), !styleWasChosen { apply(.blackBox) }
+        if added > 0 || coversFoundText, !styleWasChosen { apply(.blackBox) }
         return added
     }
 

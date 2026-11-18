@@ -261,7 +261,7 @@ final class RedactImageTests: XCTestCase {
         _ = model.addRegion(CGRect(x: 0, y: 0, width: 1, height: 1))
 
         model.find(.text)
-        try await waitUntilFound(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
 
         XCTAssertEqual(model.selected?.regions.count, 1, "the text was already covered, so nothing is added")
         XCTAssertEqual(model.selected?.regions.filter(\.coversFoundText).count, 1)
@@ -274,7 +274,7 @@ final class RedactImageTests: XCTestCase {
         _ = model.addRegion(CGRect(x: 0, y: 0, width: 1, height: 1))
 
         model.find(.text)
-        try await waitUntilFound(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
 
         XCTAssertEqual(model.settings.style, .blackBox)
     }
@@ -284,7 +284,7 @@ final class RedactImageTests: XCTestCase {
         model.add([try writeTextPage(named: "page.png")])
         _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
         model.export()
-        for _ in 0..<400 where model.isRunning { try await Task.sleep(nanoseconds: 25_000_000) }
+        try await waitUntil(timeout: .seconds(30), "the export has finished") { !model.isRunning }
         XCTAssertEqual(model.doneCount, 1)
 
         model.chooseStyle(.blackBox)
@@ -302,7 +302,7 @@ final class RedactImageTests: XCTestCase {
         XCTAssertFalse(model.needsRecoverableTextCaution)
 
         model.find(.text)
-        try await waitUntilFound(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
         XCTAssertEqual(model.selected?.regions.filter(\.coversFoundText).count, 3)
         XCTAssertEqual(model.settings.style, .blackBox)
         XCTAssertFalse(model.needsRecoverableTextCaution)
@@ -317,7 +317,7 @@ final class RedactImageTests: XCTestCase {
         model.clearRegions()
         XCTAssertFalse(model.needsRecoverableTextCaution, "with no found text left there is nothing to warn about")
         model.find(.sensitive)
-        try await waitUntilFound(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
         XCTAssertEqual(model.selected?.regions.count, 1)
         XCTAssertEqual(model.settings.style, .blur, "a style the user picked is not changed behind their back")
         XCTAssertTrue(model.needsRecoverableTextCaution)
@@ -330,7 +330,7 @@ final class RedactImageTests: XCTestCase {
         model.add([wall])
 
         model.find(.text)
-        try await waitUntilFound(model)
+        try await waitUntil(timeout: .seconds(30), "the search has finished") { model.finding == nil }
         XCTAssertEqual(model.selected?.regions, [])
         XCTAssertEqual(model.settings.style, .blur)
     }
@@ -341,11 +341,6 @@ final class RedactImageTests: XCTestCase {
         let url = dir.appendingPathComponent(name)
         try write(try textPage(["Meeting notes for Monday", "Email jane.doe@example.com", "Thanks and see you there"]), type: .png, to: url)
         return url
-    }
-
-    @MainActor private func waitUntilFound(_ model: RedactImageModel) async throws {
-        for _ in 0..<400 where model.finding != nil { try await Task.sleep(nanoseconds: 25_000_000) }
-        XCTAssertNil(model.finding, "the search never finished")
     }
 
     private func assertRect(_ r: CGRect, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, file: StaticString = #filePath, line: UInt = #line) {
