@@ -163,6 +163,7 @@ final class ColorPickerModel {
 
     func loadPalette(from urls: [URL]) {
         guard let url = urls.compactMap({ BatchFiles.images(in: $0).first }).first else {
+            stopReadingImage()
             paletteNotice = "That is not an image."
             return
         }
@@ -191,6 +192,7 @@ final class ColorPickerModel {
         }
         guard let image = NSImage(pasteboard: pasteboard),
               let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            stopReadingImage()
             paletteNotice = "There is no image on the clipboard."
             return
         }

@@ -535,6 +535,36 @@ final class ColorPickerTests: XCTestCase {
         try await pause(for: .milliseconds(100), because: "a late palette would land on a later main-actor turn")
     }
 
+    @MainActor func testInputThatIsRefusedKeepsItsNoticeWhenAnOlderImageArrivesLate() async throws {
+        let (model, held) = try makeModel(holding: ["slow.png"])
+        model.loadPalette(from: try makeImageFiles("slow.png"))
+
+        model.pastePaletteImage()
+        XCTAssertEqual(model.paletteNotice, "There is no image on the clipboard.")
+        XCTAssertFalse(model.isReadingImage)
+        held.release("slow.png")
+        try await settle()
+
+        XCTAssertEqual(model.paletteNotice, "There is no image on the clipboard.")
+        XCTAssertNil(model.paletteImage)
+    }
+
+    @MainActor func testADropThatIsNotAnImageStopsTheImageBeingRead() async throws {
+        let (model, held) = try makeModel(holding: ["slow.png"])
+        model.loadPalette(from: try makeImageFiles("slow.png"))
+        let notes = FileManager.default.temporaryDirectory.appendingPathComponent("color-picker-notes-\(UUID()).txt")
+        try Data("notes".utf8).write(to: notes)
+        addTeardownBlock { try? FileManager.default.removeItem(at: notes) }
+
+        model.loadPalette(from: [notes])
+        held.release("slow.png")
+        try await settle()
+
+        XCTAssertEqual(model.paletteNotice, "That is not an image.")
+        XCTAssertNil(model.paletteImage)
+        XCTAssertFalse(model.isReadingImage)
+    }
+
     @MainActor func testClearingThePaletteWhileAnImageIsReadKeepsItCleared() async throws {
         let (model, held) = try makeModel(holding: ["slow.png"])
         model.loadPalette(from: try makeImageFiles("slow.png"))
