@@ -569,8 +569,9 @@ final class AIModelsTests: XCTestCase {
         library.start()
         defer { library.stop() }
         XCTAssertEqual(library.scansStarted, 2)
-        try await waitUntil("the scan after the restart finds both models") { library.hasScanned && library.models.count == 2 }
-        XCTAssertFalse(library.isScanning)
+        try await waitUntil("the scan after the restart finds both models and settles") {
+            library.hasScanned && library.models.count == 2 && !library.isScanning
+        }
     }
 
     @MainActor func testStoppingEndsTheWatchUntilTheNextStart() async throws {
