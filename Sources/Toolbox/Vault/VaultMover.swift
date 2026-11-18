@@ -80,6 +80,7 @@ enum VaultMover {
         let vaultVolume = try requiresMountedVolume ? mountedVolume(at: vaultRoot) : nil
         let before = try fingerprint(source)
         let destination = uniqueDestination(for: visibleName(source.lastPathComponent), in: vaultRoot)
+        let began = Date()
         do {
             try FileManager.default.copyItem(at: source, to: destination)
             try await verify(copy: destination, of: source)
@@ -90,7 +91,7 @@ enum VaultMover {
         } catch let nameTaken as CocoaError where nameTaken.code == .fileWriteFileExists {
             throw nameTaken
         } catch {
-            try? FileManager.default.removeItem(at: destination)
+            if isOurUnfinishedCopy(destination, on: vaultVolume, since: began) { try? FileManager.default.removeItem(at: destination) }
             throw error
         }
         do {
@@ -99,6 +100,13 @@ enum VaultMover {
             throw VaultMoveError.originalKept(error.localizedDescription)
         }
         return destination
+    }
+
+    /// If the vault closed mid-copy, the same path now names a file in the plain folder underneath, which may not be ours.
+    static func isOurUnfinishedCopy(_ destination: URL, on vaultVolume: NSObject?, since began: Date) -> Bool {
+        guard let vaultVolume, volumeIdentifier(of: destination)?.isEqual(vaultVolume) != true else { return true }
+        let created = (try? URL(fileURLWithPath: destination.path).resourceValues(forKeys: [.creationDateKey]))?.creationDate
+        return created.map { $0 >= began.addingTimeInterval(-1) } ?? false
     }
 
     static func mountedVolume(at vaultRoot: URL) throws -> NSObject {

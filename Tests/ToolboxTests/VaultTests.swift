@@ -4,6 +4,22 @@ import XCTest
 @testable import Toolbox
 
 final class VaultTests: XCTestCase {
+    func testAFailedCopyOnlyRemovesAFileThisMoveMade() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vault-unfinished-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let someoneElses = folder.appendingPathComponent("photo.png")
+        try Data("theirs".utf8).write(to: someoneElses)
+        let closedVault = NSObject()
+
+        XCTAssertFalse(VaultMover.isOurUnfinishedCopy(someoneElses, on: closedVault, since: Date().addingTimeInterval(60)),
+                       "a file that was already in the plain folder under the vault is not this move's to delete")
+        XCTAssertTrue(VaultMover.isOurUnfinishedCopy(someoneElses, on: closedVault, since: Date().addingTimeInterval(-60)),
+                      "a copy this move began after it started is its own stray")
+        XCTAssertTrue(VaultMover.isOurUnfinishedCopy(someoneElses, on: nil, since: Date()))
+        XCTAssertFalse(VaultMover.isOurUnfinishedCopy(folder.appendingPathComponent("gone.png"), on: closedVault, since: Date()))
+    }
+
     private var dir: URL!
     private var source: URL!
     private var vault: URL!
