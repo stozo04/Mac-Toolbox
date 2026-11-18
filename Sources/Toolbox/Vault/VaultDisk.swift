@@ -63,7 +63,7 @@ struct VaultDisk {
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "create", "blank", "--encrypt",
                                                          "--size", Self.maximumSize, "--volumeName", Self.volumeName,
                                                          "--fs", "APFS", location.image.path],
-                                         input: Data(password.utf8), timeout: .diskImage)
+                                         input: Data(password.utf8), timeout: .untilFinished)
         guard result.succeeded else {
             try? FileManager.default.removeItem(at: location.image)
             throw VaultError.diskTool(action: "be created", message: Self.reason(result))
@@ -110,7 +110,7 @@ struct VaultDisk {
 
     func changePassword(from old: String, to new: String) async throws {
         let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "chpass", location.image.path],
-                                         input: Data("\(old)\n\(new)\n".utf8), timeout: .diskImage)
+                                         input: Data("\(old)\n\(new)\n".utf8), timeout: .untilFinished)
         guard result.succeeded else {
             if Self.isWrongPassword(result) { throw VaultError.wrongPassword }
             throw VaultError.diskTool(action: "change its password", message: Self.reason(result))

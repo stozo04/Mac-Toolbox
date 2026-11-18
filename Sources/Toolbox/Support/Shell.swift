@@ -14,8 +14,11 @@ enum Shell {
         /// For work whose length follows the user's file or that waits for the person; quitting the app cancels it too.
         case untilCancelled
 
+        /// Never stopped, by a timer, a cancel or quitting: for a write that could damage what it writes if cut off halfway.
+        case untilFinished
+
         static let quick = Timeout.seconds(30)
-        /// `diskutil image` is never stopped at quit and gets minutes: stopping it halfway through could damage the image.
+        /// Mounting and ejecting a disk image can take a while on a busy disk; neither is harmed by being stopped.
         static let diskImage = Timeout.seconds(300)
     }
 
@@ -72,7 +75,7 @@ enum Shell {
                 }
                 if case .seconds(let seconds) = timeout { box.requestStop(.timedOut(seconds), after: seconds) }
             }
-        } onCancel: { box.requestStop(.cancelled) }
+        } onCancel: { if timeout != .untilFinished { box.requestStop(.cancelled) } }
     }
 
     /// Blocks for at most `grace`: the app is gone once quitting returns, so nothing scheduled for later would run.

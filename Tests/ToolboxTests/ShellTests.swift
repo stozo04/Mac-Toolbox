@@ -127,6 +127,17 @@ final class ShellTests: XCTestCase {
         assertCancelled(await bounded.result)
     }
 
+    func testAProgramThatRunsUntilFinishedIsNotStoppedByACancelOrByQuitting() async throws {
+        let (write, pid) = try await start("echo $$; exec /bin/sleep 1.5", timeout: .untilFinished)
+
+        write.cancel()
+        Shell.stopChildrenBeforeQuit(grace: 0.2)
+
+        XCTAssertTrue(isRunning(pid), "a write that must not be cut off halfway is left to finish")
+        let result = try await write.value
+        XCTAssertTrue(result.succeeded)
+    }
+
     // MARK: Output
 
     func testAllOutputOfAFinishedProgramIsReturned() async throws {
