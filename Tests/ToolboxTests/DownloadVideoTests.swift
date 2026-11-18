@@ -4,11 +4,12 @@ import XCTest
 final class DownloadVideoTests: XCTestCase {
     private let url = URL(string: "https://www.youtube.com/watch?v=abc")!
     private let folder = URL(fileURLWithPath: "/tmp/out")
+    private let partials = URL(fileURLWithPath: "/tmp/partials")
 
     private func args(_ o: DownloadOptions, ffmpeg: Bool = true, choice: FormatChoice? = nil,
                       source: YtDlpCommand.Source? = nil, js: JSRuntime? = nil) -> [String] {
         YtDlpCommand.arguments(source: source ?? .link(url), options: o, choice: choice, folder: folder,
-                               hasFFmpeg: ffmpeg,
+                               partialsFolder: partials, hasFFmpeg: ffmpeg,
                                ffmpegDirectory: ffmpeg ? URL(fileURLWithPath: "/opt/homebrew/bin") : nil,
                                jsRuntime: js)
     }
@@ -23,6 +24,12 @@ final class DownloadVideoTests: XCTestCase {
         let a = args(DownloadOptions())
         XCTAssertEqual(value(after: "-S", in: a), "res,fps")
         XCTAssertEqual(value(after: "--merge-output-format", in: a), "mp4")
+        XCTAssertEqual(a.last, url.absoluteString)
+    }
+
+    func testUnfinishedFilesGoToThePartialsFolderAndTheSourceStaysLast() {
+        let a = args(DownloadOptions())
+        XCTAssertEqual(a.indices.filter { a[$0] == "-P" }.map { a[$0 + 1] }, ["/tmp/out", "temp:/tmp/partials"])
         XCTAssertEqual(a.last, url.absoluteString)
     }
 
@@ -179,6 +186,87 @@ final class YtDlpDownloaderTests: XCTestCase {
         let args = try String(contentsOf: argsLog, encoding: .utf8)
         XCTAssertTrue(args.contains("-f top"), args)
         XCTAssertTrue(args.contains("--load-info-json"), args)
+    }
+}
+
+final class YtDlpStoppedDownloadTests: XCTestCase {
+    private var dir: URL!
+
+    override func setUpWithError() throws {
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("tbx-stopped-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        killProgramsLeftRunning()
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    private var partialsLog: URL { dir.appendingPathComponent("partials.txt") }
+
+    private func makeDownloader(afterStartingAFile ending: String) throws -> YtDlpDownloader {
+        let script = dir.appendingPathComponent("yt-dlp")
+        try """
+        #!/bin/sh
+        for argument; do case "$argument" in temp:*) partials="${argument#temp:}";; esac; done
+        mkdir -p "$partials"
+        touch "$partials/video.mp4.part"
+        printf '%s' "$partials" > '\(partialsLog.path)'
+        echo 'TBX_PROGRESS|1|10|NA|NA|NA'
+        \(ending)
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        return YtDlpDownloader(executable: script, ffmpeg: nil)
+    }
+
+    private func partialsFolder() throws -> URL {
+        URL(fileURLWithPath: try String(contentsOf: partialsLog, encoding: .utf8))
+    }
+
+    func testACancelledDownloadStopsYtDlpAndLeavesNoUnfinishedFiles() async throws {
+        let downloader = try makeDownloader(afterStartingAFile: "exec /bin/sleep 30")
+        let link = try XCTUnwrap(URL(string: "https://example.com/v"))
+        let events = EventLog()
+        let folder = try XCTUnwrap(dir)
+        let download = Task.detached {
+            try await downloader.download(url: link, options: DownloadOptions(format: .audio), into: folder) { events.add($0) }
+        }
+        try await waitUntil("yt-dlp reports progress") { events.count > 0 }
+        let partials = try partialsFolder()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: partials.appendingPathComponent("video.mp4.part").path))
+        let child = try XCTUnwrap(Shell.livePIDs.first)
+
+        download.cancel()
+
+        guard case .failure(let error) = await download.result else { return XCTFail("a cancelled download returned a file") }
+        XCTAssertTrue(error is CancellationError, "threw \(error)")
+        XCTAssertFalse(isRunning(child))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partials.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted(), ["partials.txt", "yt-dlp"])
+    }
+
+    func testAFailedDownloadLeavesNoUnfinishedFiles() async throws {
+        let downloader = try makeDownloader(afterStartingAFile: "echo 'ERROR: Video unavailable' >&2; exit 1")
+        do {
+            _ = try await downloader.download(url: try XCTUnwrap(URL(string: "https://example.com/v")), options: DownloadOptions(format: .audio),
+                                              into: dir) { _ in }
+            XCTFail("a failed download returned a file")
+        } catch {
+            XCTAssertEqual(error as? DownloadError, .failed("Video unavailable"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try partialsFolder().path))
+    }
+
+    func testTheSavedFileIsReadFromTheWholeOutput() {
+        XCTAssertEqual(YtDlpDownloader.savedFile(in: "TBX_TITLE|Café\nTBX_PROGRESS|1|2|3|4|5\nTBX_FILE|/tmp/Café.mp4\n"), "/tmp/Café.mp4")
+        XCTAssertNil(YtDlpDownloader.savedFile(in: "TBX_TITLE|Café\n"))
+    }
+
+    func testLinesCutAcrossPiecesOfOutputArriveWhole() {
+        let seen = Locked<[String]>([])
+        let lines = OutputLines { line in seen.update { $0.append(line) } }
+        ["TBX_TI", "TLE|One\nTBX_PROGRESS|1|2", "|3|4|5\r\n", "\nunfinished"].forEach(lines.feed)
+        XCTAssertEqual(seen.value, ["TBX_TITLE|One", "TBX_PROGRESS|1|2|3|4|5"])
     }
 }
 
