@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.4"
+    static let current = "0.11.7"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,16 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.11.7", date: "2026-11-18", changes: [
+            .init(kind: .fixed, text: "Vault: a file is never deleted after its copy went to an unprotected folder because the vault closed mid-move; the original is kept."),
+            .init(kind: .improved, text: "Vault: each file moved in is saved to the disk before its original is deleted, so a power cut can't lose both."),
+            .init(kind: .fixed, text: "Vault: if the vault is ejected from outside Toolbox, the app notices, locks and lists every file that was not moved."),
+            .init(kind: .fixed, text: "Vault: the door won't open over files left outside the vault in its open folder; it names the folder, shows it in Finder and tells you to move them."),
+            .init(kind: .fixed, text: "Vault: an unlock or a vault creation that fails partway no longer leaves a half-open vault or a half-made one behind."),
+            .init(kind: .fixed, text: "Vault: opening a second copy of Toolbox no longer ejects the vault the first copy is using."),
+            .init(kind: .improved, text: "Vault: moving many files into a big vault is faster, and scrolling a long library uses far less memory."),
+            .init(kind: .improved, text: "Vault: search tidies up after deleted files much faster."),
+        ]),
         Release(version: "0.11.4", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Cancel now always stops the work: a cancel pressed just as a conversion, trim or download started could be missed, and it then ran to the end."),
             .init(kind: .fixed, text: "Quitting Toolbox stops conversions and downloads that are still running instead of leaving them going in the background."),

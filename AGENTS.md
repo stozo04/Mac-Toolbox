@@ -15,7 +15,9 @@ swift build
 swift run Toolbox
 .build/debug/Toolbox --page "Video/Trim Video"   # debug: open a page at launch (home | <Category> | <Category>/<Tool>)
 .build/debug/Toolbox --release-notes             # debug: open the release history at launch
+.build/debug/Toolbox --vault-folder /tmp/vault   # debug builds only: keep the Vault page's vault in this folder
 ```
+A development run (a debug build, or anything run from `.build/`) keeps its vault in `~/Library/Application Support/Toolbox/.vault-dev.noindex`; only the installed app uses the real one (`VaultLocation.launch`).
 
 ## Code map
 - `Sources/Toolbox/Models/ToolCatalog.swift` - single source of truth for every tool (name, category, SF Symbol, tagline, workspace type). Add or rename tools here.
@@ -51,6 +53,7 @@ swift run Toolbox
 - Every test wait goes through `waitUntil` (or `waitUntilReady` for an `AVAssetWriterInput`) in `Tests/ToolboxTests/TestSupport.swift`, which fails the test at its deadline. `pause(for:because:)` is only for when there is nothing to observe: a live device settling, or proving that something did not happen a second time. Enforced by `test_unshared_wait`, which bans `Task.sleep` in every other test file.
 - Tests leave nothing on the Mac: settings go in `makeScratchDefaults()` (`test_unmanaged_defaults` bans `UserDefaults(suiteName:)` elsewhere), the clipboard is a `makeScratchPasteboard()` handed to the model (`test_general_pasteboard` bans `NSPasteboard.general`), and files go in a temporary folder. The batch tools make their dated output folder in `~/Downloads`, so a test that runs one calls `removeAfterTest(model.folder)` right after starting the run.
 - The Vault search tests that load the real EmbeddingGemma model run only on a Mac that has the model; CI does not download it and skips them. A test that needs the bundled ffmpeg fails in CI when it is missing (`missingTools`) instead of skipping.
+- A development run never opens the owner's vault: `VaultLocation.launch` gives it the development folder, tests use temporary folders, and nothing may construct a `VaultModel` or `VaultDisk` on `VaultLocation.standard` except the installed app.
 - Icon button that shows a file in Finder: use `RevealButton` (an eye), never a magnifying glass, which reads as search.
 - Match the screenshots: dark cards, rounded corners, options panel ~240pt.
 - Known gaps: Docs has 13 of 22 tools identified (the design shows 87 total; the catalog has 68: Battery Health and Replace Audio were dropped on purpose). 13 tools lack a screenshot; their README says so.
