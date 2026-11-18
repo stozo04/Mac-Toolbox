@@ -21,6 +21,7 @@ final class ModelLibrary {
     private let useSpotlight: Bool
 
     private var started = false
+    private var openPages = 0
     private var watcher: FileWatcher?
     private var watchedPaths: [String] = []
     private var poll: Task<Void, Never>?
@@ -31,13 +32,36 @@ final class ModelLibrary {
     private var spotlightPaths: [URL] = []
     private var observers: [NSObjectProtocol] = []
 
-    init(home: URL = FileManager.default.homeDirectoryForCurrentUser, central: URL? = nil, spotlight: Bool = true) {
+    /// The least time between two looks caused by Toolbox coming to the front. The folder watch reports real changes at once,
+    /// so this look is only a safety net and switching apps back and forth should not walk the disk every time.
+    static let activationRescanInterval: Duration = .seconds(30)
+    private let now: () -> ContinuousClock.Instant
+    private var lastActivationRescan: ContinuousClock.Instant?
+    @ObservationIgnored private(set) var scansStarted = 0
+
+    typealias Finder = @Sendable (ModelScanner, URL) async -> [InstalledModel]
+    private let find: Finder
+
+    init(home: URL = FileManager.default.homeDirectoryForCurrentUser, central: URL? = nil, spotlight: Bool = true,
+         now: @escaping () -> ContinuousClock.Instant = { .now }, find: @escaping Finder = { await ModelLibrary.findModels($0, home: $1) }) {
         self.home = home
         self.central = central ?? home.appendingPathComponent("Library/Application Support/Toolbox/AI Models")
         self.useSpotlight = spotlight
+        self.now = now
+        self.find = find
     }
 
     // MARK: Lifecycle
+
+    func pageAppeared() {
+        openPages += 1
+        start()
+    }
+
+    func pageDisappeared() {
+        openPages = max(0, openPages - 1)
+        if openPages == 0 { stop() }
+    }
 
     /// Starts watching and scans; safe to call again.
     func start() {
@@ -46,40 +70,61 @@ final class ModelLibrary {
         updateWatcher()
         if useSpotlight { startSpotlight() }
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            Task { @MainActor in self?.appBecameActive() }
         })
         // Folders that did not exist yet (Ollama installed later) can't be watched until they appear.
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
-                self?.updateWatcher()
+                guard !Task.isCancelled, let self else { return }
+                // A folder that has just appeared may already hold models.
+                if updateWatcher() { refreshSoon() }
             }
         }
         refresh()
     }
 
+    /// Stops watching and drops any look in progress, so nothing runs until `start()` is called again.
     func stop() {
         started = false
         watcher?.stop()
         watcher = nil
         watchedPaths = []
         poll?.cancel()
+        poll = nil
         debounce?.cancel()
+        debounce = nil
         scanning?.cancel()
+        scanning = nil
+        rescanAfter = false
+        isScanning = false
         query?.stop()
         query = nil
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
     }
 
-    /// Looks again now, or right after the scan that is running.
+    /// Looks again now, or right after the scan that is running. Does nothing while stopped: `start()` always scans.
     func refresh() {
+        guard started else { return }
         guard scanning == nil else { rescanAfter = true; return }
         scan()
     }
 
+    /// Looks again because Toolbox came to the front, unless it already did so within `activationRescanInterval`.
+    /// True when it asked for a look.
+    @discardableResult
+    func appBecameActive() -> Bool {
+        let time = now()
+        if let last = lastActivationRescan, time - last < Self.activationRescanInterval { return false }
+        lastActivationRescan = time
+        refresh()
+        return true
+    }
+
     /// Looks again in a moment: many file events arrive together while a model downloads or is deleted.
     func refreshSoon() {
+        guard started else { return }
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(800))
@@ -92,13 +137,10 @@ final class ModelLibrary {
 
     private func scan() {
         isScanning = true
+        scansStarted += 1
         let scanner = ModelScanner(home: home, central: central, extraPaths: spotlightPaths)
-        let home = self.home
-        scanning = Task { [weak self] in
-            let found = await Task.detached(priority: .utility) { () -> [InstalledModel] in
-                let scanned = scanner.scan()
-                return await ModelAssociations.apply(to: scanned, index: AppIndex.build(home: home))
-            }.value
+        scanning = Task(priority: .utility) { [weak self, find, home] in
+            let found = await find(scanner, home)
             guard let self, !Task.isCancelled else { return }
             if found != models {
                 if hasScanned { announce(from: models, to: found) }
@@ -113,6 +155,15 @@ final class ModelLibrary {
                 refresh()
             }
         }
+    }
+
+    /// The walk over the disk. It runs in the scanning task itself, off the main actor, so that cancelling the task stops the walk.
+    nonisolated static func findModels(_ scanner: ModelScanner, home: URL) async -> [InstalledModel] {
+        let scanned = scanner.scan()
+        if Task.isCancelled { return [] }
+        let index = AppIndex.build(home: home)
+        if Task.isCancelled { return [] }
+        return await ModelAssociations.apply(to: scanned, index: index)
     }
 
     /// Says what was added or removed, so a model appearing or vanishing doesn't go unnoticed.
@@ -142,10 +193,12 @@ final class ModelLibrary {
             .filter { FileManager.default.fileExists(atPath: $0) }
     }
 
-    private func updateWatcher() {
+    /// Watches the folders that exist now, and says whether that set changed.
+    @discardableResult
+    private func updateWatcher() -> Bool {
         if !FileManager.default.fileExists(atPath: central.path) { try? FileManager.default.createDirectory(at: central, withIntermediateDirectories: true) }
         let targets = watchTargets
-        guard targets != watchedPaths else { return }
+        guard targets != watchedPaths else { return false }
         watcher?.stop()
         let central = self.central.path
         let next = FileWatcher(paths: targets) { [weak self] paths in
@@ -155,8 +208,7 @@ final class ModelLibrary {
         next.start()
         watcher = next
         watchedPaths = targets
-        // A folder that has just appeared may already hold models.
-        if started, hasScanned { refreshSoon() }
+        return true
     }
 
     /// Whether a changed path could be a model: the model files themselves, or anything in a folder named for models.

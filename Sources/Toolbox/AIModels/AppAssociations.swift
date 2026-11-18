@@ -15,12 +15,14 @@ struct AppIndex {
 
     static let folders = ["/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities"]
 
+    /// Gives up with what it has as soon as its task is cancelled, so a caller that cancels must not use the result.
     static func build(home: URL = FileManager.default.homeDirectoryForCurrentUser, folders: [URL]? = nil) -> AppIndex {
         let fm = FileManager.default
         let places = folders ?? (Self.folders.map { URL(fileURLWithPath: $0) } + [home.appendingPathComponent("Applications")])
         var entries: [Entry] = []
         for folder in places {
             for url in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [] where url.pathExtension == "app" {
+                if Task.isCancelled { return AppIndex(entries: entries) }
                 let contents = url.appendingPathComponent("Contents")
                 var embedded: [String] = []
                 for sub in ["Resources", "Frameworks", "PlugIns"] {

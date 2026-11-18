@@ -36,6 +36,10 @@ enum ReleaseNotes {
             .init(kind: .fixed, text: "Vault: two copies of Toolbox can no longer open the vault at the same time or eject it from under each other."),
             .init(kind: .improved, text: "Vault: creating the vault and changing its password are never cut short, even if you quit while they run."),
         ]),
+        Release(version: "0.11.8", date: "2026-11-18", changes: [
+            .init(kind: .fixed, text: "AI Models stops watching your disk for models when you leave the page. Before, one visit kept it looking for as long as Toolbox was open."),
+            .init(kind: .improved, text: "AI Models: coming back to Toolbox looks for new models at most once every 30 seconds instead of every time."),
+        ]),
         Release(version: "0.11.7", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "Vault: a file is never deleted after its copy went to an unprotected folder because the vault closed mid-move; the original is kept."),
             .init(kind: .improved, text: "Vault: each file moved in is saved to the disk before its original is deleted, so a power cut can't lose both."),

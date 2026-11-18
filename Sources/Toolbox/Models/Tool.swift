@@ -61,12 +61,16 @@ enum ToolInput: Hashable {
     /// Free text in, result out (Summarize, Translate...).
     case text
 
-    /// Only the generic placeholder workspaces count as not built. Any dedicated case means the tool is real,
-    /// so a new tool gets the "not implemented" banner removed just by getting its own case.
+    /// Only the generic placeholder workspaces count as not built; a dedicated case means the tool is real.
+    /// Every case is listed, so a new one does not compile until its author says which of the two it is.
     var isImplemented: Bool {
         switch self {
-        case .dropFiles, .live, .text: false
-        default: true
+        case .dropFiles, .live, .text:
+            false
+        case .link, .recordScreen, .trimVideo, .videoToGif, .extractFrames, .resizeVideo, .compressVideo, .convertImages, .compressImages,
+             .resizeImages, .rotateImages, .removeMetadata, .colorPicker, .blurFaces, .redactImage, .beautifyScreenshot, .annotateScreenshot,
+             .removeBackground, .scanDocument, .redactPDF, .burnInSubtitles, .muteVideo, .mediaInfo, .extractAudio, .trimAudio, .mac:
+            true
         }
     }
 }

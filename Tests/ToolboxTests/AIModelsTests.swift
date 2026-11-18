@@ -557,6 +557,137 @@ final class AIModelsTests: XCTestCase {
         XCTAssertEqual(library.models.count, 2)
     }
 
+    @MainActor func testStartingAgainAfterStoppingMidScanScansAgain() async throws {
+        try makeDigUp()
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.start()
+        XCTAssertTrue(library.isScanning)
+        library.stop()
+        XCTAssertFalse(library.isScanning)
+        XCTAssertFalse(library.hasScanned)
+
+        library.start()
+        defer { library.stop() }
+        XCTAssertEqual(library.scansStarted, 2)
+        try await waitUntil("the scan after the restart finds both models and settles") {
+            library.hasScanned && library.models.count == 2 && !library.isScanning
+        }
+    }
+
+    @MainActor func testStoppingEndsTheWatchUntilTheNextStart() async throws {
+        try makeDigUp()
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.start()
+        defer { library.stop() }
+        try await waitUntil("the first scan finds both models") { library.hasScanned && library.models.count == 2 }
+        library.stop()
+        let scansBeforeTheChange = library.scansStarted
+
+        try makeGGUF(support.appendingPathComponent("LM Studio/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf"), arch: "qwen2", megabytes: 4)
+        try await pause(for: .seconds(4), because: "a watch still running would report the new file and rescan within about 2 seconds")
+        XCTAssertEqual(library.scansStarted, scansBeforeTheChange)
+        XCTAssertEqual(library.models.count, 2)
+
+        library.start()
+        try await waitUntil("the model added while stopped is listed after the restart") { library.models.count == 3 && !library.isScanning }
+        try await pause(for: .seconds(2), because: "a second scan queued by the restart would start within a second")
+        XCTAssertEqual(library.scansStarted, scansBeforeTheChange + 1)
+    }
+
+    @MainActor func testComingToTheFrontAsksForALookAtMostOncePerInterval() {
+        let clock = Locked(ContinuousClock.now)
+        let library = ModelLibrary(home: home, spotlight: false, now: { clock.value })
+
+        XCTAssertTrue(library.appBecameActive())
+        clock.update { $0 += ModelLibrary.activationRescanInterval - .seconds(1) }
+        XCTAssertFalse(library.appBecameActive())
+        clock.update { $0 += .seconds(1) }
+        XCTAssertTrue(library.appBecameActive())
+        XCTAssertFalse(library.appBecameActive())
+    }
+
+    @MainActor func testStoppingMidScanCancelsTheWalkAndTheNextStartScansOnce() async throws {
+        try makeDigUp()
+        let onDisk = ModelScanner(home: home, central: support.appendingPathComponent("Toolbox/AI Models")).scan()
+        XCTAssertEqual(onDisk.count, 2)
+        let walks = Locked(0), sawCancellation = Locked(false)
+        let library = ModelLibrary(home: home, spotlight: false, find: { _, _ in
+            walks.update { $0 += 1 }
+            guard walks.value == 1 else { return Array(onDisk.prefix(1)) }
+            while !Task.isCancelled { await Task.yield() }
+            sawCancellation.set(true)
+            return onDisk
+        })
+
+        library.start()
+        try await waitUntil("the first walk is running") { walks.value == 1 }
+        library.stop()
+        try await waitUntil("the walk sees that it was cancelled") { sawCancellation.value }
+        XCTAssertFalse(library.hasScanned)
+
+        library.start()
+        defer { library.stop() }
+        try await waitUntil("the scan after the restart finishes") { library.hasScanned && !library.isScanning }
+        XCTAssertEqual(library.models.count, 1, "only the second walk's result is listed")
+        XCTAssertEqual(walks.value, 2)
+        XCTAssertEqual(library.scansStarted, 2)
+    }
+
+    func testACancelledScanGivesUpAndFindsNothing() async throws {
+        try makeDigUp()
+        let scanner = ModelScanner(home: home, central: support.appendingPathComponent("Toolbox/AI Models"))
+        let apps = home.appendingPathComponent("Applications")
+        try FileManager.default.createDirectory(at: apps.appendingPathComponent("DigUp.app"), withIntermediateDirectories: true)
+
+        let cancelled = await Task { () -> ([InstalledModel], Int) in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return (scanner.scan(), AppIndex.build(folders: [apps]).entries.count)
+        }.value
+        XCTAssertTrue(cancelled.0.isEmpty)
+        XCTAssertEqual(cancelled.1, 0)
+
+        XCTAssertEqual(scanner.scan().count, 2)
+        XCTAssertEqual(AppIndex.build(folders: [apps]).entries.count, 1)
+    }
+
+    @MainActor func testTheLibraryKeepsWatchingWhileAnotherWindowShowsThePage() async throws {
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.pageAppeared()
+        library.pageAppeared()
+        try await waitUntil("the first scan finishes") { library.hasScanned && !library.isScanning }
+        let scansWithBothOpen = library.scansStarted
+
+        library.pageDisappeared()
+        library.refresh()
+        try await waitUntil("the page still open in the other window looks again") { library.scansStarted > scansWithBothOpen }
+
+        library.pageDisappeared()
+        let scansWhenTheLastPageClosed = library.scansStarted
+        library.refresh()
+        XCTAssertEqual(library.scansStarted, scansWhenTheLastPageClosed, "with no page open, nothing scans")
+        XCTAssertFalse(library.isScanning)
+    }
+
+    @MainActor func testALookAskedForWhileStoppedWaitsForTheNextStart() async throws {
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.refresh()
+        XCTAssertEqual(library.scansStarted, 0)
+        XCTAssertFalse(library.isScanning)
+
+        library.start()
+        try await waitUntil("the first scan finishes") { library.hasScanned && !library.isScanning }
+        library.stop()
+        let scansWhenStopped = library.scansStarted
+        library.refresh()
+        XCTAssertEqual(library.scansStarted, scansWhenStopped)
+        XCTAssertFalse(library.isScanning)
+
+        library.start()
+        defer { library.stop() }
+        XCTAssertEqual(library.scansStarted, scansWhenStopped + 1)
+        try await waitUntil("the scan after the restart finishes") { !library.isScanning }
+    }
+
     // MARK: Helpers
 
     /// Size of the file a path leads to, links followed, read fresh every time.

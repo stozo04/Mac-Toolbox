@@ -15,6 +15,40 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.paths.outputs.app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Decide whether the change can affect the app
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          decide() {
+            echo "$2"
+            echo "app=$1" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          [ "$EVENT_NAME" = "pull_request" ] || decide true "Not a pull request ($EVENT_NAME): every job runs."
+          if ! changed="$(git diff --no-renames --name-only "origin/$BASE_REF"...HEAD)"; then
+            decide true "Could not compare with origin/$BASE_REF: every job runs."
+          fi
+          [ -n "$changed" ] || decide true "No changed files found: every job runs."
+          if grep -q '^\.github/workflows/' <<< "$changed"; then
+            decide true "A workflow changed: every job runs."
+          fi
+          if ! first="$(scripts/app-untouched.sh <<< "$changed")"; then
+            decide true "Changed a path that can affect the app ($first): every job runs."
+          fi
+          decide false "Only docs, designs, Dependabot config or Supabase files changed: the macOS jobs are skipped."
+
   version:
     name: Version bumped
     if: github.event_name == 'pull_request'
@@ -25,10 +59,14 @@ jobs:
         with:
           fetch-depth: 0
       - name: Version raised and release notes added (AGENTS.md, "Versioning")
-        run: scripts/check-version-bump.sh "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: scripts/check-version-bump.sh "origin/$BASE_REF"
 
   build-and-test:
-    name: Build & test
+    name: Build & test (macOS)
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -67,7 +105,9 @@ jobs:
         run: swift test --skip-build
 
   package:
-    name: Package Toolbox.app
+    name: Package Toolbox.app (macOS)
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -88,8 +128,10 @@ jobs:
         with:
           path: Vendor/llama
           key: llama-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama.cpp-no-logits.patch') }}
-      - name: Build the app (release, ad-hoc signed)
-        run: BUILD="${{ github.run_number }}" scripts/make-app.sh   # version from ReleaseNotes.swift, run number as build
+      - name: Build the app (release, ad-hoc signed; version from ReleaseNotes.swift, run number as build)
+        env:
+          BUILD: ${{ github.run_number }}
+        run: scripts/make-app.sh
       - name: Upload Toolbox.zip
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -98,15 +140,20 @@ jobs:
           retention-days: 14
           if-no-files-found: error
       - name: How to open it
+        env:
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           {
             echo "### Toolbox.app for this run"
-            echo "Download the **Toolbox-…** artifact below (or \`gh run download ${{ github.run_id }} -R ${{ github.repository }}\`), unzip it, then unzip Toolbox.zip."
+            echo "Download the **Toolbox-…** artifact below (or \`gh run download $RUN_ID -R $REPOSITORY\`), unzip it, then unzip Toolbox.zip."
             echo "It is ad-hoc signed, so the first time: right-click Toolbox.app → Open, or run \`xattr -dr com.apple.quarantine Toolbox.app\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
-    name: Lint & format
+    name: Lint & format (macOS)
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -115,8 +162,62 @@ jobs:
         run: command -v swiftlint >/dev/null || brew install swiftlint
       - name: SwiftLint (errors fail the check, warnings are annotated)
         run: swiftlint lint --reporter github-actions-logging
-      - name: swift-format (report only for now)
+      - name: swift-format (report only, see #37)
         continue-on-error: true
         run: |
           xcrun swift-format lint --recursive --parallel Sources/Toolbox Tests 2>&1 | tee swift-format.txt | head -200
           echo "swift-format findings: $(grep -c ': warning:' swift-format.txt || true)" >> "$GITHUB_STEP_SUMMARY"
+
+  build-and-test-required:
+    name: Build & test
+    needs: [changes, build-and-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+      - name: Report the result of "Build & test (macOS)"
+        env:
+          JOB_NAME: Build & test (macOS)
+          JOB_RESULT: ${{ needs.build-and-test.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          APP_AFFECTED: ${{ needs.changes.outputs.app }}
+        run: .github/scripts/required-check.sh
+
+  package-required:
+    name: Package Toolbox.app
+    needs: [changes, package]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+      - name: Report the result of "Package Toolbox.app (macOS)"
+        env:
+          JOB_NAME: Package Toolbox.app (macOS)
+          JOB_RESULT: ${{ needs.package.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          APP_AFFECTED: ${{ needs.changes.outputs.app }}
+        run: .github/scripts/required-check.sh
+
+  lint-required:
+    name: Lint & format
+    needs: [changes, lint]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+      - name: Report the result of "Lint & format (macOS)"
+        env:
+          JOB_NAME: Lint & format (macOS)
+          JOB_RESULT: ${{ needs.lint.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          APP_AFFECTED: ${{ needs.changes.outputs.app }}
+        run: .github/scripts/required-check.sh
