@@ -8,9 +8,9 @@ protocol BatchStatus: Equatable {
 }
 
 protocol BatchItem: Identifiable where ID == UUID {
-    associatedtype Status: BatchStatus
+    associatedtype QueueStatus: BatchStatus
     var url: URL { get }
-    var status: Status { get set }
+    var status: QueueStatus { get set }
 }
 
 struct BatchTool {
@@ -23,7 +23,7 @@ struct BatchTool {
 
 @MainActor @Observable
 final class BatchQueue<Item: BatchItem> {
-    typealias Work = @MainActor (Item, URL, Step) async throws -> Item.Status
+    typealias Work = @MainActor (Item, URL, Step) async throws -> Item.QueueStatus
 
     private(set) var items: [Item] = []
     private(set) var isRunning = false
@@ -101,11 +101,11 @@ final class BatchQueue<Item: BatchItem> {
         fileprivate let id: UUID
         fileprivate let run: UUID
 
-        @MainActor func set(_ status: Item.Status) {
+        @MainActor func set(_ status: Item.QueueStatus) {
             queue.begin(status, for: id, in: run)
         }
 
-        @MainActor func progress(_ status: @escaping @Sendable (Double) -> Item.Status) -> @Sendable (Double) -> Void {
+        @MainActor func progress(_ status: @escaping @Sendable (Double) -> Item.QueueStatus) -> @Sendable (Double) -> Void {
             let phase = queue.begin(status(0), for: id, in: run)
             return { [queue, id] fraction in
                 Task { @MainActor in queue.report(status(fraction), for: id, in: phase) }
@@ -160,7 +160,7 @@ final class BatchQueue<Item: BatchItem> {
     }
 
     private func outcome(of work: @escaping Work, on item: Item, into folder: URL, in run: UUID,
-                         failureContext: [String: String]) async -> Item.Status {
+                         failureContext: [String: String]) async -> Item.QueueStatus {
         do {
             return try await work(item, folder, Step(queue: self, id: item.id, run: run))
         } catch is CancellationError {
@@ -172,7 +172,7 @@ final class BatchQueue<Item: BatchItem> {
     }
 
     @discardableResult
-    private func begin(_ status: Item.Status, for id: UUID, in run: UUID) -> UUID? {
+    private func begin(_ status: Item.QueueStatus, for id: UUID, in run: UUID) -> UUID? {
         guard runID == run else { return nil }
         let phase = UUID()
         self.phase = phase
@@ -180,7 +180,7 @@ final class BatchQueue<Item: BatchItem> {
         return phase
     }
 
-    private func report(_ status: Item.Status, for id: UUID, in phase: UUID?) {
+    private func report(_ status: Item.QueueStatus, for id: UUID, in phase: UUID?) {
         guard let phase, self.phase == phase else { return }
         update(id) { $0.status = status }
     }
