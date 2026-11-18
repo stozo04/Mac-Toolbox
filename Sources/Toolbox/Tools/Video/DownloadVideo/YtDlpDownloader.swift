@@ -5,7 +5,7 @@ struct JSRuntime: Equatable, Sendable {
     let path: URL
 }
 
-/// Finds, installs and runs the yt-dlp binary.
+/// Runs the yt-dlp binary.
 struct YtDlpDownloader: Downloader {
     let executable: URL
     let ffmpeg: URL?
@@ -71,17 +71,17 @@ final class OutputLines: @unchecked Sendable {
 }
 
 enum YtDlpLocator {
-    static let releaseURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!
-
     static var installedURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Toolbox/bin/yt-dlp")
     }
 
-    /// Order: $TOOLBOX_YTDLP, then whichever of the bundled and the downloaded copy is newer
+    /// Order: $TOOLBOX_YTDLP (debug builds only), then whichever of the bundled and the downloaded copy is newer
     /// (the bundled one goes stale, so "Update yt-dlp" saves a fresh copy that must win), then Homebrew.
     static func findYtDlp() -> URL? {
+        #if DEBUG
         if let override = firstExecutable([ProcessInfo.processInfo.environment["TOOLBOX_YTDLP"]]) { return override }
+        #endif
         let own = [Bundle.main.url(forResource: "yt-dlp", withExtension: nil)?.path, installedURL.path]
             .compactMap { $0 }.filter { FileManager.default.isExecutableFile(atPath: $0) }
             .max { modified($0) < modified($1) }
@@ -103,20 +103,6 @@ enum YtDlpLocator {
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.1) }
             .map { JSRuntime(name: $0.0, path: URL(fileURLWithPath: $0.1)) }
-    }
-
-    /// Downloads the official standalone yt-dlp build into Application Support.
-    static func install() async throws {
-        let (tmp, response) = try await URLSession.shared.download(from: releaseURL)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw DownloadError.failed("Could not download yt-dlp from GitHub.")
-        }
-        let fm = FileManager.default
-        let dest = installedURL
-        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? fm.removeItem(at: dest)
-        try fm.moveItem(at: tmp, to: dest)
-        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest.path)
     }
 
     private static func firstExecutable(_ paths: [String?]) -> URL? {
