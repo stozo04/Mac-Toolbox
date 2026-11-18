@@ -2,18 +2,20 @@ import AppKit
 import Observation
 
 @MainActor @Observable
-final class CompressImagesModel {
+final class CompressImagesModel: BatchQueueModel {
     /// Shared so the queue survives switching to another tool and back.
     static let shared = CompressImagesModel()
 
-    enum Status: Equatable {
+    enum Status: BatchStatus {
         case waiting
         case compressing
         case done(CompressResult)
         case failed(String)
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
-    struct Item: Identifiable {
+    struct Item: BatchItem {
         let id = UUID()
         let url: URL
         let bytes: Int64
@@ -23,18 +25,16 @@ final class CompressImagesModel {
         var kind: String { ImageFormat.name(forExtension: url.pathExtension) }
     }
 
-    private(set) var items: [Item] = []
-    private(set) var isRunning = false
-    private(set) var folder: URL?
-    private(set) var notice: String?
+    let queue: BatchQueue<Item>
+
+    init(outputParent: URL? = nil) {
+        queue = BatchQueue(BatchTool(outputFolderName: "Toolbox Compressed Images", logCategory: "compress-images", failureLog: "Image compression failed",
+                                     skippedBecause: "had no images", files: BatchFiles.images), outputParent: outputParent)
+    }
 
     var settings = CompressSettings()
 
-    private var task: Task<Void, Never>?
-    private var runID = UUID()
-
-    var hasItems: Bool { !items.isEmpty }
-    var hasPending: Bool { items.contains { $0.status == .waiting } }
+    var hasPending: Bool { queue.hasWaiting }
 
     private var results: [CompressResult] {
         items.compactMap { if case .done(let r) = $0.status { r } else { nil } }
@@ -44,87 +44,19 @@ final class CompressImagesModel {
     var savedBytes: Int64 { results.reduce(0) { $0 + $1.savedBytes } }
     var originalBytes: Int64 { results.reduce(0) { $0 + $1.sourceBytes } }
 
-    // MARK: Queue
-
-    /// Adds images; folders are searched for images inside them.
-    func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += BatchFiles.images(in: url)
-            if found.count == before { skipped += 1 }
-        }
-        var known = Set(items.map { BatchFiles.identity($0.url) })
-        items += found.filter { known.insert(BatchFiles.identity($0)).inserted }.map {
-            Item(url: $0, bytes: Int64((try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
-        }
-        notice = skipped == 0 ? nil : "\(skipped) item(s) had no images and were skipped."
-    }
-
-    func remove(_ id: UUID) {
-        guard !isRunning else { return }
-        items.removeAll { $0.id == id }
-    }
-
-    func clear() {
-        task?.cancel()
-        runID = UUID()
-        items = []
-        folder = nil
-        notice = nil
-        isRunning = false
-    }
+    func add(_ urls: [URL]) { queue.add(urls) { Item(url: $0, bytes: BatchFiles.bytes(of: $0)) } }
 
     // MARK: Compressing
 
     func compress() {
-        guard !isRunning, hasPending else { return }
-        let folder: URL
-        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Compressed Images") } catch {
-            notice = error.localizedDescription
-            Log.error("Output folder failed", category: "compress-images", Log.details(error))
-            return
-        }
-        notice = OutputFolderError.clearing(notice)
-        isRunning = true
-        for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        self.folder = folder
+        guard hasPending else { return }
         let settings = self.settings
-        let run = UUID()
-        runID = run
-        task = Task { [weak self] in
-            guard let self else { return }
-            for item in items where item.status == .waiting {
-                if Task.isCancelled || runID != run { break }
-                update(item.id, .compressing)
-                // Decoding and encoding are heavy; keep them off the main thread.
-                let outcome = await Task.detached(priority: .userInitiated) { () -> Result<CompressResult, Error> in
-                    Result { try ImageCompressor.compress(source: item.url, settings: settings, into: folder) }
-                }.value
-                switch outcome {
-                case .success(let result):
-                    update(item.id, .done(result))
-                    Log.info("Image compressed", category: "compress-images", ["kind": item.kind, "level": settings.level.rawValue, "format": settings.format.rawValue])
-                case .failure(let error):
-                    update(item.id, .failed(error.localizedDescription))
-                    Log.error("Image compression failed", category: "compress-images", Log.details(error, file: item.url))
-                }
+        queue.run { item, folder, step in
+            let result = try await step.detached(showing: .compressing) {
+                try ImageCompressor.compress(source: item.url, settings: settings, into: folder)
             }
-            guard runID == run else { return }
-            for i in items.indices where items[i].status == .compressing { items[i].status = .waiting }
-            isRunning = false
+            Log.info("Image compressed", category: "compress-images", ["kind": item.kind, "level": settings.level.rawValue, "format": settings.format.rawValue])
+            return .done(result)
         }
     }
-
-    func cancel() { task?.cancel() }
-
-    private func update(_ id: UUID, _ status: Status) {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i].status = status
-    }
-
-    func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-
-    func revealFolder() { if let folder { NSWorkspace.shared.open(folder) } }
 }
