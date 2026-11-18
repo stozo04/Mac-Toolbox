@@ -281,6 +281,7 @@ final class HiddenSettingsTests: XCTestCase {
         for v in [0.1, 0.2, 0.3] { m.setNumber(v, delay) }
         m.setOn(true, try setting("finder.path"))
         try await waitUntil("the restart has run") { !restarter.restarted.isEmpty }
+        try await pause(for: .milliseconds(900), because: "a second restart would fire within one more 700 ms debounce")
         XCTAssertEqual(restarter.restarted.count, 1)
         XCTAssertEqual(restarter.restarted.first, [.dock, .finder])
     }
