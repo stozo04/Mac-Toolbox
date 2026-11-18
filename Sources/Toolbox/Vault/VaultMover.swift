@@ -13,6 +13,8 @@ enum VaultMoveError: LocalizedError, Equatable {
     case interrupted
     case changedWhileMoving
     case unreadable
+    case vaultNotOpen
+    case notSaved(String)
     case originalKept(String)
 
     var errorDescription: String? {
@@ -26,6 +28,8 @@ enum VaultMoveError: LocalizedError, Equatable {
         case .interrupted: "Moving stopped when the vault locked, so the original was kept."
         case .copyDiffers: "The copy in the vault didn't match the original, so the original was kept."
         case .unreadable: "The copy in the vault couldn't be opened, so the original was kept."
+        case .vaultNotOpen: "The vault closed before it was safely inside, so the original was kept."
+        case .notSaved(let reason): "The copy in the vault couldn't be saved to the disk, so the original was kept: \(reason)"
         case .originalKept(let reason): "It's in the vault, but the original couldn't be deleted: \(reason)"
         }
     }
@@ -35,6 +39,7 @@ struct VaultMoveFailure: Identifiable, Equatable {
     let id = UUID()
     let name: String
     let reason: String
+    var source: URL?
 }
 
 enum VaultMover {
@@ -70,17 +75,21 @@ enum VaultMover {
         }
     }
 
-    @concurrent static func move(_ source: URL, into vaultRoot: URL) async throws -> URL {
+    @concurrent static func move(_ source: URL, into vaultRoot: URL, requiresMountedVolume: Bool = true,
+                                 flush: @Sendable (URL) throws -> Void = flushToDisk) async throws -> URL {
         try check(source, vaultRoot: vaultRoot)
+        let vaultVolume = try requiresMountedVolume ? mountedVolume(at: vaultRoot) : nil
         let before = try fingerprint(source)
         let destination = uniqueDestination(for: visibleName(source.lastPathComponent), in: vaultRoot)
-        try FileManager.default.copyItem(at: source, to: destination)
+        let created = try copyAsNewFile(source, to: destination)
         do {
             try await verify(copy: destination, of: source)
             guard !Task.isCancelled, copyIsStillThere(destination, matching: source) else { throw VaultMoveError.interrupted }
             guard try fingerprint(source) == before else { throw VaultMoveError.changedWhileMoving }
+            try flush(destination)
+            if let vaultVolume { try require(destination, isOn: vaultVolume, mountedAt: vaultRoot) }
         } catch {
-            try? FileManager.default.removeItem(at: destination)
+            removeIfStill(created, at: destination)
             throw error
         }
         do {
@@ -89,6 +98,71 @@ enum VaultMover {
             throw VaultMoveError.originalKept(error.localizedDescription)
         }
         return destination
+    }
+
+    struct FileIdentity: Equatable {
+        let device: dev_t
+        let node: ino_t
+    }
+
+    /// The copy is made with O_EXCL and written through that one open file, so it is this move's own from first byte to
+    /// last: if the vault closes mid-copy, the same path names another file, in the plain folder underneath, which is never
+    /// written to and whose identity will not match.
+    static func copyAsNewFile(_ source: URL, to destination: URL) throws -> FileIdentity {
+        let from = open(source.path, O_RDONLY)
+        guard from >= 0 else { throw systemError() }
+        defer { close(from) }
+        let to = open(destination.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        guard to >= 0 else { throw errno == EEXIST ? CocoaError(.fileWriteFileExists) : systemError() }
+        defer { close(to) }
+        var facts = stat()
+        guard fstat(to, &facts) == 0 else { throw systemError() }
+        let made = FileIdentity(device: facts.st_dev, node: facts.st_ino)
+        guard fcopyfile(from, to, nil, copyfile_flags_t(COPYFILE_ALL)) == 0 else {
+            let failure = systemError()
+            removeIfStill(made, at: destination)
+            throw failure
+        }
+        return made
+    }
+
+    static func removeIfStill(_ made: FileIdentity, at url: URL) {
+        if fileIdentity(of: url) == made { try? FileManager.default.removeItem(at: url) }
+    }
+
+    static func fileIdentity(of url: URL) -> FileIdentity? {
+        var facts = stat()
+        guard lstat(url.path, &facts) == 0 else { return nil }
+        return FileIdentity(device: facts.st_dev, node: facts.st_ino)
+    }
+
+    private static func systemError() -> Error { POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+
+    static func mountedVolume(at vaultRoot: URL) throws -> NSObject {
+        guard VaultThumbnails.isMountedVolume(vaultRoot.path), let volume = volumeIdentifier(of: vaultRoot) else {
+            throw VaultMoveError.vaultNotOpen
+        }
+        return volume
+    }
+
+    static func require(_ copy: URL, isOn vaultVolume: NSObject, mountedAt vaultRoot: URL) throws {
+        guard try mountedVolume(at: vaultRoot).isEqual(vaultVolume), volumeIdentifier(of: copy)?.isEqual(vaultVolume) == true else {
+            throw VaultMoveError.vaultNotOpen
+        }
+    }
+
+    private static func volumeIdentifier(of url: URL) -> NSObject? {
+        let fresh = URL(fileURLWithPath: url.path)
+        return (try? fresh.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier as? NSObject
+    }
+
+    static func flushToDisk(_ file: URL) throws {
+        let descriptor = open(file.path, O_RDONLY)
+        guard descriptor >= 0 else { throw VaultMoveError.notSaved(String(cString: strerror(errno))) }
+        defer { close(descriptor) }
+        guard fcntl(descriptor, F_FULLFSYNC) == 0 || fsync(descriptor) == 0 else {
+            throw VaultMoveError.notSaved(String(cString: strerror(errno)))
+        }
     }
 
     struct Fingerprint: Equatable {

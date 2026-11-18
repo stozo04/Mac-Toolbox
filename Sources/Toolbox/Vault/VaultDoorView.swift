@@ -152,6 +152,12 @@ struct VaultDoorView: View {
             }
             if let message = vault.message {
                 Text(message).font(.callout).foregroundStyle(.red).multilineTextAlignment(.center)
+                if let folder = vault.folderWithFilesLeftOutside {
+                    HStack(spacing: 6) {
+                        Text("Show the folder in Finder").font(.callout).foregroundStyle(.secondary)
+                        RevealButton(help: "Show the folder in Finder") { NSWorkspace.shared.open(folder) }
+                    }
+                }
             }
             Button(action: submit) {
                 Group {

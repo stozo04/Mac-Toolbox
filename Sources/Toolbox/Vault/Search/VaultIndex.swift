@@ -76,8 +76,7 @@ final class VaultIndex {
     }
 
     func store(path: String, file: VaultIndexedFile, segments: [VaultSegment]) throws {
-        try execute("BEGIN IMMEDIATE")
-        do {
+        try inTransaction {
             try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, path) }
             for segment in segments {
                 try run("INSERT INTO segments(path, modality, start, finish, vector) VALUES(?, ?, ?, ?, ?)") { statement in
@@ -93,23 +92,21 @@ final class VaultIndex {
                 sqlite3_bind_int64(statement, 2, file.bytes)
                 sqlite3_bind_double(statement, 3, file.modified)
             }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
         }
     }
 
     func remove(_ paths: [String]) throws {
-        for path in paths {
-            try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, path) }
-            try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, path) }
+        guard !paths.isEmpty else { return }
+        try inTransaction {
+            for path in paths {
+                try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, path) }
+                try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, path) }
+            }
         }
     }
 
     func rename(_ oldPath: String, to newPath: String) throws {
-        try execute("BEGIN IMMEDIATE")
-        do {
+        try inTransaction {
             try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, newPath) }
             try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, newPath) }
             for table in ["segments", "files"] {
@@ -118,10 +115,6 @@ final class VaultIndex {
                     Self.bind(statement, 2, oldPath)
                 }
             }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
         }
     }
 
@@ -169,6 +162,17 @@ final class VaultIndex {
         try run("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)") { statement in
             Self.bind(statement, 1, key)
             Self.bind(statement, 2, value)
+        }
+    }
+
+    private func inTransaction(_ changes: () throws -> Void) throws {
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try changes()
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
         }
     }
 

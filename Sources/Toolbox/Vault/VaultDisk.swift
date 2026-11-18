@@ -9,9 +9,18 @@ struct VaultLocation: Equatable {
     static let standard = VaultLocation(folder: FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Toolbox/.vault.noindex"))
 
-    static func launch(arguments: [String] = CommandLine.arguments) -> VaultLocation {
-        guard let flag = arguments.firstIndex(of: "--vault-folder"), flag + 1 < arguments.count else { return .standard }
-        return VaultLocation(folder: URL(fileURLWithPath: arguments[flag + 1], isDirectory: true))
+    static let development = VaultLocation(folder: FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Toolbox/.vault-dev.noindex"))
+
+    static let debugFolderFlag = "--vault-folder"
+
+    static func launch(arguments: [String] = CommandLine.arguments, isDevelopmentRun: Bool = AppInfo.isDevelopmentRun) -> VaultLocation {
+        #if DEBUG
+        if let flag = arguments.firstIndex(of: debugFolderFlag), flag + 1 < arguments.count {
+            return VaultLocation(folder: URL(fileURLWithPath: arguments[flag + 1], isDirectory: true))
+        }
+        #endif
+        return isDevelopmentRun ? .development : .standard
     }
 }
 
@@ -20,6 +29,8 @@ enum VaultError: LocalizedError, Equatable {
     case passwordTooShort
     case passwordsDiffer
     case alreadyExists
+    case filesLeftOutside(count: Int, folder: String)
+    case openInAnotherCopy
     case diskTool(action: String, message: String)
 
     static let minimumPasswordLength = 6
@@ -30,8 +41,22 @@ enum VaultError: LocalizedError, Equatable {
         case .passwordTooShort: "Use at least \(Self.minimumPasswordLength) characters."
         case .passwordsDiffer: "The two passwords don't match."
         case .alreadyExists: "A vault already exists."
+        case .openInAnotherCopy: "The vault is open in another copy of Toolbox. Lock it there first."
+        case .filesLeftOutside(let count, let folder):
+            "\(count == 1 ? "1 file was" : "\(count) files were") found in the vault's open folder, outside the vault: \(folder). "
+                + "Move \(count == 1 ? "it" : "them") somewhere else, then unlock again."
         case .diskTool(let action, let message): "The vault couldn't \(action). \(message)"
         }
+    }
+}
+
+struct VaultTool: Sendable {
+    static let didNotFinish: Int32 = -1
+
+    let run: @Sendable (_ path: String, _ arguments: [String], _ input: Data?, _ timeout: Shell.Timeout) async throws -> Shell.Result
+
+    static let system = VaultTool { path, arguments, input, timeout in
+        try await Shell.run(path, arguments, input: input, timeout: timeout)
     }
 }
 
@@ -41,8 +66,14 @@ struct VaultDisk {
     static let maximumSize = "2T"
     static let volumeName = "Vault"
     static let spotlightOptOut = ".metadata_never_index"
+    static let harmlessLeftovers: Set<String> = [".DS_Store", spotlightOptOut]
+    static let unfinishedPrefix = ".Vault-"
+    static let unfinishedSuffix = ".sparsebundle"
+    // Another copy of the app may be creating its image right now; one this old was left by a create that crashed.
+    static let unfinishedIsAbandonedAfter: TimeInterval = 3600
 
     let location: VaultLocation
+    var tool = VaultTool.system
 
     var exists: Bool { FileManager.default.fileExists(atPath: location.image.path) }
 
@@ -60,39 +91,92 @@ struct VaultDisk {
         guard !exists else { throw VaultError.alreadyExists }
         try FileManager.default.createDirectory(at: location.folder, withIntermediateDirectories: true)
         try hideFolder()
-        let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "create", "blank", "--encrypt",
-                                                         "--size", Self.maximumSize, "--volumeName", Self.volumeName,
-                                                         "--fs", "APFS", location.image.path],
-                                         input: Data(password.utf8), timeout: .untilFinished)
-        guard result.succeeded else {
-            try? FileManager.default.removeItem(at: location.image)
-            throw VaultError.diskTool(action: "be created", message: Self.reason(result))
+        removeAbandonedUnfinishedImages()
+        let unfinished = location.folder.appendingPathComponent("\(Self.unfinishedPrefix)\(UUID().uuidString)\(Self.unfinishedSuffix)")
+        do {
+            let result = try await tool.run(Self.diskutil, ["image", "--stdinpass", "create", "blank", "--encrypt",
+                                                            "--size", Self.maximumSize, "--volumeName", Self.volumeName,
+                                                            "--fs", "APFS", unfinished.path],
+                                            Data(password.utf8), .untilFinished)
+            guard result.succeeded else { throw VaultError.diskTool(action: "be created", message: Self.reason(result)) }
+            try moveIntoPlace(unfinished)
+        } catch {
+            try? FileManager.default.removeItem(at: unfinished)
+            throw Self.diskToolError(error, action: "be created")
         }
     }
 
-    func unlock(password: String) async throws {
-        if isOpen { try await lock() }
+    private func moveIntoPlace(_ unfinished: URL) throws {
+        guard renamex_np(unfinished.path, location.image.path, UInt32(RENAME_EXCL)) != 0 else { return }
+        let code = errno
+        if code == EEXIST || code == ENOTEMPTY { throw VaultError.alreadyExists }
+        throw VaultError.diskTool(action: "be created", message: String(cString: strerror(code)))
+    }
+
+    private func removeAbandonedUnfinishedImages() {
+        let fileManager = FileManager.default
+        let names = (try? fileManager.contentsOfDirectory(atPath: location.folder.path)) ?? []
+        for name in names where name.hasPrefix(Self.unfinishedPrefix) && name.hasSuffix(Self.unfinishedSuffix) {
+            let leftover = location.folder.appendingPathComponent(name)
+            let changed = (try? leftover.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let changed, Date().timeIntervalSince(changed) > Self.unfinishedIsAbandonedAfter else { continue }
+            try? fileManager.removeItem(at: leftover)
+        }
+    }
+
+    func unlock(password: String, mayEject: Bool = true) async throws {
+        if isOpen {
+            guard mayEject else { throw VaultError.openInAnotherCopy }
+            try await lock()
+        }
+        try refuseFilesLeftOutside()
         if !FileManager.default.fileExists(atPath: location.mountPoint.path) {
             try FileManager.default.createDirectory(at: location.mountPoint, withIntermediateDirectories: false)
         }
-        let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "attach", "--nobrowse",
-                                                         "--mountPoint", location.mountPoint.path, location.image.path],
-                                         input: Data(password.utf8), timeout: .diskImage)
-        guard result.succeeded else {
+        let wasMountedByOthers = isOpen
+        do {
+            let result = try await tool.run(Self.diskutil, ["image", "--stdinpass", "attach", "--nobrowse",
+                                                            "--mountPoint", location.mountPoint.path, location.image.path],
+                                            Data(password.utf8), .diskImage)
+            guard result.succeeded else {
+                throw Self.isWrongPassword(result) ? VaultError.wrongPassword : VaultError.diskTool(action: "open", message: Self.reason(result))
+            }
+        } catch {
+            if mayEject, !wasMountedByOthers { try? await lock() }
             removeEmptyMountPoint()
-            if Self.isWrongPassword(result) { throw VaultError.wrongPassword }
-            throw VaultError.diskTool(action: "open", message: Self.reason(result))
+            throw Self.diskToolError(error, action: "open")
         }
         try prepareVolume()
     }
 
     func lock() async throws {
         guard isOpen else { return }
-        let eject = try await Shell.run(Self.diskutil, ["eject", location.mountPoint.path], timeout: .diskImage)
+        let eject = await lockStep(Self.diskutil, ["eject", location.mountPoint.path])
         if eject.succeeded || !isOpen { return removeEmptyMountPoint() }
-        let forced = try await Shell.run(Self.hdiutil, ["detach", "-force", location.mountPoint.path], timeout: .diskImage)
+        let forced = await lockStep(Self.hdiutil, ["detach", "-force", location.mountPoint.path])
         guard forced.succeeded || !isOpen else { throw VaultError.diskTool(action: "lock", message: Self.reason(forced)) }
         removeEmptyMountPoint()
+    }
+
+    private func lockStep(_ path: String, _ arguments: [String]) async -> Shell.Result {
+        do {
+            return try await tool.run(path, arguments, nil, .diskImage)
+        } catch {
+            return Shell.Result(status: VaultTool.didNotFinish, out: "", err: error.localizedDescription)
+        }
+    }
+
+    private func refuseFilesLeftOutside() throws {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: location.mountPoint.path)) ?? []
+        let leftOutside = names.filter { !Self.harmlessLeftovers.contains($0) }
+        guard leftOutside.isEmpty else {
+            let folder = (location.mountPoint.path as NSString).abbreviatingWithTildeInPath
+            throw VaultError.filesLeftOutside(count: leftOutside.count, folder: folder)
+        }
+    }
+
+    static func diskToolError(_ error: Error, action: String) -> Error {
+        error is VaultError || error is CancellationError ? error : VaultError.diskTool(action: action, message: error.localizedDescription)
     }
 
     func removeEmptyMountPoint() {
@@ -109,8 +193,8 @@ struct VaultDisk {
     }
 
     func changePassword(from old: String, to new: String) async throws {
-        let result = try await Shell.run(Self.diskutil, ["image", "--stdinpass", "chpass", location.image.path],
-                                         input: Data("\(old)\n\(new)\n".utf8), timeout: .untilFinished)
+        let result = try await tool.run(Self.diskutil, ["image", "--stdinpass", "chpass", location.image.path],
+                                        Data("\(old)\n\(new)\n".utf8), .untilFinished)
         guard result.succeeded else {
             if Self.isWrongPassword(result) { throw VaultError.wrongPassword }
             throw VaultError.diskTool(action: "change its password", message: Self.reason(result))
