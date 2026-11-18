@@ -129,6 +129,14 @@ final class MuteVideoTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
     }
 
+    func testOutputFoldersMadeInTheSameSecondAreSeparate() throws {
+        let first = BatchFiles.makeOutputFolder(named: "Toolbox Muted Videos", in: dir)
+        let second = BatchFiles.makeOutputFolder(named: "Toolbox Muted Videos", in: dir)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+    }
+
     @MainActor func testClearDuringARunLetsANewBatchFinishOnItsOwn() async throws {
         let first = (1...3).map { dir.appendingPathComponent("First \($0).mov") }
         let second = (1...4).map { dir.appendingPathComponent("Second \($0).mov") }
