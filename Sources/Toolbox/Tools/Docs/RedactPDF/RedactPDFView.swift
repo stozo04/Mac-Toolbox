@@ -13,7 +13,7 @@ struct RedactPDFView: View {
             Group {
                 if model.hasDocument { viewer } else { empty }
             }
-            .onDrop(of: [.fileURL], isTargeted: $targeted, perform: drop)
+            .fileDrop(isTargeted: $targeted) { if let url = $0.first { request(url) } }
             VStack(spacing: 14) {
                 findCard
                 redactionsCard
@@ -249,14 +249,6 @@ struct RedactPDFView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.pdf]
         if panel.runModal() == .OK, let url = panel.url { request(url) }
-    }
-
-    private func drop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: URL.self) }) else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            if let url { DispatchQueue.main.async { request(url) } }
-        }
-        return true
     }
 
     /// Opens `url`, asking first when it would throw away boxes.

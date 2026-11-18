@@ -2,18 +2,20 @@ import AppKit
 import Observation
 
 @MainActor @Observable
-final class RotateImagesModel {
+final class RotateImagesModel: BatchQueueModel {
     /// Shared so the queue survives switching to another tool and back.
     static let shared = RotateImagesModel()
 
-    enum Status: Equatable {
+    enum Status: BatchStatus {
         case waiting
         case rotating
         case done(RotateResult)
         case failed(String)
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
-    struct Item: Identifiable {
+    struct Item: BatchItem {
         let id = UUID()
         let url: URL
         let bytes: Int64
@@ -25,22 +27,22 @@ final class RotateImagesModel {
         var kind: String { ImageFormat.name(forExtension: url.pathExtension) }
     }
 
-    private(set) var items: [Item] = []
+    let queue: BatchQueue<Item>
+
+    init(outputParent: URL? = nil) {
+        queue = BatchQueue(BatchTool(outputFolderName: "Toolbox Rotated Images", logCategory: "rotate-images", failureLog: "Image rotation failed",
+                                     skippedBecause: "had no readable images", files: BatchFiles.images), outputParent: outputParent)
+    }
+
     private(set) var selectedID: UUID?
     /// The selected photo with the current change applied, small enough to draw quickly.
     private(set) var preview: CGImage?
-    private(set) var isRunning = false
-    private(set) var folder: URL?
-    private(set) var notice: String?
     private(set) var settings = RotateSettings()
 
     /// The selected photo before any change.
     private var basePreview: CGImage?
-    private var task: Task<Void, Never>?
-    private var runID = UUID()
 
-    var hasItems: Bool { !items.isEmpty }
-    var hasPending: Bool { items.contains { $0.status == .waiting } }
+    var hasPending: Bool { queue.hasWaiting }
     var selected: Item? { items.first { $0.id == selectedID } }
     var canRotate: Bool { hasPending && !settings.isIdentity && !isRunning }
 
@@ -48,38 +50,20 @@ final class RotateImagesModel {
 
     // MARK: Queue
 
-    /// Adds images; folders are searched for images inside them.
     func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += BatchFiles.images(in: url)
-            if found.count == before { skipped += 1 }
+        queue.add(urls) { url in
+            ImageResizer.pixelSize(of: url).map { Item(url: url, bytes: BatchFiles.bytes(of: url), size: $0) }
         }
-        var known = Set(items.map { BatchFiles.identity($0.url) })
-        for url in found where known.insert(BatchFiles.identity(url)).inserted {
-            guard let size = ImageResizer.pixelSize(of: url) else { skipped += 1; continue }
-            let bytes = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-            items.append(Item(url: url, bytes: bytes, size: size))
-        }
-        notice = skipped == 0 ? nil : "\(skipped) item(s) had no readable images and were skipped."
         if selected == nil, let first = items.first { select(first.id) }
     }
 
     func remove(_ id: UUID) {
-        guard !isRunning else { return }
-        items.removeAll { $0.id == id }
+        guard queue.remove(id) else { return }
         if selectedID == id { select(items.first?.id) }
     }
 
     func clear() {
-        task?.cancel()
-        runID = UUID()
-        items = []
-        folder = nil
-        notice = nil
-        isRunning = false
+        queue.clear()
         select(nil)
     }
 
@@ -123,50 +107,13 @@ final class RotateImagesModel {
 
     func rotate() {
         guard canRotate else { return }
-        let folder: URL
-        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Rotated Images") } catch {
-            notice = error.localizedDescription
-            Log.error("Output folder failed", category: "rotate-images", Log.details(error))
-            return
-        }
-        notice = OutputFolderError.clearing(notice)
-        isRunning = true
-        for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        self.folder = folder
         let settings = self.settings
-        let run = UUID()
-        runID = run
-        task = Task { [weak self] in
-            guard let self else { return }
-            for item in items where item.status == .waiting {
-                if Task.isCancelled || runID != run { break }
-                update(item.id, .rotating)
-                let outcome = await Task.detached(priority: .userInitiated) { () -> Result<RotateResult, Error> in
-                    Result { try ImageRotator.rotate(source: item.url, settings: settings, into: folder) }
-                }.value
-                switch outcome {
-                case .success(let result):
-                    update(item.id, .done(result))
-                    Log.info("Image rotated", category: "rotate-images", ["kind": item.kind, "change": settings.summary])
-                case .failure(let error):
-                    update(item.id, .failed(error.localizedDescription))
-                    Log.error("Image rotation failed", category: "rotate-images", Log.details(error, file: item.url))
-                }
+        queue.run { item, folder, step in
+            let result = try await step.detached(showing: .rotating) {
+                try ImageRotator.rotate(source: item.url, settings: settings, into: folder)
             }
-            guard runID == run else { return }
-            for i in items.indices where items[i].status == .rotating { items[i].status = .waiting }
-            isRunning = false
+            Log.info("Image rotated", category: "rotate-images", ["kind": item.kind, "change": settings.summary])
+            return .done(result)
         }
     }
-
-    func cancel() { task?.cancel() }
-
-    private func update(_ id: UUID, _ status: Status) {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i].status = status
-    }
-
-    func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-
-    func revealFolder() { if let folder { NSWorkspace.shared.open(folder) } }
 }

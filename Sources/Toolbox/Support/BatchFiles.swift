@@ -55,6 +55,25 @@ enum BatchFiles {
         return (walker?.compactMap { $0 as? URL } ?? []).filter(isImage).sorted { $0.path < $1.path }
     }
 
+    static func gather(_ urls: [URL], files: (URL) -> [URL]) -> (found: [URL], skipped: Int) {
+        var found: [URL] = []
+        var skipped = 0
+        for url in urls {
+            let inside = files(url)
+            if inside.isEmpty { skipped += 1 }
+            found += inside
+        }
+        return (found, skipped)
+    }
+
+    static func skippedNotice(_ skipped: Int, because reason: String) -> String? {
+        skipped == 0 ? nil : "\(skipped) item(s) \(reason) and were skipped."
+    }
+
+    static func bytes(of url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+
     /// A new dated folder in Downloads (or in `parent`), e.g. "Toolbox GIFs 2026-10-26 14.30.05", or "… 14.30.05 2" when that one exists.
     static func makeOutputFolder(named prefix: String, in parent: URL? = nil) throws -> URL {
         let f = DateFormatter()

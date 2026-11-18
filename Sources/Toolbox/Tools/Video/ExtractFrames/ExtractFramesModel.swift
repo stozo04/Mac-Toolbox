@@ -128,18 +128,12 @@ final class ExtractFramesModel {
 
     /// Adds videos; folders are searched for videos inside them.
     func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += BatchFiles.videos(in: url)
-            if found.count == before { skipped += 1 }
-        }
+        let (found, skipped) = BatchFiles.gather(urls, files: BatchFiles.videos)
         var known = Set(items.map { BatchFiles.identity($0.url) })
         // `insert` also drops a video picked twice in one go (a folder plus a file inside it).
         let new = found.filter { known.insert(BatchFiles.identity($0)).inserted }.map { Item(url: $0) }
         items += new
-        notice = skipped == 0 ? nil : "\(skipped) item(s) had no videos and were skipped."
+        notice = BatchFiles.skippedNotice(skipped, because: "had no videos")
         if selectedID == nil { selectedID = items.first?.id }
         for item in new {
             Task {
