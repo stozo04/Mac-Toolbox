@@ -96,7 +96,7 @@ final class DownloadVideoModel {
         toolStatus = .installing
         Task {
             do {
-                try await YtDlpLocator.install()
+                try await YtDlpInstaller().install()
                 refreshTool()
                 Log.info("yt-dlp installed", category: "download")
             } catch {

@@ -66,7 +66,7 @@ enum AudioTrimmer {
         let parser = FFmpegProgress(total: job.length, report: progress)
         let result: Shell.Result
         do {
-            result = try await Shell.run(ffmpeg.path, arguments(for: job, output: output)) { parser.feed($0) }
+            result = try await Shell.run(ffmpeg.path, arguments(for: job, output: output), timeout: .untilCancelled) { parser.feed($0) }
         } catch {
             try? FileManager.default.removeItem(at: output)
             throw error

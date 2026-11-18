@@ -122,7 +122,7 @@ final class ExtractFramesTests: XCTestCase {
         XCTAssertEqual(zip.lastPathComponent, "clip Frames.zip")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted(), ["clip Frames.zip", "clip.mov"])
 
-        let listing = try await Shell.run("/usr/bin/zipinfo", ["-1", zip.path])
+        let listing = try await Shell.run("/usr/bin/zipinfo", ["-1", zip.path], timeout: .quick)
         let names = listing.out.split(separator: "\n").filter { $0.hasSuffix(".heic") }
         XCTAssertEqual(names.count, 4)
         XCTAssertFalse(listing.out.contains("__MACOSX"))

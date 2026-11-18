@@ -12,7 +12,10 @@ final class TrimAudioTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
-    override func tearDown() { try? FileManager.default.removeItem(at: dir) }
+    override func tearDown() {
+        killProgramsLeftRunning()
+        try? FileManager.default.removeItem(at: dir)
+    }
 
     // MARK: Plan
 
@@ -167,6 +170,28 @@ final class TrimAudioTests: XCTestCase {
         XCTAssertEqual(second.url.lastPathComponent, "Tone (Trimmed) 2.wav")
     }
 
+    func testCancellingATrimStopsFFmpegAndRemovesTheUnfinishedFile() async throws {
+        let ffmpeg = try ExtractAudioTests.ffmpegWithMP3()
+        let halfAnHour = 1800.0
+        let source = dir.appendingPathComponent("Long.wav")
+        let made = try await Shell.run(ffmpeg.path, ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+                                                     "-t", "\(halfAnHour)", "-y", source.path], timeout: .quick)
+        XCTAssertTrue(made.succeeded, made.err)
+        let job = TrimAudioJob(source: source, start: 0, end: halfAnHour, sample: .init(bitDepth: 16), settings: .init(format: .mp3))
+        let folder = try XCTUnwrap(dir)
+        let reported = Locked(false)
+        let trim = Task.detached { try await AudioTrimmer.trim(job, into: folder, ffmpeg: ffmpeg) { _ in reported.set(true) } }
+        try await waitUntil("ffmpeg reports progress") { reported.value }
+        let encoder = try XCTUnwrap(Shell.livePIDs.first, "ffmpeg had already finished")
+
+        trim.cancel()
+
+        guard case .failure(let error) = await trim.result else { return XCTFail("a cancelled trim returned a file") }
+        XCTAssertTrue(error is CancellationError, "threw \(error)")
+        XCTAssertFalse(isRunning(encoder))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["Long.wav"])
+    }
+
     func testCompressedFormatsAreCopiedAsIs() async throws {
         let ffmpeg = try ExtractAudioTests.ffmpegWithMP3()
         let tone = dir.appendingPathComponent("Tone.wav")
@@ -211,7 +236,7 @@ final class TrimAudioTests: XCTestCase {
         try makeTone(at: tone)
         let float = dir.appendingPathComponent("Float.wav"), alac = dir.appendingPathComponent("Lossless.m4a")
         for (output, codec) in [(float, "pcm_f32le"), (alac, "alac")] {
-            let made = try await Shell.run(ffmpeg.path, ["-nostdin", "-v", "error", "-i", tone.path, "-c:a", codec, "-y", output.path])
+            let made = try await Shell.run(ffmpeg.path, ["-nostdin", "-v", "error", "-i", tone.path, "-c:a", codec, "-y", output.path], timeout: .quick)
             XCTAssertTrue(made.succeeded, made.err)
         }
 

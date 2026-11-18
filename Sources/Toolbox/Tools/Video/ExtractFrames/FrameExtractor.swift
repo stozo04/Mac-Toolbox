@@ -155,12 +155,13 @@ enum FrameExtractor {
 
     /// `ditto` makes a ZIP with the folder inside it, without the hidden __MACOSX files other systems show as clutter.
     static func makeZip(of folder: URL, at zip: URL) async throws {
-        let result = try await Shell.run("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--noextattr", "--noacl", "--keepParent", folder.path, zip.path])
-        guard result.succeeded else {
+        do {
+            let result = try await Shell.run("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--noextattr", "--noacl", "--keepParent", folder.path, zip.path],
+                                             timeout: .untilCancelled)
+            guard result.succeeded else { throw FrameError.zipFailed(result.err.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        } catch {
             try? FileManager.default.removeItem(at: zip)
-            // Cancel stops ditto, which then exits with an error; that is a cancellation, not a failure.
-            try Task.checkCancellation()
-            throw FrameError.zipFailed(result.err.trimmingCharacters(in: .whitespacesAndNewlines))
+            throw error
         }
     }
 

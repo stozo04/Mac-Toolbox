@@ -43,7 +43,7 @@ protocol ProcessRestarter: AnyObject {
 final class SystemProcessRestarter: ProcessRestarter {
     func restart(_ targets: Set<RestartTarget>) {
         for target in targets {
-            Task { _ = try? await Shell.run("/usr/bin/killall", [target.rawValue]) }
+            Task { _ = try? await Shell.run("/usr/bin/killall", [target.rawValue], timeout: .quick) }
         }
     }
 }

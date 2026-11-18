@@ -78,7 +78,7 @@ enum PermissionResetter {
 
     static func reset(service: String, bundleID: String) async throws {
         guard let args = arguments(service: service, bundleID: bundleID) else { throw ResetError.invalid }
-        let result = try await Shell.run("/usr/bin/tccutil", args, timeout: 20)
+        let result = try await Shell.run("/usr/bin/tccutil", args, timeout: .quick)
         guard result.succeeded else {
             // tccutil only knows apps that macOS has registered, i.e. installed ones.
             if result.err.contains("No such bundle identifier") { throw ResetError.failed("macOS doesn't know this app. Open it once from its installed location, then try again.") }

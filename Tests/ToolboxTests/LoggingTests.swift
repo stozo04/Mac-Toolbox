@@ -167,3 +167,106 @@ final class LoggingLiveTests: XCTestCase {
         try await pause(for: .seconds(3), because: "the sink sends in the background and exposes nothing to wait on")
     }
 }
+
+private final class HeldRequest: URLProtocol, @unchecked Sendable {
+    static let held = Locked<[HeldRequest]>([])
+
+    private(set) var messages: [String] = []
+
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let body = request.httpBody ?? Self.read(request.httpBodyStream)
+        let rows = (try? JSONSerialization.jsonObject(with: body)) as? [[String: Any]] ?? []
+        messages = rows.compactMap { $0["message"] as? String }
+        Self.held.update { $0.append(self) }
+    }
+
+    func respond(status: Int) {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil) else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func read(_ stream: InputStream?) -> Data {
+        guard let stream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        return data
+    }
+}
+
+final class SupabaseLogSinkQueueTests: XCTestCase {
+    override func setUp() { HeldRequest.held.set([]) }
+
+    override func tearDown() {
+        HeldRequest.held.value.forEach { $0.respond(status: 201) }
+        HeldRequest.held.set([])
+    }
+
+    private func makeSink() throws -> SupabaseLogSink {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HeldRequest.self]
+        let url = try XCTUnwrap(URL(string: "https://logs.invalid"))
+        return SupabaseLogSink(config: SupabaseLogConfig(url: url, key: "test"), flushInterval: 3600,
+                               session: URLSession(configuration: configuration))
+    }
+
+    private func write(_ range: Range<Int>, to sink: SupabaseLogSink) {
+        for index in range {
+            sink.write(LogEvent(timestamp: Date(timeIntervalSince1970: 0), level: .warning, category: "test", message: String(index),
+                                metadata: [:], appVersion: "1", osVersion: "os", installID: "i", sessionID: "s"))
+        }
+    }
+
+    private func secondRequestMessages(queuedFirst: Int, writtenDuringSend: Int) async throws -> [String] {
+        let sink = try makeSink()
+        write(0..<queuedFirst, to: sink)
+        sink.flush()
+        try await waitUntil("the first batch reaches the transport") { HeldRequest.held.value.count == 1 }
+        let first = try XCTUnwrap(HeldRequest.held.value.first)
+        XCTAssertEqual(first.messages.count, queuedFirst)
+        write(queuedFirst..<queuedFirst + writtenDuringSend, to: sink)
+        first.respond(status: 201)
+        try await waitUntil("the events written during the send go out") {
+            sink.flush()
+            return HeldRequest.held.value.count >= 2
+        }
+        return try XCTUnwrap(HeldRequest.held.value.last).messages
+    }
+
+    func testEventsWrittenDuringASendGoOutInTheNextBatch() async throws {
+        let messages = try await secondRequestMessages(queuedFirst: 10, writtenDuringSend: 5)
+        XCTAssertEqual(messages, (10..<15).map(String.init))
+    }
+
+    func testEventsWrittenWhileAFullQueueIsBeingSentAreNotDropped() async throws {
+        let messages = try await secondRequestMessages(queuedFirst: 500, writtenDuringSend: 100)
+        XCTAssertEqual(messages, (500..<600).map(String.init))
+    }
+
+    func testAFailedSendKeepsTheNewestEventsForTheNextTry() async throws {
+        let sink = try makeSink()
+        write(0..<500, to: sink)
+        sink.flush()
+        try await waitUntil("the first batch reaches the transport") { HeldRequest.held.value.count == 1 }
+        write(500..<600, to: sink)
+        try XCTUnwrap(HeldRequest.held.value.first).respond(status: 500)
+        try await waitUntil("the queue is sent again") {
+            sink.flush()
+            return HeldRequest.held.value.count >= 2
+        }
+        XCTAssertEqual(try XCTUnwrap(HeldRequest.held.value.last).messages, (100..<600).map(String.init))
+    }
+}

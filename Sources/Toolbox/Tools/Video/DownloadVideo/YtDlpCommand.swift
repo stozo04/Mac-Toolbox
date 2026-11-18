@@ -15,11 +15,12 @@ enum YtDlpCommand {
         ["-J", "--no-playlist", "--no-warnings"] + runtimeArguments(jsRuntime) + [url.absoluteString]
     }
 
-    static func arguments(source: Source, options: DownloadOptions, choice: FormatChoice?, folder: URL,
+    static func arguments(source: Source, options: DownloadOptions, choice: FormatChoice?, folder: URL, partialsFolder: URL,
                           hasFFmpeg: Bool, ffmpegDirectory: URL?, jsRuntime: JSRuntime?) -> [String] {
         var a = [
             "--no-playlist", "--newline", "--progress", "--no-warnings",
             "-P", folder.path,
+            "-P", "temp:\(partialsFolder.path)",
             "-o", "%(title).150B [%(id)s].%(ext)s",
             "--progress-template",
             "download:\(progressPrefix)%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",

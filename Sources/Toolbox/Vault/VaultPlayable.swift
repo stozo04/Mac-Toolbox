@@ -142,7 +142,7 @@ enum VaultPlayable {
     /// `.some(codec)` for the first sound stream ffprobe finds, `.some(nil)` when there is none, nil when ffprobe failed.
     static func soundStream(_ url: URL, tools: MediaTools) async -> String?? {
         guard !Task.isCancelled,
-              let result = try? await Shell.run(tools.ffprobe.path, probeArguments(url)), result.succeeded else { return nil }
+              let result = try? await Shell.run(tools.ffprobe.path, probeArguments(url), timeout: .quick), result.succeeded else { return nil }
         return .some(firstCodec(inProbeOutput: result.out))
     }
 
@@ -166,7 +166,7 @@ enum VaultPlayable {
         let partial = destination.deletingLastPathComponent()
             .appendingPathComponent(partialPrefix + UUID().uuidString).appendingPathExtension(copyExtension)
         defer { try? FileManager.default.removeItem(at: partial) }
-        let result = try await Shell.run(tools.ffmpeg.path, remuxArguments(from: source, to: partial))
+        let result = try await Shell.run(tools.ffmpeg.path, remuxArguments(from: source, to: partial), timeout: .untilCancelled)
         try Task.checkCancellation()
         guard result.succeeded else {
             let scrubbed = VaultLog.hideName(of: source, in: VaultLog.hideName(of: partial, in: result.err))

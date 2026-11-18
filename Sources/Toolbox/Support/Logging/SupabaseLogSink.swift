@@ -35,6 +35,7 @@ final class SupabaseLogSink: LogSink, @unchecked Sendable {
     private let lock = NSLock()
     private var queue: [LogEvent] = []
     private var sending = false
+    private var trimmedWhileSending = 0
     private var timer: Timer?
 
     init(config: SupabaseLogConfig, minimumLevel: LogLevel = .warning,
@@ -54,7 +55,11 @@ final class SupabaseLogSink: LogSink, @unchecked Sendable {
     func write(_ event: LogEvent) {
         lock.lock()
         queue.append(event)
-        if queue.count > maxQueued { queue.removeFirst(queue.count - maxQueued) }
+        let overflow = queue.count - maxQueued
+        if overflow > 0 {
+            queue.removeFirst(overflow)
+            if sending { trimmedWhileSending += overflow }
+        }
         lock.unlock()
         if event.level >= .error { flush() }
     }
@@ -68,12 +73,13 @@ final class SupabaseLogSink: LogSink, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !sending, !queue.isEmpty else { return nil }
         sending = true
+        trimmedWhileSending = 0
         return queue
     }
 
     private func endSend(sent: Int, success: Bool) {
         lock.lock(); defer { lock.unlock() }
-        if success { queue.removeFirst(min(sent, queue.count)) }
+        if success { queue.removeFirst(min(max(sent - trimmedWhileSending, 0), queue.count)) }
         sending = false
     }
 

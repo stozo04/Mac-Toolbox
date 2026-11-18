@@ -5,7 +5,7 @@ struct JSRuntime: Equatable, Sendable {
     let path: URL
 }
 
-/// Finds, installs and runs the yt-dlp binary.
+/// Runs the yt-dlp binary.
 struct YtDlpDownloader: Downloader {
     let executable: URL
     let ffmpeg: URL?
@@ -13,15 +13,15 @@ struct YtDlpDownloader: Downloader {
 
     func download(url: URL, options: DownloadOptions, into folder: URL,
                   onEvent: @escaping @Sendable (DownloadEvent) -> Void) async throws -> URL {
+        let partials = FileManager.default.temporaryDirectory.appendingPathComponent("toolbox-download-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: partials, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: partials) }
         var source = YtDlpCommand.Source.link(url)
         var choice: FormatChoice?
-        var infoFile: URL?
-        defer { if let infoFile { try? FileManager.default.removeItem(at: infoFile) } }
 
         if options.format != .audio {
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent("toolbox-\(UUID().uuidString).info.json")
-            infoFile = file
-            try await probe(url, into: file)
+            let file = partials.appendingPathComponent("video.info.json")
+            try Data(try await run(YtDlpCommand.probeArguments(url: url, jsRuntime: jsRuntime)).out.utf8).write(to: file)
             if let formats = try? JSONDecoder().decode(VideoInfo.self, from: Data(contentsOf: file)).formats, !formats.isEmpty {
                 source = .infoJSON(file)
                 choice = FormatPicker.choose(from: formats, options: options, hasFFmpeg: ffmpeg != nil)
@@ -29,118 +29,58 @@ struct YtDlpDownloader: Downloader {
             }
         }
 
-        var saved: String?
         let arguments = YtDlpCommand.arguments(source: source, options: options, choice: choice, folder: folder,
-                                               hasFFmpeg: ffmpeg != nil,
+                                               partialsFolder: partials, hasFFmpeg: ffmpeg != nil,
                                                ffmpegDirectory: ffmpeg?.deletingLastPathComponent(),
                                                jsRuntime: jsRuntime)
-        try await run(arguments) { line in
-            switch YtDlpCommand.parse(line) {
-            case .event(let e): onEvent(e)
-            case .file(let path): saved = path
-            case .other: break
-            }
+        let lines = OutputLines { line in
+            if case .event(let event) = YtDlpCommand.parse(line) { onEvent(event) }
         }
-        guard let saved else { throw DownloadError.failed("yt-dlp finished but did not report a file.") }
+        let result = try await run(arguments) { lines.feed($0) }
+        guard let saved = Self.savedFile(in: result.out) else { throw DownloadError.failed("yt-dlp finished but did not report a file.") }
         return URL(fileURLWithPath: saved)
     }
 
-    private func probe(_ url: URL, into file: URL) async throws {
-        guard FileManager.default.createFile(atPath: file.path, contents: nil) else {
-            throw DownloadError.failed("Could not create a temporary file for the video details.")
-        }
-        let handle = try FileHandle(forWritingTo: file)
-        defer { try? handle.close() }
-        try await run(YtDlpCommand.probeArguments(url: url, jsRuntime: jsRuntime), output: .file(handle))
+    static func savedFile(in output: String) -> String? {
+        output.split(whereSeparator: \.isNewline).lazy.compactMap { line -> String? in
+            if case .file(let path) = YtDlpCommand.parse(String(line)) { path } else { nil }
+        }.last
     }
 
-    private enum Output {
-        case lines((String) -> Void)
-        case file(FileHandle)
-    }
-
-    private func run(_ arguments: [String], onLine: @escaping (String) -> Void) async throws {
-        try await run(arguments, output: .lines(onLine))
-    }
-
-    private func run(_ arguments: [String], output: Output) async throws {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        let out = Pipe(), err = Pipe()
-        switch output {
-        case .lines: process.standardOutput = out
-        case .file(let handle): process.standardOutput = handle
-        }
-        process.standardError = err
-        process.standardInput = FileHandle.nullDevice
-        let exit = ProcessExit()
-        process.terminationHandler = { _ in exit.finish() }
-
-        try await withTaskCancellationHandler {
-            try process.run()
-            let errors = Task { try await Self.text(of: err) }
-            if case .lines(let onLine) = output {
-                for try await line in out.fileHandleForReading.bytes.lines { onLine(line) }
-            }
-            let stderr = (try? await errors.value) ?? ""
-            await exit.wait()
-            try Task.checkCancellation()
-            guard process.terminationStatus == 0 else {
-                throw DownloadError.failed(YtDlpCommand.friendlyError(from: stderr))
-            }
-        } onCancel: {
-            if process.isRunning { process.terminate() }
-        }
-    }
-
-    private static func text(of pipe: Pipe) async throws -> String {
-        var s = ""
-        for try await line in pipe.fileHandleForReading.bytes.lines { s += line + "\n" }
-        return s
+    private func run(_ arguments: [String], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> Shell.Result {
+        let result = try await Shell.run(executable.path, arguments, timeout: .untilCancelled, onOutput: onOutput)
+        guard result.succeeded else { throw DownloadError.failed(YtDlpCommand.friendlyError(from: result.err)) }
+        return result
     }
 }
 
-private final class ProcessExit: @unchecked Sendable {
+final class OutputLines: @unchecked Sendable {
     private let lock = NSLock()
-    private var exited = false
-    private var waiter: CheckedContinuation<Void, Never>?
+    private var unfinished = ""
+    private let onLine: (String) -> Void
 
-    func finish() {
-        lock.lock()
-        exited = true
-        let resume = waiter
-        waiter = nil
-        lock.unlock()
-        resume?.resume()
-    }
+    init(onLine: @escaping (String) -> Void) { self.onLine = onLine }
 
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if exited {
-                lock.unlock()
-                continuation.resume()
-            } else {
-                waiter = continuation
-                lock.unlock()
-            }
-        }
+    func feed(_ text: String) {
+        lock.lock(); defer { lock.unlock() }
+        var lines = (unfinished + text).split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        unfinished = String(lines.removeLast())
+        lines.filter { !$0.isEmpty }.forEach { onLine(String($0)) }
     }
 }
 
 enum YtDlpLocator {
-    static let releaseURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!
-
     static var installedURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Toolbox/bin/yt-dlp")
     }
 
-    /// Order: $TOOLBOX_YTDLP, then whichever of the bundled and the downloaded copy is newer
+    /// Order: $TOOLBOX_YTDLP (debug builds only), then whichever of the bundled and the downloaded copy is newer
     /// (the bundled one goes stale, so "Update yt-dlp" saves a fresh copy that must win), then Homebrew.
     static func findYtDlp() -> URL? {
+        #if DEBUG
         if let override = firstExecutable([ProcessInfo.processInfo.environment["TOOLBOX_YTDLP"]]) { return override }
+        #endif
         let own = [Bundle.main.url(forResource: "yt-dlp", withExtension: nil)?.path, installedURL.path]
             .compactMap { $0 }.filter { FileManager.default.isExecutableFile(atPath: $0) }
             .max { modified($0) < modified($1) }
@@ -162,20 +102,6 @@ enum YtDlpLocator {
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.1) }
             .map { JSRuntime(name: $0.0, path: URL(fileURLWithPath: $0.1)) }
-    }
-
-    /// Downloads the official standalone yt-dlp build into Application Support.
-    static func install() async throws {
-        let (tmp, response) = try await URLSession.shared.download(from: releaseURL)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw DownloadError.failed("Could not download yt-dlp from GitHub.")
-        }
-        let fm = FileManager.default
-        let dest = installedURL
-        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? fm.removeItem(at: dest)
-        try fm.moveItem(at: tmp, to: dest)
-        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest.path)
     }
 
     private static func firstExecutable(_ paths: [String?]) -> URL? {

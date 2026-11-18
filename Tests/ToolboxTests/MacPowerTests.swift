@@ -34,7 +34,7 @@ final class PowerAssertionsLiveTests: XCTestCase {
     private static let listingTimeout: Duration = .seconds(10)
 
     private func assertions() async throws -> String {
-        try await Shell.run("/usr/bin/pmset", ["-g", "assertions"]).out
+        try await Shell.run("/usr/bin/pmset", ["-g", "assertions"], timeout: .quick).out
     }
 
     private func lines(naming reason: String, settlingOn expected: Int) async throws -> [Substring] {

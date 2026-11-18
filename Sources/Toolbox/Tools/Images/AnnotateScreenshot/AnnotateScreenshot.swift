@@ -386,7 +386,8 @@ final class AnnotateBlurCache: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var base: ObjectIdentifier?
+    /// Held strongly: an address alone can be reused by the next picture once this one is freed.
+    private var base: CGImage?
     private var images: [Key: CGImage] = [:]
     private static let context = CIContext()
 
@@ -395,8 +396,8 @@ final class AnnotateBlurCache: @unchecked Sendable {
         let key = Key(style: style, level: level)
         lock.lock()
         defer { lock.unlock() }
-        if base != ObjectIdentifier(source) {
-            base = ObjectIdentifier(source)
+        if base !== source {
+            base = source
             images = [:]
         }
         if let cached = images[key] { return cached }

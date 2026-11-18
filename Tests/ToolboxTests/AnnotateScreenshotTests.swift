@@ -266,6 +266,27 @@ final class AnnotateScreenshotTests: XCTestCase {
         XCTAssertEqual(try pixel(out, 10, 10).r, try pixel(out, 10, 11).r)
     }
 
+    func testTheBlurCacheHoldsItsPictureSoANewOneCanNeverTakeItsAddress() throws {
+        let cache = AnnotateBlurCache()
+        weak var cached: CGImage?
+        try autoreleasepool {
+            let red = try picture(top: (255, 0, 0), bottom: (255, 0, 0))
+            cached = red
+            XCTAssertNotNil(cache.image(for: red, style: .pixelate, amount: 4, unit: 1))
+        }
+        XCTAssertNotNil(cached, "the cache knew its picture only by address, which the next picture can reuse and then be shown this one's blur")
+    }
+
+    func testADifferentPictureGetsItsOwnBlur() throws {
+        let cache = AnnotateBlurCache()
+        let red = try picture(top: (255, 0, 0), bottom: (255, 0, 0))
+        let blue = try picture(top: (0, 0, 255), bottom: (0, 0, 255))
+        let blurredRed = try RGBAPixels(try XCTUnwrap(cache.image(for: red, style: .pixelate, amount: 4, unit: 1)), alpha: .premultipliedLast)
+        let blurredBlue = try RGBAPixels(try XCTUnwrap(cache.image(for: blue, style: .pixelate, amount: 4, unit: 1)), alpha: .premultipliedLast)
+        XCTAssertEqual(try blurredRed.rgb(100, 50), [255, 0, 0])
+        XCTAssertEqual(try blurredBlue.rgb(100, 50), [0, 0, 255])
+    }
+
     func testBlurIsStrongerAtHigherAmounts() throws {
         let image = try splitPicture(width: 400, height: 100)
         func softness(_ amount: Double) throws -> Int {

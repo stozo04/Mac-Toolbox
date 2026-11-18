@@ -73,3 +73,13 @@ custom_rules:
     excluded_match_kinds: [comment, doccomment, string]
     message: "Use makeScratchDefaults in TestSupport.swift, which keeps the suite out of ~/Library/Preferences and removes it afterwards."
     severity: error
+  process_outside_shell:
+    name: "Process() outside Shell"
+    included: "Sources/Toolbox/.*\\.swift"
+    excluded:
+      - "Sources/Toolbox/Support/Shell\\.swift"
+      - "Sources/Toolbox/Vault/VaultDisk\\.swift"   # runAndWait locks the vault while the app quits; to be moved into Shell
+    regex: "(?<![\\w.])Process\\s*(\\.\\s*init)?\\s*\\("
+    excluded_match_kinds: [comment, doccomment, string]
+    message: "Run programs with Shell.run, which stops them on cancel, on timeout and when the app quits."
+    severity: error

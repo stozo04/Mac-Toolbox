@@ -41,7 +41,7 @@ enum VolumeScanner {
     }
 
     static func diskImages() async -> Set<String> {
-        guard let result = try? await Shell.run("/usr/bin/hdiutil", ["info", "-plist"]), result.succeeded else { return [] }
+        guard let result = try? await Shell.run("/usr/bin/hdiutil", ["info", "-plist"], timeout: .quick), result.succeeded else { return [] }
         return diskImageMountPoints(fromPlist: Data(result.out.utf8))
     }
 

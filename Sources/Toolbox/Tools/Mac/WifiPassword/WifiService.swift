@@ -41,9 +41,9 @@ enum WifiService {
     }
 
     static func savedNetworks() async throws -> [String] {
-        let ports = try await Shell.run("/usr/sbin/networksetup", ["-listallhardwareports"]).out
+        let ports = try await Shell.run("/usr/sbin/networksetup", ["-listallhardwareports"], timeout: .quick).out
         guard let device = interface(inHardwarePorts: ports) else { return [] }
-        let listing = try await Shell.run("/usr/sbin/networksetup", ["-listpreferredwirelessnetworks", device])
+        let listing = try await Shell.run("/usr/sbin/networksetup", ["-listpreferredwirelessnetworks", device], timeout: .quick)
         return parseNetworks(listing.out)
     }
 
@@ -55,8 +55,16 @@ enum WifiService {
 
     /// Asks the Keychain for the password. macOS shows its own approval window, so this waits for the person.
     static func password(for ssid: String) async -> PasswordResult {
-        guard let result = try? await Shell.run("/usr/bin/security", passwordArguments(for: ssid)) else { return .failed("The Keychain could not be opened.") }
-        return interpret(status: result.status, output: result.out, error: result.err)
+        do {
+            let result = try await Shell.run("/usr/bin/security", passwordArguments(for: ssid), timeout: .untilCancelled)
+            return interpret(status: result.status, output: result.out, error: result.err)
+        } catch {
+            return outcome(ofNotRunning: error)
+        }
+    }
+
+    static func outcome(ofNotRunning error: Error) -> PasswordResult {
+        error is CancellationError ? .cancelled : .failed("The Keychain could not be opened.")
     }
 
     static func interpret(status: Int32, output: String, error: String) -> PasswordResult {
