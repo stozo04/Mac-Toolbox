@@ -93,7 +93,7 @@ final class VaultDoor: @unchecked Sendable {
     var holdsOwnership: Bool { guardLock.withLock { ownership != nil } }
 
     /// Versions before 0.11.9 take no lock file, so a mount this door did not make is also left alone while another copy runs.
-    static func anotherCopyOfThisAppIsRunning() -> Bool {
+    @Sendable static func anotherCopyOfThisAppIsRunning() -> Bool {
         guard let identifier = Bundle.main.bundleIdentifier else { return false }
         return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).contains { $0 != .current }
     }

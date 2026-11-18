@@ -76,9 +76,7 @@ custom_rules:
   process_outside_shell:
     name: "Process() outside Shell"
     included: "Sources/Toolbox/.*\\.swift"
-    excluded:
-      - "Sources/Toolbox/Support/Shell\\.swift"
-      - "Sources/Toolbox/Vault/VaultDisk\\.swift"   # runAndWait locks the vault while the app quits; to be moved into Shell
+    excluded: "Sources/Toolbox/Support/Shell\\.swift"
     regex: "(?<![\\w.])Process\\s*(\\.\\s*init)?\\s*\\("
     excluded_match_kinds: [comment, doccomment, string]
     message: "Run programs with Shell.run, which stops them on cancel, on timeout and when the app quits."

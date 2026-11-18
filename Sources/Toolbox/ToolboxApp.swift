@@ -23,7 +23,7 @@ struct ToolboxApp: App {
                 .registersMainWindowOpener(reopener)
                 .onAppear {
                     MacLaunchHooks.run()
-                    vault.showRefusedQuit(on: state)
+                    vault.quitGuard.showRefusal(on: state)
                     NSApplication.shared.setActivationPolicy(.regular)
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }

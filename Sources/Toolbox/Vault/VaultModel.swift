@@ -6,29 +6,6 @@ import Observation
 @MainActor
 @Observable
 final class VaultModel {
-    enum Phase: Equatable { case setup, locked, opening, open }
-
-    enum Mode: String, CaseIterable, Identifiable {
-        case library, duplicates
-
-        var id: Self { self }
-        var title: String { self == .library ? "Library" : "Duplicates" }
-    }
-
-    enum SearchState: Equatable {
-        case off
-        case needsModel
-        case downloading(Double)
-        case indexing(done: Int, total: Int)
-        case ready(unreadable: Int)
-        case failed(String)
-    }
-
-    struct MoveProgress: Equatable {
-        var done: Int
-        var total: Int
-    }
-
     private(set) var phase: Phase
     private(set) var isWorking = false
     private(set) var wrongPasswordAttempts = 0
@@ -73,10 +50,8 @@ final class VaultModel {
     var disk: VaultDisk { door.disk }
     private var lockCount = 0
     private var lockInFlight: Task<Void, Never>?
-    fileprivate var lastLockFailure: String?
-    fileprivate var quitRefusal: String?
-    fileprivate var quitsAnywayIfStillOpen = false
-    @ObservationIgnored var showVaultPage: (() -> Void)?
+    private(set) var lastLockFailure: String?
+    @ObservationIgnored private(set) lazy var quitGuard = VaultQuitGuard(self)
     private var moveTask: Task<Void, Never>?
     private var moveID: UUID?
     private var observers: [NSObjectProtocol] = []
@@ -628,7 +603,7 @@ final class VaultModel {
         observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { _ = self?.lockImmediately() }
         })
-        prepareQuit(in: .shared)
+        quitGuard.prepare(in: .shared)
         observers.append(workspace.addObserver(forName: NSWorkspace.didUnmountNotification, object: nil, queue: .main) { [weak self] note in
             let volume = note.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL
             MainActor.assumeIsolated { self?.volumeDidUnmount(volume) }
@@ -646,55 +621,6 @@ extension VaultModel {
         let pending = door.startLock()
         _ = pending.wait(upTo: door.bounds.lock)
         if lockInFlight == nil { lockInFlight = Task { settle(await pending.value()) } }
-    }
-
-    static let quitSlack: TimeInterval = 2
-    var quitPatience: Duration { .seconds(door.bounds.lock + Self.quitSlack) }
-
-    func prepareQuit(in preparation: QuitPreparation) {
-        preparation.add(patience: quitPatience, mayQuitUnfinished: { [weak self] in self?.mayQuit() ?? true },
-                        { [weak self] in self?.lockBeforeQuitting() })
-    }
-
-    func showRefusedQuit(on state: AppState) {
-        showVaultPage = { [weak state] in state?.page = .vault }
-    }
-
-    func lockBeforeQuitting() -> Task<Bool, Never>? {
-        let state = door.state
-        guard isWorking || isLocking || state == .mounting || state == .open || state == .closing else { return nil }
-        quitsAnywayIfStillOpen = quitRefusal != nil && message == quitRefusal
-        let locking = lockImmediately()
-        return Task {
-            await locking.value
-            await door.idle()
-            return mayQuit()
-        }
-    }
-
-    /// Answered from the door's state alone, so it is also right when the lock has not finished within the patience.
-    func mayQuit() -> Bool {
-        let state = door.state
-        guard state == .mounting || state == .open || state == .closing else {
-            quitRefusal = nil
-            return true
-        }
-        let details = ["door": "\(state)", "reason": lastLockFailure ?? "the lock had not finished"]
-        guard !quitsAnywayIfStillOpen else {
-            Log.error("Quit with the vault still open", category: VaultLog.category, details)
-            return true
-        }
-        Log.error("Quit refused because the vault is still open", category: VaultLog.category, details)
-        let refusal = VaultNotices.quitRefused(reason: lastLockFailure)
-        quitRefusal = refusal
-        message = refusal
-        showVaultPage?()
-        return false
-    }
-
-    func volumeDidUnmount(_ volume: URL?) {
-        guard volume?.resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().path else { return }
-        lockIfClosedFromOutside()
     }
 
     @discardableResult
@@ -726,15 +652,6 @@ extension VaultModel {
         let noticeShown = message == VaultNotices.closedFromOutside(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed)
         outsideCloseNotice = (notice.duringImport, notice.unconfirmed + 1)
         if noticeShown { message = VaultNotices.closedFromOutside(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed + 1) }
-    }
-
-    fileprivate func addDebugFiles() {
-        #if DEBUG
-        let arguments = CommandLine.arguments
-        guard let flag = arguments.firstIndex(of: "--vault-debug-add"), flag + 1 < arguments.count else { return }
-        let folder = URL(fileURLWithPath: arguments[flag + 1], isDirectory: true)
-        add([folder])
-        #endif
     }
 
     func changePassword(current: String, new: String, confirmation: String) async -> Bool {
