@@ -28,7 +28,7 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
-        Release(version: "0.11.6", date: "2026-11-17", changes: [
+        Release(version: "0.11.6", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "Dropping several files at once always tells you when some were skipped. Before, the note could vanish depending on which file loaded last."),
             .init(kind: .fixed, text: "Storage Explorer no longer freezes while it moves things to the Trash or empties it, and shows that it is working."),
             .init(kind: .fixed, text: "Storage Explorer: a list measured earlier can no longer replace a newer one."),
