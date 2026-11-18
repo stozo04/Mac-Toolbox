@@ -3,7 +3,7 @@ import Observation
 import UniformTypeIdentifiers
 
 @MainActor @Observable
-final class BurnInSubtitlesModel {
+final class BurnInSubtitlesModel: BatchQueueModel {
     /// Shared so the queue survives switching to another tool and back.
     static let shared = BurnInSubtitlesModel()
 
@@ -12,15 +12,17 @@ final class BurnInSubtitlesModel {
         var id: String { rawValue }
     }
 
-    enum Status: Equatable {
+    enum Status: BatchStatus {
         case waiting
         case transcribing(Double)
         case burning(Double)
         case done(BurnResult)
         case failed(String)
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
-    struct Item: Identifiable {
+    struct Item: BatchItem {
         let id = UUID()
         let url: URL
         /// A subtitle file with the video's name next to it.
@@ -28,21 +30,18 @@ final class BurnInSubtitlesModel {
         var status = Status.waiting
     }
 
-    private(set) var items: [Item] = []
-    private(set) var isRunning = false
-    private(set) var folder: URL?
-    private(set) var notice: String?
+    let queue: BatchQueue<Item>
+
+    init(outputParent: URL? = nil) {
+        queue = BatchQueue(BatchTool(outputFolderName: "Toolbox Subtitled Videos", logCategory: "burn-in", failureLog: "Burn in failed",
+                                     skippedBecause: "had no videos", files: BatchFiles.videos), outputParent: outputParent)
+    }
 
     var source = Source.file
     private(set) var chosenFile: URL?
     var alsoSaveSubtitles = false
     var languageID = ""
     var style = CaptionStyle()
-
-    private var task: Task<Void, Never>?
-    private var runID = UUID()
-
-    var hasItems: Bool { !items.isEmpty }
 
     /// Languages this Mac can transcribe; empty until `loadLanguages()` has run.
     private(set) var locales: [Locale] = []
@@ -61,38 +60,12 @@ final class BurnInSubtitlesModel {
 
     func isReady(_ item: Item) -> Bool { item.status == .waiting && (source == .transcribe || subtitleFile(for: item) != nil) }
     var hasRunnable: Bool { items.contains(where: isReady) }
-    var hasPending: Bool { items.contains { $0.status == .waiting } }
+    var hasPending: Bool { queue.hasWaiting }
     var doneCount: Int { items.filter { if case .done = $0.status { true } else { false } }.count }
 
     // MARK: Queue
 
-    /// Adds videos; folders are searched for videos inside them.
-    func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += BatchFiles.videos(in: url)
-            if found.count == before { skipped += 1 }
-        }
-        var known = Set(items.map { BatchFiles.identity($0.url) })
-        items += found.filter { known.insert(BatchFiles.identity($0)).inserted }.map { Item(url: $0, sidecar: SubtitleFile.sidecar(for: $0)) }
-        notice = skipped == 0 ? nil : "\(skipped) item(s) had no videos and were skipped."
-    }
-
-    func remove(_ id: UUID) {
-        guard !isRunning else { return }
-        items.removeAll { $0.id == id }
-    }
-
-    func clear() {
-        task?.cancel()
-        runID = UUID()
-        items = []
-        folder = nil
-        notice = nil
-        isRunning = false
-    }
+    func add(_ urls: [URL]) { queue.add(urls) { Item(url: $0, sidecar: SubtitleFile.sidecar(for: $0)) } }
 
     // MARK: Subtitle file
 
@@ -108,85 +81,38 @@ final class BurnInSubtitlesModel {
         do {
             _ = try SubtitleFile.load(url)
             chosenFile = url
-            notice = nil
+            queue.notice = nil
         } catch {
-            notice = error.localizedDescription
+            queue.notice = error.localizedDescription
         }
     }
 
     // MARK: Burning
 
     func burn() {
-        guard !isRunning, hasRunnable else { return }
-        let folder: URL
-        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Subtitled Videos") } catch {
-            notice = error.localizedDescription
-            Log.error("Output folder failed", category: "burn-in", Log.details(error))
-            return
-        }
-        notice = OutputFolderError.clearing(notice)
-        isRunning = true
-        for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
-        self.folder = folder
+        guard hasRunnable else { return }
         let (source, style, save) = (self.source, self.style, alsoSaveSubtitles)
         let locale = Locale(identifier: languageID)
-        let run = UUID()
-        runID = run
-        task = Task { [weak self] in
-            guard let self else { return }
-            for item in items where isReady(item) {
-                if Task.isCancelled || runID != run { break }
-                let id = item.id
-                do {
-                    let cues: [SubtitleCue]
-                    switch source {
-                    case .file:
-                        guard let file = subtitleFile(for: item) else { continue }
-                        cues = try SubtitleFile.load(file)
-                    case .transcribe:
-                        update(id, .transcribing(0))
-                        let words = try await SpeechTranscriber.transcribe(item.url, locale: locale) { p in
-                            Task { @MainActor in self.update(id, .transcribing(p), only: .transcribing) }
-                        }
-                        cues = CueBuilder.cues(from: words)
-                        if save { try Self.writeSRT(cues, for: item.url, into: folder) }
-                    }
-                    update(id, .burning(0))
-                    let result = try await SubtitleBurner.burn(source: item.url, cues: cues, style: style, into: folder) { p in
-                        Task { @MainActor in self.update(id, .burning(p), only: .burning) }
-                    }
-                    update(id, .done(result))
-                    Log.info("Subtitles burned in", category: "burn-in", ["source": source == .file ? "file" : "speech", "style": style.look == .box ? "box" : "shadow"])
-                } catch is CancellationError {
-                    update(id, .waiting)
-                } catch {
-                    update(id, .failed(error.localizedDescription))
-                    Log.error("Burn in failed", category: "burn-in", Log.details(error, file: item.url))
-                }
+        queue.run(where: isReady) { [self] item, folder, step in
+            let cues: [SubtitleCue]
+            switch source {
+            case .file:
+                guard let file = subtitleFile(for: item) else { return .waiting }
+                cues = try SubtitleFile.load(file)
+            case .transcribe:
+                let words = try await SpeechTranscriber.transcribe(item.url, locale: locale, progress: step.progress { .transcribing($0) })
+                cues = CueBuilder.cues(from: words)
+                if save { try Self.writeSRT(cues, for: item.url, into: folder) }
             }
-            guard runID == run else { return }
-            isRunning = false
+            let result = try await SubtitleBurner.burn(source: item.url, cues: cues, style: style, into: folder,
+                                                       progress: step.progress { .burning($0) })
+            Log.info("Subtitles burned in", category: "burn-in", ["source": source == .file ? "file" : "speech", "style": style.look == .box ? "box" : "shadow"])
+            return .done(result)
         }
     }
-
-    func cancel() { task?.cancel() }
 
     nonisolated static func writeSRT(_ cues: [SubtitleCue], for video: URL, into folder: URL) throws {
         let url = BatchFiles.uniqueURL(in: folder, name: video.deletingPathExtension().lastPathComponent, ext: "srt")
         try SubtitleFile.srt(cues).write(to: url, atomically: true, encoding: .utf8)
     }
-
-    private enum Phase { case transcribing, burning }
-
-    private func update(_ id: UUID, _ status: Status, only phase: Phase? = nil) {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        switch (phase, items[i].status) {
-        case (nil, _), (.transcribing, .transcribing), (.burning, .burning): items[i].status = status
-        default: break
-        }
-    }
-
-    func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-
-    func revealFolder() { if let folder { NSWorkspace.shared.open(folder) } }
 }
