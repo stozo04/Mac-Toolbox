@@ -50,32 +50,22 @@ enum Shell {
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Result, Error>) in
-                let outData = DataCollector(), errData = DataCollector()
                 let text = UTF8Chunks()
-                out.fileHandleForReading.readabilityHandler = { handle in
-                    let chunk = handle.availableData
-                    outData.append(chunk)
-                    onOutput?(text.decode(chunk))
-                }
-                err.fileHandleForReading.readabilityHandler = { errData.append($0.availableData) }
+                let outDrain = PipeDrain(out.fileHandleForReading) { chunk in onOutput?(text.decode(chunk)) }
+                let errDrain = PipeDrain(err.fileHandleForReading)
                 process.terminationHandler = { p in
-                    let stopped = box.finish()
-                    out.fileHandleForReading.readabilityHandler = nil
-                    err.fileHandleForReading.readabilityHandler = nil
-                    // A stopped program's children can keep the pipes open, so reading to the end could wait forever.
-                    if let stopped { return continuation.resume(throwing: stopError(stopped, path: path)) }
-                    let rest = out.fileHandleForReading.readDataToEndOfFile()
-                    outData.append(rest)
-                    if !rest.isEmpty { onOutput?(text.decode(rest)) }
-                    errData.append(err.fileHandleForReading.readDataToEndOfFile())
-                    continuation.resume(returning: Result(status: p.terminationStatus, out: outData.string, err: errData.string))
+                    // A stopped program's children can keep the pipes open, so its output is not waited for.
+                    if let stopped = box.finish() { return continuation.resume(throwing: stopError(stopped, path: path)) }
+                    outDrain.waitUntilEmptied()
+                    errDrain.waitUntilEmptied()
+                    continuation.resume(returning: Result(status: p.terminationStatus, out: outDrain.string, err: errDrain.string))
                 }
                 do { try box.launch() } catch {
-                    out.fileHandleForReading.readabilityHandler = nil
-                    err.fileHandleForReading.readabilityHandler = nil
                     continuation.resume(throwing: error)
                     return
                 }
+                outDrain.start()
+                errDrain.start()
                 if let inputPipe, let input {
                     try? inputPipe.fileHandleForWriting.write(contentsOf: input)
                     try? inputPipe.fileHandleForWriting.close()
@@ -217,10 +207,37 @@ enum Shell {
         }
     }
 
-    private final class DataCollector: @unchecked Sendable {
+    /// Reads a pipe to its end on one thread of its own, so the pieces stay in order and none is left behind when the program exits.
+    private final class PipeDrain: @unchecked Sendable {
+        private static let secondsToWaitAfterExit: TimeInterval = 5
+        private let handle: FileHandle
+        private let onChunk: (@Sendable (Data) -> Void)?
+        private let emptied = DispatchSemaphore(value: 0)
         private let lock = NSLock()
         private var data = Data()
-        func append(_ more: Data) { lock.lock(); data.append(more); lock.unlock() }
+
+        init(_ handle: FileHandle, onChunk: (@Sendable (Data) -> Void)? = nil) {
+            self.handle = handle
+            self.onChunk = onChunk
+        }
+
+        func start() {
+            Thread.detachNewThread { [self] in
+                while true {
+                    let chunk = handle.availableData
+                    if chunk.isEmpty { break }
+                    lock.lock(); data.append(chunk); lock.unlock()
+                    onChunk?(chunk)
+                }
+                emptied.signal()
+            }
+        }
+
+        /// Bounded, because a child the program left running can hold the pipe open after the program itself has exited.
+        func waitUntilEmptied() {
+            _ = emptied.wait(timeout: .now() + Self.secondsToWaitAfterExit)
+        }
+
         var string: String { lock.lock(); defer { lock.unlock() }; return String(decoding: data, as: UTF8.self) }
     }
 }
