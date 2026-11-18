@@ -92,6 +92,24 @@ final class VaultSearchTests: XCTestCase {
         XCTAssertEqual(try reopened.vectors().rows, 0, "vectors from another model must never be mixed in")
     }
 
+    func testRemovingManyFilesFromTheIndexIsOneWrite() throws {
+        let database = root.appendingPathComponent("index.sqlite")
+        let index = try VaultIndex(at: database)
+        let vector = [Float](repeating: 0.5, count: LlamaEmbedder.dimension)
+        let paths = (0..<200).map { "photo-\($0).png" }
+        for path in paths {
+            try index.store(path: path, file: VaultIndexedFile(bytes: 1, modified: 1),
+                            segments: [VaultSegment(modality: .image, start: 0, end: 0, vector: vector)])
+        }
+        let writesBefore = try writeCount(of: database)
+
+        try index.remove(paths)
+
+        XCTAssertTrue(try index.files().isEmpty)
+        XCTAssertEqual(try index.vectors().rows, 0)
+        XCTAssertEqual(try writeCount(of: database) - writesBefore, 1, "removing \(paths.count) files committed once per file")
+    }
+
     func testSearchFindsTheMatchingPhotoWithTheRealModel() async throws {
         guard let model = EmbeddingModel.locate() else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
         let red = try makePhoto("one.png", red: 230, green: 20, blue: 20)
@@ -221,6 +239,15 @@ final class VaultSearchTests: XCTestCase {
         let result = try await engine.search("a solid red picture", names: names)
         XCTAssertEqual(result.hits.first?.path, video.lastPathComponent)
         engine.close()
+    }
+
+    // SQLite raises the 4-byte counter at offset 24 of the file once for every transaction that changes it.
+    private func writeCount(of database: URL) throws -> Int {
+        let handle = try FileHandle(forReadingFrom: database)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: 24)
+        let counter = try XCTUnwrap(try handle.read(upToCount: 4))
+        return counter.reduce(0) { $0 << 8 | Int($1) }
     }
 
     private func makeVideo(_ name: String, seconds: Int) async throws -> URL {
