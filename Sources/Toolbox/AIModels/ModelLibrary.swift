@@ -21,6 +21,7 @@ final class ModelLibrary {
     private let useSpotlight: Bool
 
     private var started = false
+    private var openPages = 0
     private var watcher: FileWatcher?
     private var watchedPaths: [String] = []
     private var poll: Task<Void, Never>?
@@ -51,6 +52,16 @@ final class ModelLibrary {
     }
 
     // MARK: Lifecycle
+
+    func pageAppeared() {
+        openPages += 1
+        start()
+    }
+
+    func pageDisappeared() {
+        openPages = max(0, openPages - 1)
+        if openPages == 0 { stop() }
+    }
 
     /// Starts watching and scans; safe to call again.
     func start() {

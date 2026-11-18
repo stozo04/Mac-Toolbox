@@ -649,6 +649,23 @@ final class AIModelsTests: XCTestCase {
         XCTAssertEqual(AppIndex.build(folders: [apps]).entries.count, 1)
     }
 
+    @MainActor func testTheLibraryKeepsWatchingWhileAnotherWindowShowsThePage() async throws {
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.pageAppeared()
+        library.pageAppeared()
+        try await waitUntil("the first scan finishes") { library.hasScanned && !library.isScanning }
+        let scansWithBothOpen = library.scansStarted
+
+        library.pageDisappeared()
+        library.refresh()
+        XCTAssertEqual(library.scansStarted, scansWithBothOpen + 1, "the page still open in the other window can look again")
+        try await waitUntil("that scan finishes") { !library.isScanning }
+
+        library.pageDisappeared()
+        library.refresh()
+        XCTAssertEqual(library.scansStarted, scansWithBothOpen + 1, "with no page open, nothing scans")
+    }
+
     @MainActor func testALookAskedForWhileStoppedWaitsForTheNextStart() async throws {
         let library = ModelLibrary(home: home, spotlight: false)
         library.refresh()
