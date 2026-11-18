@@ -74,7 +74,8 @@ final class MediaInfoModel {
 
     private func read(_ item: Item) {
         readers[item.id] = Task { [weak self, inspect] in
-            let outcome = await Result { try await inspect(item.url) }
+            let outcome: Result<MediaReport, Error>
+            do { outcome = .success(try await inspect(item.url)) } catch { outcome = .failure(error) }
             guard let self, !Task.isCancelled, readers.removeValue(forKey: item.id) != nil else { return }
             switch outcome {
             case .success(let report):
