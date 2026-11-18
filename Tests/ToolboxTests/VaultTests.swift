@@ -551,7 +551,7 @@ final class VaultTests: XCTestCase {
         XCTAssertFalse(disk.isOpen)
     }
 
-    private static let toolTimeout: TimeInterval = 60
+    private static let toolTimeout = Shell.Timeout.seconds(60)
 
     private func makeOpenDisk(_ name: String) async throws -> VaultDisk {
         let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent(name)))
