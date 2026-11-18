@@ -80,7 +80,7 @@ final class BatchQueueTests: XCTestCase {
     private func add(_ names: String...) { queue.add(names.map(file)) { Job(url: $0) } }
 
     @discardableResult
-    private func run(retryingFailed: Bool = true) -> Bool {
+    private func start(retryingFailed: Bool = true) -> Bool {
         let bench: Bench = bench
         return queue.run(retryingFailed: retryingFailed) { try await bench.work($0, $1, $2) }
     }
@@ -159,7 +159,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testRemoveIsRefusedWhileRunning() async throws {
         add("a.job", "b.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
 
         XCTAssertFalse(queue.remove(try XCTUnwrap(queue.items.last).id))
@@ -187,9 +187,9 @@ final class BatchQueueTests: XCTestCase {
     func testRunWorksThroughTheWaitingItemsOneAtATimeInOrder() async throws {
         add("a.job", "b.job")
 
-        XCTAssertTrue(run())
+        XCTAssertTrue(start())
         XCTAssertTrue(queue.isRunning)
-        XCTAssertFalse(run(), "a second run cannot start while one is going")
+        XCTAssertFalse(start(), "a second run cannot start while one is going")
         try await waitUntilWorking(on: "a.job")
         XCTAssertEqual(try status(of: "a.job"), .working(0))
         XCTAssertEqual(try status(of: "b.job"), .waiting)
@@ -205,7 +205,7 @@ final class BatchQueueTests: XCTestCase {
     }
 
     func testRunDoesNothingWithoutAWaitingItem() {
-        XCTAssertFalse(run())
+        XCTAssertFalse(start())
 
         XCTAssertFalse(queue.isRunning)
         XCTAssertNil(queue.folder)
@@ -227,12 +227,12 @@ final class BatchQueueTests: XCTestCase {
 
     func testEveryRunOfOneQueueSavesIntoTheSameDatedFolderUnderTheGivenParent() async throws {
         add("a.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
         try bench.finish("a.job")
         try await waitUntilIdle()
         add("b.job")
-        run()
+        start()
         try await waitUntilWorking(on: "b.job")
         try bench.finish("b.job")
         try await waitUntilIdle()
@@ -246,7 +246,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testProgressShowsWhileAnItemIsWorkedOnAndALateReportCannotUndoItsResult() async throws {
         add("a.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
 
         try bench.report(0.4, for: "a.job")
@@ -261,7 +261,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testAnItemWhoseWorkFailsShowsWhyAndTheRunGoesOn() async throws {
         add("a.job", "b.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
 
         try bench.fail("a.job", with: JobError())
@@ -274,7 +274,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testCancelPutsTheItemInHandBackToWaitingAndStartsNoOther() async throws {
         add("a.job", "b.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
 
         queue.cancel()
@@ -287,7 +287,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testAnItemThatFinishesDespiteTheCancelKeepsItsResult() async throws {
         add("a.job", "b.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
 
         queue.cancel()
@@ -299,14 +299,14 @@ final class BatchQueueTests: XCTestCase {
 
     func testTheNextRunRetriesFailedItemsAlongsideAWaitingOne() async throws {
         add("a.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
         try bench.fail("a.job", with: JobError())
         try await waitUntilIdle()
 
-        XCTAssertFalse(run(), "a queue with only failed items has nothing waiting")
+        XCTAssertFalse(start(), "a queue with only failed items has nothing waiting")
         add("b.job")
-        XCTAssertTrue(run())
+        XCTAssertTrue(start())
 
         XCTAssertEqual(try status(of: "a.job"), .waiting)
         try await waitUntilWorking(on: "a.job")
@@ -320,13 +320,13 @@ final class BatchQueueTests: XCTestCase {
 
     func testARunToldNotToRetryLeavesFailedItemsAlone() async throws {
         add("a.job")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
         try bench.fail("a.job", with: JobError())
         try await waitUntilIdle()
         add("b.job")
 
-        run(retryingFailed: false)
+        start(retryingFailed: false)
         try await waitUntilWorking(on: "b.job")
         try bench.finish("b.job")
         try await waitUntilIdle()
@@ -338,7 +338,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testClearEmptiesTheQueueAndForgetsTheFolderAndNotice() async throws {
         add("a.job", "notes.txt")
-        run()
+        start()
         try await waitUntilWorking(on: "a.job")
         try bench.finish("a.job")
         try await waitUntilIdle()
@@ -352,14 +352,14 @@ final class BatchQueueTests: XCTestCase {
 
     func testClearDuringARunLetsANewRunFinishOnItsOwn() async throws {
         add("old.job", "old 2.job")
-        run()
+        start()
         try await waitUntilWorking(on: "old.job")
         let firstFolder = try XCTUnwrap(queue.folder)
 
         queue.clear()
         XCTAssertFalse(queue.isRunning)
         add("new.job")
-        XCTAssertTrue(run())
+        XCTAssertTrue(start())
         try await waitUntilWorking(on: "new.job")
         try bench.report(0.7, for: "old.job")
         try bench.finish("old.job")
@@ -379,7 +379,7 @@ final class BatchQueueTests: XCTestCase {
 
     func testALateFailureFromAClearedRunTouchesNothing() async throws {
         add("same.job")
-        run()
+        start()
         try await waitUntilWorking(on: "same.job")
 
         queue.clear()
@@ -400,7 +400,7 @@ final class BatchQueueTests: XCTestCase {
         queue = makeQueue(outputParent: blocked)
         add("a.job")
 
-        XCTAssertFalse(run())
+        XCTAssertFalse(start())
 
         XCTAssertEqual(queue.notice?.hasPrefix("Couldn't create the output folder in “blocked”."), true, queue.notice ?? "no notice")
         XCTAssertFalse(queue.isRunning)
@@ -410,7 +410,7 @@ final class BatchQueueTests: XCTestCase {
 
         try FileManager.default.removeItem(at: blocked)
         try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
-        XCTAssertTrue(run())
+        XCTAssertTrue(start())
 
         XCTAssertNil(queue.notice)
         try await waitUntilWorking(on: "a.job")
@@ -422,7 +422,7 @@ final class BatchQueueTests: XCTestCase {
     func testStartingARunKeepsANoticeAboutSkippedFiles() async throws {
         add("a.job", "notes.txt")
 
-        run()
+        start()
 
         XCTAssertEqual(queue.notice, "1 item(s) had no jobs and were skipped.")
         try await waitUntilWorking(on: "a.job")

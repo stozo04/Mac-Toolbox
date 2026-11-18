@@ -150,21 +150,25 @@ final class BatchQueue<Item: BatchItem> {
         for id in ids {
             if Task.isCancelled || runID != run { break }
             guard let item = item(id) else { continue }
-            let status: Item.Status
-            do {
-                status = try await work(item, folder, Step(queue: self, id: id, run: run))
-            } catch is CancellationError {
-                status = .waiting
-            } catch {
-                status = .failed(error.localizedDescription)
-                Log.error(tool.failureLog, category: tool.logCategory, Log.details(error, file: item.url, failureContext))
-            }
+            let status = await outcome(of: work, on: item, into: folder, in: run, failureContext: failureContext)
             guard runID == run else { return }
             phase = UUID()
             update(id) { $0.status = status }
         }
         guard runID == run else { return }
         isRunning = false
+    }
+
+    private func outcome(of work: @escaping Work, on item: Item, into folder: URL, in run: UUID,
+                         failureContext: [String: String]) async -> Item.Status {
+        do {
+            return try await work(item, folder, Step(queue: self, id: item.id, run: run))
+        } catch is CancellationError {
+            return .waiting
+        } catch {
+            Log.error(tool.failureLog, category: tool.logCategory, Log.details(error, file: item.url, failureContext))
+            return .failed(error.localizedDescription)
+        }
     }
 
     @discardableResult
