@@ -94,6 +94,7 @@ final class VideoToGifModel {
             Log.error("Output folder failed", category: "gif", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
         self.folder = folder

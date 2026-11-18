@@ -281,6 +281,7 @@ final class RedactImageModel {
             Log.error("Output folder failed", category: "redact-image", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         self.folder = folder
         let settings = self.settings

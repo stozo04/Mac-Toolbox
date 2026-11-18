@@ -78,6 +78,7 @@ final class CompressVideoModel {
             Log.error("Output folder failed", category: "compress", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         let run = UUID()
         runID = run
         isRunning = true

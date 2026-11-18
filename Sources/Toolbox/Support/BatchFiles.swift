@@ -5,8 +5,14 @@ struct OutputFolderError: LocalizedError, CustomNSError {
     let parentName: String
     let underlying: Error
 
+    private static let opening = "Couldn't create the output folder"
+
     var errorDescription: String? {
-        "Couldn't create the output folder in “\(parentName)”. Check that Toolbox is allowed to save files there, and that the disk is not full."
+        "\(Self.opening) in “\(parentName)”. Check that Toolbox is allowed to save files there, and that the disk is not full."
+    }
+
+    static func clearing(_ notice: String?) -> String? {
+        notice?.hasPrefix(opening) == true ? nil : notice
     }
 
     var errorUserInfo: [String: Any] { [NSUnderlyingErrorKey: underlying as NSError] }

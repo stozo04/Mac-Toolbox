@@ -94,6 +94,7 @@ final class RemoveMetadataModel {
             Log.error("Output folder failed", category: "remove-metadata", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         for i in items.indices { if case .failed = items[i].status { items[i].status = .waiting } }
         self.folder = folder

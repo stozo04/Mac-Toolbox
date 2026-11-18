@@ -140,6 +140,7 @@ final class BlurFacesModel {
             Log.error("Output folder failed", category: "blur-faces", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         self.folder = folder
         let settings = self.settings

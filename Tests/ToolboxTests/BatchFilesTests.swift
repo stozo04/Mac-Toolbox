@@ -37,4 +37,11 @@ final class BatchFilesTests: XCTestCase {
     func testOutputFolderWithANameTooLongForTheDiskIsAnError() {
         XCTAssertThrowsError(try BatchFiles.makeOutputFolder(named: String(repeating: "x", count: 300), in: dir))
     }
+
+    func testClearingDropsOnlyAFolderFailureNotice() {
+        let failure = OutputFolderError(parentName: "Downloads", underlying: CocoaError(.fileWriteNoPermission)).localizedDescription
+        XCTAssertNil(OutputFolderError.clearing(failure))
+        XCTAssertEqual(OutputFolderError.clearing("2 item(s) had no videos and were skipped."), "2 item(s) had no videos and were skipped.")
+        XCTAssertNil(OutputFolderError.clearing(nil))
+    }
 }

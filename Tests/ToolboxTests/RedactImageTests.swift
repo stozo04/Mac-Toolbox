@@ -293,6 +293,26 @@ final class RedactImageTests: XCTestCase {
         XCTAssertTrue(model.hasExportable)
     }
 
+    @MainActor func testAFolderFailureNoticeGoesOnceAnExportWorks() async throws {
+        let parent = dir.appendingPathComponent("parent")
+        try Data().write(to: parent)
+        let model = RedactImageModel(outputParent: parent)
+        model.add([try writeTextPage(named: "page.png")])
+        _ = model.addRegion(CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))
+
+        model.export()
+        XCTAssertNotNil(model.notice, "a folder cannot be made inside a file")
+        XCTAssertEqual(model.doneCount, 0)
+
+        try FileManager.default.removeItem(at: parent)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        model.export()
+        try await waitUntil(timeout: .seconds(30), "the export has finished") { !model.isRunning }
+
+        XCTAssertEqual(model.doneCount, 1)
+        XCTAssertNil(model.notice)
+    }
+
     @MainActor func testFindAndCoverSwitchesToBlackBoxUntilAStyleIsChosen() async throws {
         let model = RedactImageModel()
         model.add([try writeTextPage(named: "page.png")])

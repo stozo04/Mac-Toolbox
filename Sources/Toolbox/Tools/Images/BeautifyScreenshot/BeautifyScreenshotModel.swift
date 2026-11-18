@@ -110,6 +110,7 @@ final class BeautifyScreenshotModel {
             Log.error("Output folder failed", category: "beautify-screenshot", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         self.folder = folder
         let settings = self.settings

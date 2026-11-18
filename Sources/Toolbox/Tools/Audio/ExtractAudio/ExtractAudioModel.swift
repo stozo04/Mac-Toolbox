@@ -74,6 +74,7 @@ final class ExtractAudioModel {
             Log.error("Output folder failed", category: "extractAudio", Log.details(error))
             return
         }
+        notice = OutputFolderError.clearing(notice)
         isRunning = true
         for i in items.indices where items[i].isFailed { items[i].status = .waiting }
         let run = UUID()
