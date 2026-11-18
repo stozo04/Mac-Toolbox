@@ -61,8 +61,9 @@ final class ModelLibrary {
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
-                guard !Task.isCancelled else { return }
-                self?.updateWatcher()
+                guard !Task.isCancelled, let self else { return }
+                // A folder that has just appeared may already hold models.
+                if updateWatcher() { refreshSoon() }
             }
         }
         refresh()
@@ -168,10 +169,12 @@ final class ModelLibrary {
             .filter { FileManager.default.fileExists(atPath: $0) }
     }
 
-    private func updateWatcher() {
+    /// Watches the folders that exist now, and says whether that set changed.
+    @discardableResult
+    private func updateWatcher() -> Bool {
         if !FileManager.default.fileExists(atPath: central.path) { try? FileManager.default.createDirectory(at: central, withIntermediateDirectories: true) }
         let targets = watchTargets
-        guard targets != watchedPaths else { return }
+        guard targets != watchedPaths else { return false }
         watcher?.stop()
         let central = self.central.path
         let next = FileWatcher(paths: targets) { [weak self] paths in
@@ -181,8 +184,7 @@ final class ModelLibrary {
         next.start()
         watcher = next
         watchedPaths = targets
-        // A folder that has just appeared may already hold models.
-        if started, hasScanned { refreshSoon() }
+        return true
     }
 
     /// Whether a changed path could be a model: the model files themselves, or anything in a folder named for models.

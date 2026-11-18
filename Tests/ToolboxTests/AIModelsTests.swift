@@ -588,7 +588,9 @@ final class AIModelsTests: XCTestCase {
         XCTAssertEqual(library.models.count, 2)
 
         library.start()
-        try await waitUntil("the model added while stopped is listed after the restart") { library.models.count == 3 }
+        try await waitUntil("the model added while stopped is listed after the restart") { library.models.count == 3 && !library.isScanning }
+        try await pause(for: .seconds(2), because: "a second scan queued by the restart would start within a second")
+        XCTAssertEqual(library.scansStarted, scansBeforeTheChange + 1)
     }
 
     @MainActor func testComingToTheFrontRescansAtMostOncePerInterval() async throws {
