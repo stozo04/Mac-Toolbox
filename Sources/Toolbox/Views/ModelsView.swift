@@ -37,6 +37,7 @@ struct ModelsView: View {
             .animation(.easeInOut(duration: 0.25), value: library.models.map(\.id))
         }
         .onAppear { library.start() }
+        .onDisappear { library.stop() }
         .alert("Move this model?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { model in
             Button("Move") { move([model]) }
             Button("Cancel", role: .cancel) {}

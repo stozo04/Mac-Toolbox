@@ -557,6 +557,63 @@ final class AIModelsTests: XCTestCase {
         XCTAssertEqual(library.models.count, 2)
     }
 
+    @MainActor func testStartingAgainAfterStoppingMidScanScansAgain() async throws {
+        try makeDigUp()
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.start()
+        XCTAssertTrue(library.isScanning)
+        library.stop()
+        XCTAssertFalse(library.isScanning)
+        XCTAssertFalse(library.hasScanned)
+
+        library.start()
+        defer { library.stop() }
+        XCTAssertEqual(library.scansStarted, 2)
+        try await waitUntil("the scan after the restart finds both models") { library.hasScanned && library.models.count == 2 }
+        XCTAssertFalse(library.isScanning)
+    }
+
+    @MainActor func testStoppingEndsTheWatchUntilTheNextStart() async throws {
+        try makeDigUp()
+        let library = ModelLibrary(home: home, spotlight: false)
+        library.start()
+        defer { library.stop() }
+        try await waitUntil("the first scan finds both models") { library.hasScanned && library.models.count == 2 }
+        library.stop()
+        let scansBeforeTheChange = library.scansStarted
+
+        try makeGGUF(support.appendingPathComponent("LM Studio/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf"), arch: "qwen2", megabytes: 4)
+        try await pause(for: .seconds(4), because: "a watch still running would report the new file and rescan within about 2 seconds")
+        XCTAssertEqual(library.scansStarted, scansBeforeTheChange)
+        XCTAssertEqual(library.models.count, 2)
+
+        library.start()
+        try await waitUntil("the model added while stopped is listed after the restart") { library.models.count == 3 }
+    }
+
+    @MainActor func testComingToTheFrontRescansAtMostOncePerInterval() async throws {
+        let clock = Locked(ContinuousClock.now)
+        let library = ModelLibrary(home: home, spotlight: false, now: { clock.value })
+        let settle = { try await waitUntil("the scan finishes") { !library.isScanning } }
+
+        library.appBecameActive()
+        XCTAssertEqual(library.scansStarted, 1)
+        try await settle()
+
+        clock.update { $0 += ModelLibrary.activationRescanInterval - .seconds(1) }
+        library.appBecameActive()
+        XCTAssertEqual(library.scansStarted, 1)
+
+        clock.update { $0 += .seconds(1) }
+        library.appBecameActive()
+        XCTAssertEqual(library.scansStarted, 2)
+        try await settle()
+
+        library.refresh()
+        XCTAssertEqual(library.scansStarted, 3, "asking for a look yourself is never held back")
+        try await settle()
+    }
+
     // MARK: Helpers
 
     /// Size of the file a path leads to, links followed, read fresh every time.

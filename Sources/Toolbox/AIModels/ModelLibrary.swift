@@ -31,10 +31,19 @@ final class ModelLibrary {
     private var spotlightPaths: [URL] = []
     private var observers: [NSObjectProtocol] = []
 
-    init(home: URL = FileManager.default.homeDirectoryForCurrentUser, central: URL? = nil, spotlight: Bool = true) {
+    /// The least time between two looks caused by Toolbox coming to the front. The folder watch reports real changes at once,
+    /// so this look is only a safety net and switching apps back and forth should not walk the disk every time.
+    static let activationRescanInterval: Duration = .seconds(30)
+    private let now: () -> ContinuousClock.Instant
+    private var lastActivationRescan: ContinuousClock.Instant?
+    @ObservationIgnored private(set) var scansStarted = 0
+
+    init(home: URL = FileManager.default.homeDirectoryForCurrentUser, central: URL? = nil, spotlight: Bool = true,
+         now: @escaping () -> ContinuousClock.Instant = { .now }) {
         self.home = home
         self.central = central ?? home.appendingPathComponent("Library/Application Support/Toolbox/AI Models")
         self.useSpotlight = spotlight
+        self.now = now
     }
 
     // MARK: Lifecycle
@@ -46,26 +55,33 @@ final class ModelLibrary {
         updateWatcher()
         if useSpotlight { startSpotlight() }
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            Task { @MainActor in self?.appBecameActive() }
         })
         // Folders that did not exist yet (Ollama installed later) can't be watched until they appear.
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { return }
                 self?.updateWatcher()
             }
         }
         refresh()
     }
 
+    /// Stops watching and drops any look in progress, so nothing runs until `start()` is called again.
     func stop() {
         started = false
         watcher?.stop()
         watcher = nil
         watchedPaths = []
         poll?.cancel()
+        poll = nil
         debounce?.cancel()
+        debounce = nil
         scanning?.cancel()
+        scanning = nil
+        rescanAfter = false
+        isScanning = false
         query?.stop()
         query = nil
         observers.forEach(NotificationCenter.default.removeObserver)
@@ -78,8 +94,17 @@ final class ModelLibrary {
         scan()
     }
 
+    /// Looks again because Toolbox came to the front, unless it already did so within `activationRescanInterval`.
+    func appBecameActive() {
+        let time = now()
+        if let last = lastActivationRescan, time - last < Self.activationRescanInterval { return }
+        lastActivationRescan = time
+        refresh()
+    }
+
     /// Looks again in a moment: many file events arrive together while a model downloads or is deleted.
     func refreshSoon() {
+        guard started else { return }
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(800))
@@ -92,6 +117,7 @@ final class ModelLibrary {
 
     private func scan() {
         isScanning = true
+        scansStarted += 1
         let scanner = ModelScanner(home: home, central: central, extraPaths: spotlightPaths)
         let home = self.home
         scanning = Task { [weak self] in
