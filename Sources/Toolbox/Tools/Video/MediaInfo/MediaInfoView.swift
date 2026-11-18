@@ -37,14 +37,7 @@ struct MediaInfoView: View {
         .padding(14)
         .frame(maxHeight: .infinity)
         .cardBackground(corner: 24)
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            for p in providers {
-                _ = p.loadObject(ofClass: URL.self) { url, _ in
-                    if let url { DispatchQueue.main.async { model.add([url]) } }
-                }
-            }
-            return true
-        }
+        .fileDrop { model.add($0) }
     }
 
     private func listRow(_ item: MediaInfoModel.Item) -> some View {

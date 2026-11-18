@@ -33,14 +33,7 @@ struct DropZone: View {
                     .font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
-            for p in providers {
-                _ = p.loadObject(ofClass: URL.self) { url, _ in
-                    if let url { DispatchQueue.main.async { files.append(url); onFiles?([url]) } }
-                }
-            }
-            return true
-        }
+        .fileDrop(isTargeted: $targeted) { files += $0; onFiles?($0) }
     }
 
     private func chooseFiles() {

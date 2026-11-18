@@ -46,7 +46,7 @@ struct AnnotateScreenshotView: View {
                         .font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
                 }
             }
-            .onDrop(of: [.fileURL], isTargeted: $targeted, perform: drop)
+            .fileDrop(isTargeted: $targeted) { if let url = $0.first { model.open(url: url) } }
             shortcuts.frame(width: 240)
         }
     }
@@ -359,14 +359,6 @@ struct AnnotateScreenshotView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.image]
         if panel.runModal() == .OK, let url = panel.url { model.open(url: url) }
-    }
-
-    private func drop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            if let url { DispatchQueue.main.async { model.open(url: url) } }
-        }
-        return true
     }
 
     private func dragProvider() -> NSItemProvider {

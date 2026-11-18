@@ -83,3 +83,13 @@ custom_rules:
     excluded_match_kinds: [comment, doccomment, string]
     message: "Run programs with Shell.run, which stops them on cancel, on timeout and when the app quits."
     severity: error
+  hand_written_file_drop:
+    name: ".onDrop(of:) outside FileDrop"
+    included: "Sources/Toolbox/.*\\.swift"
+    excluded:
+      - "Sources/Toolbox/Views/FileDrop\\.swift"
+      - "Sources/Toolbox/Vault/VaultLibraryView\\.swift"   # already hands over one drop in one call; to be moved onto fileDrop
+    regex: "\\bonDrop\\s*\\(\\s*of\\s*:"
+    excluded_match_kinds: [comment, doccomment, string]
+    message: "Use .fileDrop { urls in … } from Views/FileDrop.swift, which hands over every dropped file in one call."
+    severity: error

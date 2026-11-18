@@ -13,7 +13,7 @@ struct ScanDocumentView: View {
             Group {
                 if model.hasPages || model.isAdding { pagesCard } else { empty }
             }
-            .onDrop(of: [.fileURL], isTargeted: $targeted, perform: drop)
+            .fileDrop(isTargeted: $targeted) { model.add($0) }
             VStack(spacing: 14) {
                 options
                 summary.frame(height: 172)
@@ -200,17 +200,6 @@ struct ScanDocumentView: View {
         panel.canChooseDirectories = true
         panel.allowedContentTypes = [.image, .pdf]
         if panel.runModal() == .OK { model.add(panel.urls) }
-    }
-
-    private func drop(_ providers: [NSItemProvider]) -> Bool {
-        var accepted = false
-        for provider in providers where provider.canLoadObject(ofClass: URL.self) {
-            accepted = true
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url { DispatchQueue.main.async { model.add([url]) } }
-            }
-        }
-        return accepted
     }
 }
 

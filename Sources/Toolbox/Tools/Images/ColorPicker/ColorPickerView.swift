@@ -275,14 +275,7 @@ private struct PalettePane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
-            for p in providers {
-                _ = p.loadObject(ofClass: URL.self) { url, _ in
-                    if let url { DispatchQueue.main.async { model.loadPalette(from: [url]) } }
-                }
-            }
-            return true
-        }
+        .fileDrop(isTargeted: $dropTargeted) { model.loadPalette(from: $0) }
     }
 
     private func result(_ image: CGImage) -> some View {
