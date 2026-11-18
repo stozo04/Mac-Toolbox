@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.2"
+    static let current = "0.11.5"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,16 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.11.5", date: "2026-11-17", changes: [
+            .init(kind: .fixed, text: "Cancel now always stops the work: a cancel pressed just as a conversion, trim or download started could be missed, and it then ran to the end."),
+            .init(kind: .fixed, text: "Quitting Toolbox stops conversions and downloads that are still running instead of leaving them going in the background."),
+            .init(kind: .fixed, text: "A system tool that hangs can no longer leave a Mac tool waiting forever: it is stopped after a time limit, and the message says so."),
+            .init(kind: .fixed, text: "Download Video: a cancelled or failed download no longer leaves half-downloaded files in your Downloads folder."),
+            .init(kind: .improved, text: "Download Video: Update yt-dlp checks the download against the checksum published with it, and keeps the copy you have if anything goes wrong."),
+            .init(kind: .fixed, text: "Burn In Subtitles: cancelling while the speech is being transcribed is no longer shown as a failure."),
+            .init(kind: .fixed, text: "Annotate Screenshot: a blurred area can no longer show the blur of the picture you had open before."),
+            .init(kind: .fixed, text: "Behind the scenes: problem reports written while earlier ones were being sent are no longer lost."),
+        ]),
         Release(version: "0.11.2", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Behind the scenes: the app's automatic checks no longer leave settings files on your Mac or replace what you copied."),
             .init(kind: .fixed, text: "Mute Video, Burn In Subtitles and Transcribe: clearing or cancelling just as a file starts no longer quits the app."),
