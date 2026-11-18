@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.11.7"
+    static let current = "0.11.9"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,14 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.11.9", date: "2026-11-18", changes: [
+            .init(kind: .fixed, text: "Vault: locking no longer freezes the app while the disk ejects; the door shows at once and the eject finishes behind it."),
+            .init(kind: .fixed, text: "Vault: quitting, sleeping or locking the screen while the vault is still unlocking stops the unlock, so it is never left open behind your back."),
+            .init(kind: .fixed, text: "Vault: your Mac does not go to sleep until the vault is locked, or 18 seconds have passed."),
+            .init(kind: .fixed, text: "Vault: quitting waits for the vault to lock. If it can't be locked, Toolbox stays open and tells you why; quit again to quit anyway."),
+            .init(kind: .fixed, text: "Vault: two copies of Toolbox can no longer open the vault at the same time or eject it from under each other."),
+            .init(kind: .improved, text: "Vault: creating the vault and changing its password are never cut short, even if you quit while they run."),
+        ]),
         Release(version: "0.11.7", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "Vault: a file is never deleted after its copy went to an unprotected folder because the vault closed mid-move; the original is kept."),
             .init(kind: .improved, text: "Vault: each file moved in is saved to the disk before its original is deleted, so a power cut can't lose both."),
