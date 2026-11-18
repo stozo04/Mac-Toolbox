@@ -200,7 +200,7 @@ final class VaultDoorTests: XCTestCase {
 
     func testAnEjectThatTimesOutStillForcesTheVaultClosed() async throws {
         let stand = DoorStandIn()
-        let door = try await makeOpenDoor(in: folder("stuck-eject"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: 0.3))
+        let door = try await makeOpenDoor(in: folder("stuck-eject"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: 3))
         stand.play("eject", as: .hangs)
 
         let locked = await door.lock()
