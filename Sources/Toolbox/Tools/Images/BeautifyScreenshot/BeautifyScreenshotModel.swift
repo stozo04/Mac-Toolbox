@@ -2,20 +2,22 @@ import AppKit
 import Observation
 
 @MainActor @Observable
-final class BeautifyScreenshotModel {
+final class BeautifyScreenshotModel: BatchQueueModel {
     /// Shared so the queue survives switching to another tool and back.
     static let shared = BeautifyScreenshotModel()
 
-    enum Status: Equatable {
+    enum Status: BatchStatus {
         /// Reading the screenshot's size; it can't be previewed yet.
         case loading
         case waiting
         case framing
         case done(BeautifyResult)
         case failed(String)
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
-    struct Item: Identifiable {
+    struct Item: BatchItem {
         let id = UUID()
         let url: URL
         let bytes: Int64
@@ -26,20 +28,20 @@ final class BeautifyScreenshotModel {
         var name: String { url.lastPathComponent }
     }
 
-    private(set) var items: [Item] = []
-    private(set) var isRunning = false
-    private(set) var folder: URL?
-    private(set) var notice: String?
+    let queue: BatchQueue<Item>
+
+    init(outputParent: URL? = nil) {
+        queue = BatchQueue(BatchTool(outputFolderName: "Toolbox Beautified Screenshots", logCategory: "beautify-screenshot", failureLog: "Screenshot framing failed",
+                                     skippedBecause: "had no images", files: BatchFiles.images), outputParent: outputParent)
+    }
+
     var selectedID: UUID?
 
     var settings = BeautifySettings()
 
     private var loader: Task<Void, Never>?
-    private var task: Task<Void, Never>?
-    private var runID = UUID()
 
-    var hasItems: Bool { !items.isEmpty }
-    var hasPending: Bool { items.contains { $0.status == .waiting } }
+    var hasPending: Bool { queue.hasWaiting }
     var isLoading: Bool { items.contains { $0.status == .loading } }
     var selected: Item? { items.first { $0.id == selectedID } }
     var doneCount: Int { items.filter { if case .done = $0.status { true } else { false } }.count }
@@ -47,38 +49,20 @@ final class BeautifyScreenshotModel {
 
     // MARK: Queue
 
-    /// Adds screenshots; folders are searched for images inside them.
     func add(_ urls: [URL]) {
-        var found: [URL] = []
-        var skipped = 0
-        for url in urls {
-            let before = found.count
-            found += BatchFiles.images(in: url)
-            if found.count == before { skipped += 1 }
-        }
-        var known = Set(items.map { BatchFiles.identity($0.url) })
-        items += found.filter { known.insert(BatchFiles.identity($0)).inserted }.map {
-            Item(url: $0, bytes: Int64((try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
-        }
+        queue.add(urls) { Item(url: $0, bytes: BatchFiles.bytes(of: $0)) }
         if selectedID == nil { selectedID = items.first?.id }
-        notice = skipped == 0 ? nil : "\(skipped) item(s) had no images and were skipped."
         readItems()
     }
 
     func remove(_ id: UUID) {
-        guard !isRunning else { return }
-        items.removeAll { $0.id == id }
+        guard queue.remove(id) else { return }
         if selectedID == id { selectedID = items.first?.id }
     }
 
     func clear() {
-        task?.cancel()
-        runID = UUID()
-        items = []
+        queue.clear()
         selectedID = nil
-        folder = nil
-        notice = nil
-        isRunning = false
     }
 
     // MARK: Reading
@@ -90,10 +74,11 @@ final class BeautifyScreenshotModel {
             while let item = items.first(where: { $0.status == .loading }) {
                 let url = item.url
                 let info = await Task.detached(priority: .userInitiated) { BeautifyScreenshot.inspect(url) }.value
-                guard let i = items.firstIndex(where: { $0.id == item.id }) else { continue }
-                items[i].pixelSize = info.size
-                items[i].thumbnail = info.thumbnail
-                items[i].status = .waiting
+                queue.update(item.id) {
+                    $0.pixelSize = info.size
+                    $0.thumbnail = info.thumbnail
+                    $0.status = .waiting
+                }
             }
             loader = nil
         }
@@ -101,52 +86,15 @@ final class BeautifyScreenshotModel {
 
     // MARK: Framing
 
-    /// Saves every waiting screenshot framed with the current settings, into one new dated folder in Downloads.
     func beautify() {
-        guard !isRunning, hasPending, !isLoading else { return }
-        let folder: URL
-        do { folder = try self.folder ?? BatchFiles.makeOutputFolder(named: "Toolbox Beautified Screenshots") } catch {
-            notice = error.localizedDescription
-            Log.error("Output folder failed", category: "beautify-screenshot", Log.details(error))
-            return
-        }
-        notice = OutputFolderError.clearing(notice)
-        isRunning = true
-        self.folder = folder
+        guard hasPending, !isLoading else { return }
         let settings = self.settings
-        let work = items.filter { $0.status == .waiting }.map { (id: $0.id, url: $0.url) }
-        let run = UUID()
-        runID = run
-        task = Task {
-            for job in work {
-                if Task.isCancelled || runID != run { break }
-                update(job.id, .framing)
-                let outcome = await Task.detached(priority: .userInitiated) { () -> Result<BeautifyResult, Error> in
-                    Result { try BeautifyScreenshot.save(source: job.url, settings: settings, into: folder) }
-                }.value
-                switch outcome {
-                case .success(let result):
-                    update(job.id, .done(result))
-                    Log.info("Screenshot framed", category: "beautify-screenshot", ["background": settings.background.rawValue, "ratio": settings.ratio.rawValue])
-                case .failure(let error):
-                    update(job.id, .failed(error.localizedDescription))
-                    Log.error("Screenshot framing failed", category: "beautify-screenshot", Log.details(error, file: job.url))
-                }
+        queue.run(retryingFailed: false) { item, folder, step in
+            let result = try await step.detached(showing: .framing) {
+                try BeautifyScreenshot.save(source: item.url, settings: settings, into: folder)
             }
-            guard runID == run else { return }
-            for i in items.indices where items[i].status == .framing { items[i].status = .waiting }
-            isRunning = false
+            Log.info("Screenshot framed", category: "beautify-screenshot", ["background": settings.background.rawValue, "ratio": settings.ratio.rawValue])
+            return .done(result)
         }
     }
-
-    func cancel() { task?.cancel() }
-
-    private func update(_ id: UUID, _ status: Status) {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i].status = status
-    }
-
-    func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-
-    func revealFolder() { if let folder { NSWorkspace.shared.open(folder) } }
 }
