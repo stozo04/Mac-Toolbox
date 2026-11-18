@@ -113,6 +113,22 @@ final class MuteVideoTests: XCTestCase {
         XCTAssertFalse(model.hasPending)
     }
 
+    func testAnExportCancelledBeforeItStartsThrowsCancellation() async throws {
+        let source = dir.appendingPathComponent("Clip.mov"), output = dir.appendingPathComponent("Out.mov")
+        try await makeVideoWithSound(at: source)
+        let export = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await AssetExporter.export(AVURLAsset(url: source), preset: AVAssetExportPresetPassthrough, type: .mov, to: output) { _ in }
+        }
+        do {
+            try await export.value
+            XCTFail("a cancelled export must not finish")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+    }
+
     @MainActor func testClearDuringARunLetsANewBatchFinishOnItsOwn() async throws {
         let first = (1...3).map { dir.appendingPathComponent("First \($0).mov") }
         let second = (1...4).map { dir.appendingPathComponent("Second \($0).mov") }

@@ -30,6 +30,7 @@ enum ReleaseNotes {
     static let all: [Release] = [
         Release(version: "0.11.2", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Behind the scenes: the app's automatic checks no longer leave settings files on your Mac or replace what you copied."),
+            .init(kind: .fixed, text: "Mute Video, Burn In Subtitles and Transcribe: clearing or cancelling just as a file starts no longer quits the app."),
         ]),
         Release(version: "0.11.1", date: "2026-11-17", changes: [
             .init(kind: .fixed, text: "Behind the scenes: the Keep Awake checks wait for macOS to list a new sleep block, so an automatic check no longer stops all the others."),
