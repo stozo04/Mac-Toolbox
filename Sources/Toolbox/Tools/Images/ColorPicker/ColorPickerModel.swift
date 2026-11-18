@@ -42,9 +42,11 @@ final class ColorPickerModel {
     private var sampler: NSColorSampler?
     private var copiedTask: Task<Void, Never>?
     private let defaults: UserDefaults
+    private let pasteboard: NSPasteboard
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, pasteboard: NSPasteboard = .general) {
         self.defaults = defaults
+        self.pasteboard = pasteboard
         history = ColorHistory.load(from: defaults)
         current = history.colors.first
     }
@@ -143,8 +145,8 @@ final class ColorPickerModel {
 
     /// Copies any text and shows the "Copied" pill next to whatever `key` names.
     func copy(_ text: String, key: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
         copied = key
         copiedTask?.cancel()
         copiedTask = Task { [weak self] in
@@ -177,7 +179,6 @@ final class ColorPickerModel {
 
     /// Uses an image copied to the clipboard (a screenshot, an image copied from a browser).
     func pastePaletteImage() {
-        let pasteboard = NSPasteboard.general
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
            urls.contains(where: { !BatchFiles.images(in: $0).isEmpty }) {
             loadPalette(from: urls)

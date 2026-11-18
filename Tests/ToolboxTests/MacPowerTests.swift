@@ -31,8 +31,28 @@ final class RefusingPreventer: SleepPreventer {
 }
 
 final class PowerAssertionsLiveTests: XCTestCase {
+    private static let listingTimeout: Duration = .seconds(10)
+
     private func assertions() async throws -> String {
         try await Shell.run("/usr/bin/pmset", ["-g", "assertions"]).out
+    }
+
+    private func lines(naming reason: String, settlingOn expected: Int) async throws -> [Substring] {
+        var found: [Substring] = []
+        try await waitUntil(timeout: Self.listingTimeout, "pmset lists \(expected) assertions for \(reason)") {
+            found = try await self.assertions().split(separator: "\n").filter { $0.contains(reason) }
+            return found.count == expected
+        }
+        return found
+    }
+
+    private func assertions(withoutListing reason: String) async throws -> String {
+        var listing = ""
+        try await waitUntil(timeout: Self.listingTimeout, "pmset no longer lists \(reason)") {
+            listing = try await self.assertions()
+            return !listing.contains(reason)
+        }
+        return listing
     }
 
     /// The real IOKit assertions appear in `pmset -g assertions` while held and are gone after release.
@@ -40,12 +60,12 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let reason = "Toolbox Keep Awake \(UUID().uuidString.prefix(8))"
         let held = PowerAssertions()
         held.hold(keepDisplayOn: true, reason: reason)
-        let during = try await assertions()
-        XCTAssertTrue(during.contains(reason), "assertion should be listed while held")
-        XCTAssertTrue(during.contains("PreventUserIdleSystemSleep"))
-        XCTAssertTrue(during.contains("PreventUserIdleDisplaySleep"))
+        defer { held.release() }
+        let during = try await lines(naming: reason, settlingOn: 2).joined(separator: "\n")
+        XCTAssertTrue(during.contains("PreventUserIdleSystemSleep"), "system-sleep assertion should be listed while held")
+        XCTAssertTrue(during.contains("PreventUserIdleDisplaySleep"), "display-sleep assertion should be listed while held")
         held.release()
-        let after = try await assertions()
+        let after = try await assertions(withoutListing: reason)
         XCTAssertFalse(after.contains(reason), "assertion should be gone after release")
         XCTAssertFalse(held.isHeld)
     }
@@ -58,9 +78,10 @@ final class PowerAssertionsLiveTests: XCTestCase {
         held.hold(keepDisplayOn: true, reason: reason)
         held.hold(keepDisplayOn: false, reason: reason)
         defer { held.release() }
-        let lines = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
-        XCTAssertEqual(lines.count, 1, "one system-sleep assertion, the display one dropped")
-        XCTAssertTrue(lines[0].contains("PreventUserIdleSystemSleep"))
+        let listed = try await lines(naming: reason, settlingOn: 1)
+        XCTAssertEqual(listed.count, 1, "one system-sleep assertion, the display one dropped")
+        let line = try XCTUnwrap(listed.first, "the assertion never showed up in pmset")
+        XCTAssertTrue(line.contains("PreventUserIdleSystemSleep"))
     }
 
     func testDisplayAssertionIsOptional() async throws {
@@ -68,9 +89,10 @@ final class PowerAssertionsLiveTests: XCTestCase {
         let held = PowerAssertions()
         held.hold(keepDisplayOn: false, reason: reason)
         defer { held.release() }
-        let lines = try await assertions().split(separator: "\n").filter { $0.contains(reason) }
-        XCTAssertEqual(lines.count, 1, "only the system-sleep assertion, so the screen may still turn off")
-        XCTAssertTrue(lines[0].contains("PreventUserIdleSystemSleep"))
+        let listed = try await lines(naming: reason, settlingOn: 1)
+        XCTAssertEqual(listed.count, 1, "only the system-sleep assertion, so the screen may still turn off")
+        let line = try XCTUnwrap(listed.first, "the assertion never showed up in pmset")
+        XCTAssertTrue(line.contains("PreventUserIdleSystemSleep"))
     }
 }
 
@@ -190,17 +212,17 @@ final class KeepAwakeTests: XCTestCase {
 
 @MainActor
 final class HiddenSettingsTests: XCTestCase {
-    private func setting(_ id: String) -> HiddenSetting { HiddenSetting.all.first { $0.id == id }! }
+    private func setting(_ id: String) throws -> HiddenSetting { try XCTUnwrap(HiddenSetting.all.first { $0.id == id }) }
 
     func testIdsAreUniqueAndEveryGroupHasSettings() {
         XCTAssertEqual(Set(HiddenSetting.all.map(\.id)).count, HiddenSetting.all.count)
         for g in HiddenSetting.Group.allCases { XCTAssertFalse(HiddenSetting.settings(in: g).isEmpty) }
     }
 
-    func testToggleReadsDefaultsWritesAndResets() {
+    func testToggleReadsDefaultsWritesAndResets() throws {
         let store = FakeDefaults(), restarter = FakeRestarter()
         let m = HiddenSettingsModel(store: store, restarter: restarter)
-        let s = setting("finder.path")
+        let s = try setting("finder.path")
         XCTAssertFalse(m.isOn(s))
         XCTAssertFalse(m.isModified(s))
         m.setOn(true, s)
@@ -212,37 +234,37 @@ final class HiddenSettingsTests: XCTestCase {
         XCTAssertFalse(m.isModified(s))
     }
 
-    func testInvertedKeysAreShownTheRightWayRound() {
+    func testInvertedKeysAreShownTheRightWayRound() throws {
         let store = FakeDefaults()
         let m = HiddenSettingsModel(store: store, restarter: FakeRestarter())
-        let shadow = setting("shots.shadow")
+        let shadow = try setting("shots.shadow")
         XCTAssertTrue(m.isOn(shadow), "shadows are on unless disable-shadow is set")
         m.setOn(false, shadow)
         XCTAssertEqual(store.values[shadow.key] as? Bool, true)
         XCTAssertFalse(m.isOn(shadow))
-        let plain = setting("textedit.plain")
+        let plain = try setting("textedit.plain")
         XCTAssertFalse(m.isOn(plain))
         m.setOn(true, plain)
         XCTAssertEqual(store.values[plain.key] as? Bool, false)
     }
 
-    func testStoredDefaultValueIsNotShownAsModified() {
+    func testStoredDefaultValueIsNotShownAsModified() throws {
         let store = FakeDefaults()
         let m = HiddenSettingsModel(store: store, restarter: FakeRestarter())
-        let recents = setting("dock.recents")
+        let recents = try setting("dock.recents")
         store.values[recents.key] = true
         XCTAssertFalse(m.isModified(recents))
         XCTAssertTrue(m.isOn(recents))
     }
 
-    func testSlidersAndChoices() {
+    func testSlidersAndChoices() throws {
         let store = FakeDefaults()
         let m = HiddenSettingsModel(store: store, restarter: FakeRestarter())
-        let delay = setting("dock.delay")
+        let delay = try setting("dock.delay")
         XCTAssertNil(m.number(delay))
         m.setNumber(0.123, delay)
         XCTAssertEqual(m.number(delay), 0.12)
-        let format = setting("shots.format")
+        let format = try setting("shots.format")
         XCTAssertEqual(m.text(format), "png")
         m.setText("jpg", format)
         XCTAssertTrue(m.isModified(format))
@@ -255,17 +277,19 @@ final class HiddenSettingsTests: XCTestCase {
     func testChangesRestartTheRightProcessOnce() async throws {
         let restarter = FakeRestarter()
         let m = HiddenSettingsModel(store: FakeDefaults(), restarter: restarter)
-        let delay = setting("dock.delay")
+        let delay = try setting("dock.delay")
         for v in [0.1, 0.2, 0.3] { m.setNumber(v, delay) }
-        m.setOn(true, setting("finder.path"))
-        try await Task.sleep(for: .milliseconds(1100))
+        m.setOn(true, try setting("finder.path"))
+        try await waitUntil("the restart has run") { !restarter.restarted.isEmpty }
+        try await pause(for: .milliseconds(900), because: "a second restart would fire within one more 700 ms debounce")
         XCTAssertEqual(restarter.restarted.count, 1)
         XCTAssertEqual(restarter.restarted.first, [.dock, .finder])
     }
 
-    func testSystemDefaultsRoundTripInAScratchDomain() {
-        let key = DefaultsKey(domain: "com.toolbox.tests.\(UUID().uuidString)", name: "x")
+    func testSystemDefaultsRoundTripInAScratchDomain() throws {
+        let key = DefaultsKey(domain: try makeScratchDefaultsDomain(), name: "x")
         let d = SystemDefaults.shared
+        defer { d.set(nil, for: key) }
         XCTAssertNil(d.value(for: key))
         d.set(true, for: key)
         XCTAssertEqual((d.value(for: key) as? NSNumber)?.boolValue, true)
@@ -280,15 +304,8 @@ final class PresentationModeTests: XCTestCase {
         PresentationModeModel(store: store, restarter: restarter, awake: awake, saved: suite)
     }
 
-    private func suite() -> UserDefaults {
-        let name = "toolbox.tests.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: name)!
-        d.removePersistentDomain(forName: name)
-        return d
-    }
-
-    func testOnChangesSettingsAndOffRestoresPreviousValues() {
-        let store = FakeDefaults(), r = FakeRestarter(), awake = FakePreventer(), d = suite()
+    func testOnChangesSettingsAndOffRestoresPreviousValues() throws {
+        let store = FakeDefaults(), r = FakeRestarter(), awake = FakePreventer(), d = try makeScratchDefaults()
         store.values[PresentationModeModel.dockAutohide] = false   // desktop icons key was never set
         let m = make(store, r, awake, d)
         m.turnOn()
@@ -304,8 +321,8 @@ final class PresentationModeTests: XCTestCase {
         XCTAssertFalse(m.isOn)
     }
 
-    func testStateSurvivesRelaunch() {
-        let store = FakeDefaults(), d = suite()
+    func testStateSurvivesRelaunch() throws {
+        let store = FakeDefaults(), d = try makeScratchDefaults()
         store.values[PresentationModeModel.dockAutohide] = true
         let first = make(store, FakeRestarter(), FakePreventer(), d)
         first.turnOn()

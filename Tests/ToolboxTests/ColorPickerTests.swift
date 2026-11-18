@@ -55,7 +55,7 @@ final class ColorPickerTests: XCTestCase {
         }
     }
 
-    func testOKLCHMatchesKnownValues() {
+    func testOKLCHMatchesKnownValues() throws {
         // White is lightness 1 with no chroma. Pure red is the standard reference: oklch(0.628 0.2577 29.23).
         let red = RGBAColor(r: 255, g: 0, b: 0).oklch
         XCTAssertEqual(red.l, 0.628, accuracy: 0.001)
@@ -65,7 +65,7 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(white.l, 1, accuracy: 0.001)
         XCTAssertEqual(white.c, 0, accuracy: 0.001)
         XCTAssertEqual(RGBAColor.black.oklch.l, 0, accuracy: 0.001)
-        let blue = RGBAColor.parse("#3b82f6")!.oklch
+        let blue = try XCTUnwrap(RGBAColor.parse("#3b82f6")).oklch
         XCTAssertEqual(blue.l, 0.623, accuracy: 0.003)
         XCTAssertEqual(blue.c, 0.188, accuracy: 0.003)
         XCTAssertEqual(blue.h, 259.8, accuracy: 0.5)
@@ -88,14 +88,14 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(RGBAColor.parse("#f008")?.a255, 136)
     }
 
-    func testParsesRGBAndHSLText() {
+    func testParsesRGBAndHSLText() throws {
         XCTAssertEqual(RGBAColor.parse("rgb(110, 143, 158)"), slate)
         XCTAssertEqual(RGBAColor.parse("rgb(110 143 158)"), slate)
         XCTAssertEqual(RGBAColor.parse("RGB(110,143,158)"), slate)
         XCTAssertEqual(RGBAColor.parse("rgba(110, 143, 158, 0.5)")?.a255, 128)
         XCTAssertEqual(RGBAColor.parse("rgb(110 143 158 / 50%)")?.a255, 128)
         XCTAssertEqual(RGBAColor.parse("rgb(100%, 0%, 0%)")?.r255, 255)
-        let hsl = RGBAColor.parse("hsl(199, 20%, 53%)")!
+        let hsl = try XCTUnwrap(RGBAColor.parse("hsl(199, 20%, 53%)"))
         XCTAssertEqual(hsl.r255, 110, accuracy: 2)
         XCTAssertEqual(hsl.g255, 143, accuracy: 2)
         XCTAssertEqual(hsl.b255, 158, accuracy: 2)
@@ -143,17 +143,17 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(Set(TailwindColors.all.map(\.name)).count, TailwindColors.all.count)
     }
 
-    func testExactTailwindColors() {
-        let blue = TailwindColors.nearest(to: RGBAColor.parse("#3B82F6")!)
+    func testExactTailwindColors() throws {
+        let blue = TailwindColors.nearest(to: try XCTUnwrap(RGBAColor.parse("#3B82F6")))
         XCTAssertEqual(blue.name, "blue-500")
         XCTAssertTrue(blue.isExact)
         XCTAssertEqual(TailwindColors.nearest(to: .white).name, "white")
         XCTAssertEqual(TailwindColors.nearest(to: .black).name, "black")
-        XCTAssertEqual(TailwindColors.nearest(to: RGBAColor.parse("#EF4444")!).name, "red-500")
+        XCTAssertEqual(TailwindColors.nearest(to: try XCTUnwrap(RGBAColor.parse("#EF4444"))).name, "red-500")
     }
 
-    func testClosestTailwindColorForAnythingElse() {
-        let near = TailwindColors.nearest(to: RGBAColor.parse("#3B83F5")!)
+    func testClosestTailwindColorForAnythingElse() throws {
+        let near = TailwindColors.nearest(to: try XCTUnwrap(RGBAColor.parse("#3B83F5")))
         XCTAssertEqual(near.name, "blue-500")
         XCTAssertFalse(near.isExact)
         XCTAssertEqual(near.hex, "#3B82F6")
@@ -161,8 +161,8 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(TailwindColors.nearest(to: slate).name, "cyan-600")
     }
 
-    func testTailwindFormatAddsOpacityLikeTailwindDoes() {
-        let blue = RGBAColor.parse("#3B82F6")!
+    func testTailwindFormatAddsOpacityLikeTailwindDoes() throws {
+        let blue = try XCTUnwrap(RGBAColor.parse("#3B82F6"))
         XCTAssertEqual(ColorFormat.tailwind.string(for: blue, includeAlpha: false), "blue-500")
         XCTAssertEqual(ColorFormat.tailwind.string(for: blue.withAlpha(0.5), includeAlpha: true), "blue-500/50")
         XCTAssertEqual(ColorFormat.tailwind.string(for: blue.withAlpha(0.5), includeAlpha: false), "blue-500")
@@ -184,29 +184,29 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertFalse(c.aaLarge)
     }
 
-    func testTheClassicGreyOnWhiteBoundary() {
+    func testTheClassicGreyOnWhiteBoundary() throws {
         // #767676 is the lightest grey that passes AA for normal text on white; #777777 is just under.
-        let pass = ColorContrast(text: RGBAColor.parse("#767676")!, background: .white)
+        let pass = ColorContrast(text: try XCTUnwrap(RGBAColor.parse("#767676")), background: .white)
         XCTAssertEqual(pass.ratio, 4.54, accuracy: 0.01)
         XCTAssertTrue(pass.aaNormal)
         XCTAssertFalse(pass.aaaNormal)
         XCTAssertTrue(pass.aaaLarge)
-        let fail = ColorContrast(text: RGBAColor.parse("#777777")!, background: .white)
+        let fail = ColorContrast(text: try XCTUnwrap(RGBAColor.parse("#777777")), background: .white)
         XCTAssertEqual(fail.ratio, 4.48, accuracy: 0.01)
         XCTAssertFalse(fail.aaNormal)
         XCTAssertTrue(fail.aaLarge)
         XCTAssertFalse(fail.aaaLarge)
     }
 
-    func testRatioIsTheSameEitherWayRound() {
-        let a = RGBAColor.parse("#336699")!, b = RGBAColor.parse("#FFEECC")!
+    func testRatioIsTheSameEitherWayRound() throws {
+        let a = try XCTUnwrap(RGBAColor.parse("#336699")), b = try XCTUnwrap(RGBAColor.parse("#FFEECC"))
         XCTAssertEqual(ColorContrast(text: a, background: b).ratio, ColorContrast(text: b, background: a).ratio, accuracy: 1e-9)
     }
 
     func testRatioTextIsRoundedButNeverShowsAPassItDoesNotHave() {
         XCTAssertEqual(ColorContrast(text: .black, background: .white).text, "21:1")
-        XCTAssertEqual(ColorContrast(text: RGBAColor.parse("#777777")!, background: .white).text, "4.48:1")
-        XCTAssertEqual(ColorContrast(text: RGBAColor.parse("#767676")!, background: .white).text, "4.54:1")
+        XCTAssertEqual(ColorContrast(text: try XCTUnwrap(RGBAColor.parse("#777777")), background: .white).text, "4.48:1")
+        XCTAssertEqual(ColorContrast(text: try XCTUnwrap(RGBAColor.parse("#767676")), background: .white).text, "4.54:1")
         // 4.499 rounds to 4.50 but fails 4.5, so it is cut to 4.49; the same just under 3 and 7.
         XCTAssertEqual(ColorContrast(ratio: 4.499).text, "4.49:1")
         XCTAssertFalse(ColorContrast(ratio: 4.499).aaNormal)
@@ -249,17 +249,17 @@ final class ColorPickerTests: XCTestCase {
     }
 
     func testHistoryIsSavedAndComesBackInOrder() throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "color-picker-tests-\(UUID())"))
+        let defaults = try makeScratchDefaults()
         var h = ColorHistory()
         h.add(.black); h.add(slate.withAlpha(0.5)); h.add(.white)
         h.save(to: defaults)
         XCTAssertEqual(ColorHistory.load(from: defaults).colors, h.colors)
-        XCTAssertTrue(ColorHistory.load(from: UserDefaults(suiteName: "color-picker-empty-\(UUID())")!).colors.isEmpty)
+        XCTAssertTrue(ColorHistory.load(from: try makeScratchDefaults()).colors.isEmpty)
     }
 
     // MARK: Palette
 
-    private func image(width: Int, height: Int, _ pixel: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)) -> CGImage {
+    private func image(width: Int, height: Int, _ pixel: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)) throws -> CGImage {
         var data = [UInt8](repeating: 0, count: width * height * 4)
         for y in 0..<height {
             for x in 0..<width {
@@ -270,27 +270,27 @@ final class ColorPickerTests: XCTestCase {
                 data[o + 2] = UInt8(Int(b) * Int(a) / 255); data[o + 3] = a
             }
         }
-        let provider = CGDataProvider(data: Data(data) as CFData)!
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(data) as CFData))
+        return try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                                     space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                                     bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                                                   provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
     }
 
-    func testTwoColorImageGivesTwoColorsWithTheirShares() {
-        let img = image(width: 100, height: 100) { x, _ in x < 75 ? (255, 0, 0, 255) : (0, 0, 255, 255) }
+    func testTwoColorImageGivesTwoColorsWithTheirShares() throws {
+        let img = try image(width: 100, height: 100) { x, _ in x < 75 ? (255, 0, 0, 255) : (0, 0, 255, 255) }
         let colors = PaletteExtractor.colors(in: img, count: 6)
         XCTAssertEqual(colors.count, 2)
-        XCTAssertEqual(colors[0].color.r255, 255)
-        XCTAssertEqual(colors[0].color.b255, 0)
-        XCTAssertEqual(colors[0].share, 0.75, accuracy: 0.02)
-        XCTAssertEqual(colors[1].color.b255, 255)
-        XCTAssertEqual(colors[1].share, 0.25, accuracy: 0.02)
+        XCTAssertEqual(try XCTUnwrap(colors.first).color.r255, 255)
+        XCTAssertEqual(try XCTUnwrap(colors.first).color.b255, 0)
+        XCTAssertEqual(try XCTUnwrap(colors.first).share, 0.75, accuracy: 0.02)
+        XCTAssertEqual(try colors.element(at: 1).color.b255, 255)
+        XCTAssertEqual(try colors.element(at: 1).share, 0.25, accuracy: 0.02)
     }
 
-    func testSixDistinctBandsAreAllFound() {
+    func testSixDistinctBandsAreAllFound() throws {
         let bands: [(UInt8, UInt8, UInt8)] = [(230, 30, 30), (240, 160, 20), (240, 230, 40), (30, 170, 60), (30, 90, 220), (140, 40, 190)]
-        let img = image(width: 120, height: 60) { x, _ in
+        let img = try image(width: 120, height: 60) { x, _ in
             let b = bands[x / 20]
             return (b.0, b.1, b.2, 255)
         }
@@ -303,8 +303,8 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(colors.map(\.share).reduce(0, +), 1, accuracy: 0.001)
     }
 
-    func testCountIsKeptBetweenFiveAndEight() {
-        let img = image(width: 160, height: 160) { x, y in
+    func testCountIsKeptBetweenFiveAndEight() throws {
+        let img = try image(width: 160, height: 160) { x, y in
             (UInt8(x * 255 / 159), UInt8(y * 255 / 159), UInt8((x + y) * 255 / 318), 255)
         }
         XCTAssertEqual(PaletteExtractor.colors(in: img, count: 2).count, 5)
@@ -314,9 +314,9 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(eight.map(\.share), eight.map(\.share).sorted(by: >), "most common first")
     }
 
-    func testNearTwinsAreMergedButNeverBelowFive() {
+    func testNearTwinsAreMergedButNeverBelowFive() throws {
         // Two reds that look the same, plus four clearly different colors: the reds become one.
-        let img = image(width: 120, height: 20) { x, _ in
+        let img = try image(width: 120, height: 20) { x, _ in
             switch x / 20 {
             case 0: (200, 30, 30, 255)
             case 1: (202, 31, 29, 255)
@@ -329,17 +329,17 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(PaletteExtractor.colors(in: img, count: 6).count, 5)
     }
 
-    func testSeeThroughPixelsAreIgnoredAndKeepTheirColor() {
-        let img = image(width: 40, height: 40) { x, _ in x < 20 ? (0, 0, 0, 0) : (10, 200, 30, 255) }
+    func testSeeThroughPixelsAreIgnoredAndKeepTheirColor() throws {
+        let img = try image(width: 40, height: 40) { x, _ in x < 20 ? (0, 0, 0, 0) : (10, 200, 30, 255) }
         let colors = PaletteExtractor.colors(in: img, count: 6)
         XCTAssertEqual(colors.count, 1)
-        XCTAssertEqual(colors[0].share, 1, accuracy: 0.001)
-        XCTAssertEqual(colors[0].color.g255, 200, accuracy: 2)
-        XCTAssertTrue(PaletteExtractor.colors(in: image(width: 8, height: 8) { _, _ in (0, 0, 0, 0) }, count: 6).isEmpty)
+        XCTAssertEqual(try XCTUnwrap(colors.first).share, 1, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(colors.first).color.g255, 200, accuracy: 2)
+        XCTAssertTrue(PaletteExtractor.colors(in: try image(width: 8, height: 8) { _, _ in (0, 0, 0, 0) }, count: 6).isEmpty)
     }
 
-    func testPaletteIsTheSameEveryTime() {
-        let img = image(width: 90, height: 90) { x, y in (UInt8((x * 3) % 256), UInt8((y * 5) % 256), UInt8((x * y) % 256), 255) }
+    func testPaletteIsTheSameEveryTime() throws {
+        let img = try image(width: 90, height: 90) { x, y in (UInt8((x * 3) % 256), UInt8((y * 5) % 256), UInt8((x * y) % 256), 255) }
         XCTAssertEqual(PaletteExtractor.colors(in: img, count: 7), PaletteExtractor.colors(in: img, count: 7))
     }
 
@@ -347,7 +347,7 @@ final class ColorPickerTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("color-picker-\(UUID())")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let img = image(width: 64, height: 32) { _, _ in (20, 120, 220, 255) }
+        let img = try image(width: 64, height: 32) { _, _ in (20, 120, 220, 255) }
         let url = dir.appendingPathComponent("blue.png")
         let rep = NSBitmapImageRep(cgImage: img)
         try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: url)
@@ -355,14 +355,14 @@ final class ColorPickerTests: XCTestCase {
         XCTAssertEqual(sample.width, 64)
         let colors = PaletteExtractor.colors(in: sample, count: 5)
         XCTAssertEqual(colors.count, 1)
-        XCTAssertEqual(colors[0].color.b255, 220, accuracy: 2)
+        XCTAssertEqual(try XCTUnwrap(colors.first).color.b255, 220, accuracy: 2)
         XCTAssertNil(PaletteExtractor.sample(at: dir.appendingPathComponent("missing.png")))
     }
 
     // MARK: Model
 
-    @MainActor private func makeModel() throws -> ColorPickerModel {
-        ColorPickerModel(defaults: try XCTUnwrap(UserDefaults(suiteName: "color-picker-model-\(UUID())")))
+    @MainActor private func makeModel(pasteboard: NSPasteboard? = nil) throws -> ColorPickerModel {
+        ColorPickerModel(defaults: try makeScratchDefaults(), pasteboard: pasteboard ?? makeScratchPasteboard())
     }
 
     @MainActor func testTypingAColorShowsItAndPutsItInHistory() throws {
@@ -400,26 +400,28 @@ final class ColorPickerTests: XCTestCase {
     }
 
     @MainActor func testHistorySurvivesARelaunch() throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: "color-picker-relaunch-\(UUID())"))
-        let first = ColorPickerModel(defaults: defaults)
+        let defaults = try makeScratchDefaults()
+        let pasteboard = makeScratchPasteboard()
+        let first = ColorPickerModel(defaults: defaults, pasteboard: pasteboard)
         first.enter("#112233"); first.enter("#445566")
-        let second = ColorPickerModel(defaults: defaults)
+        let second = ColorPickerModel(defaults: defaults, pasteboard: pasteboard)
         XCTAssertEqual(second.history.colors, first.history.colors)
         XCTAssertEqual(second.current?.r255, 0x44)
         second.clearHistory()
-        XCTAssertTrue(ColorPickerModel(defaults: defaults).history.colors.isEmpty)
+        XCTAssertTrue(ColorPickerModel(defaults: defaults, pasteboard: pasteboard).history.colors.isEmpty)
     }
 
     @MainActor func testCopyPutsTheChosenFormatOnTheClipboard() throws {
-        let model = try makeModel()
+        let pasteboard = makeScratchPasteboard()
+        let model = try makeModel(pasteboard: pasteboard)
         model.enter("#6E8F9E")
         model.copy(.rgb)
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "rgb(110, 143, 158)")
+        XCTAssertEqual(pasteboard.string(forType: .string), "rgb(110, 143, 158)")
         XCTAssertEqual(model.copied, "rgb")
         model.includeAlpha = true
         model.setOpacity(0.5)
         model.copy(.hex)
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "#6E8F9E80")
+        XCTAssertEqual(pasteboard.string(forType: .string), "#6E8F9E80")
     }
 
     @MainActor func testContrastColorsAreFilledByTypingPickingOrHistory() throws {
@@ -461,13 +463,13 @@ final class ColorPickerTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("color-picker-model-\(UUID())")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let img = image(width: 100, height: 100) { x, y in (UInt8(x * 255 / 99), UInt8(y * 255 / 99), 128, 255) }
+        let img = try image(width: 100, height: 100) { x, y in (UInt8(x * 255 / 99), UInt8(y * 255 / 99), 128, 255) }
         let url = dir.appendingPathComponent("gradient.png")
         try XCTUnwrap(NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])).write(to: url)
 
         let model = try makeModel()
         model.loadPalette(from: [url])
-        for _ in 0..<100 where model.paletteImage == nil { try await Task.sleep(for: .milliseconds(50)) }
+        try await waitUntil(timeout: .seconds(30), "the palette image is loaded") { model.paletteImage != nil }
         XCTAssertNotNil(model.paletteImage)
         XCTAssertEqual(model.paletteName, "gradient.png")
         XCTAssertEqual(model.palette.count, 6)

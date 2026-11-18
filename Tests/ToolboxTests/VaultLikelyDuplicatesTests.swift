@@ -120,7 +120,7 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
         let groups = VaultDuplicates.groups(in: VaultLibrary.items(in: root)) { try VaultMover.sha256($0.url) }
 
         XCTAssertEqual(groups.map(\.match), [.exact, .likely])
-        XCTAssertEqual(Set(groups[0].copies.map(\.name)), ["a.mp4", "b.mp4"])
+        XCTAssertEqual(Set(try XCTUnwrap(groups.first).copies.map(\.name)), ["a.mp4", "b.mp4"])
     }
 
     func testAnExactPairAndALookalikeBecomeOneLikelyGroup() throws {
@@ -158,9 +158,10 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
         XCTAssertFalse(lookOf(original).resembles(lookOf(other)))
     }
 
-    func testPhotosNeedACloserMatchThanVideos() {
+    func testPhotosNeedACloserMatchThanVideos() throws {
         let frame: VaultLook.FrameHash = [0x5555_5555_5555_5555, 0x3333_3333_3333_3333, 0x0F0F_0F0F_0F0F_0F0F, 0x00FF_00FF_00FF_00FF]
-        let nudged: VaultLook.FrameHash = [frame[0] ^ 0x3FFF_FFFF, frame[1], frame[2], frame[3]]
+        var nudged = frame
+        nudged[0] ^= 0x3FFF_FFFF
         XCTAssertEqual(VaultLook.distance(frame, nudged), 30)
 
         let photo = VaultLook(frames: [frame], aspect: 1), nudgedPhoto = VaultLook(frames: [nudged], aspect: 1)

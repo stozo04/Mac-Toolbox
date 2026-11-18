@@ -174,7 +174,7 @@ final class RemoveMetadataTests: XCTestCase {
     private func makePhoto(_ type: UTType, name: String, orientation: Int, metadata: Bool = true) throws -> URL {
         let url = dir.appendingPathComponent(name)
         let context = try XCTUnwrap(CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         for i in 0..<10 {
             context.setFillColor(CGColor(red: CGFloat(i) / 10, green: 0.5, blue: 1 - CGFloat(i) / 10, alpha: 1))
             context.fill(CGRect(x: i * 40, y: 0, width: 40, height: 300))
@@ -219,9 +219,9 @@ final class RemoveMetadataTests: XCTestCase {
     private func pixels(_ url: URL) throws -> [UInt8] {
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(reader(url), 0, nil))
         var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
-        data.withUnsafeMutableBytes { raw in
-            let context = CGContext(data: raw.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-                                    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        try data.withUnsafeMutableBytes { raw in
+            let context = try XCTUnwrap(CGContext(data: raw.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                                  space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
             context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         }
         return data

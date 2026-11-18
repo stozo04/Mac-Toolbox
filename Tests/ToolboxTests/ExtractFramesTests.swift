@@ -38,7 +38,7 @@ final class ExtractFramesTests: XCTestCase {
     func testFramesPerSecond() {
         let t = FramePlan.times(duration: 2, settings: settings(.perSecond) { $0.fps = 10 })
         XCTAssertEqual(t.count, 20)
-        XCTAssertEqual(t.last!, 1.9, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(t.last), 1.9, accuracy: 1e-9)
         // Out-of-range rates are clamped to 1...30.
         XCTAssertEqual(FramePlan.times(duration: 1, settings: settings(.perSecond) { $0.fps = 99 }).count, 30)
     }
@@ -95,7 +95,7 @@ final class ExtractFramesTests: XCTestCase {
         XCTAssertEqual(result.frames.map(\.lastPathComponent),
                        ["clip_0001_00m00.000s.png", "clip_0002_00m01.000s.png", "clip_0003_00m02.000s.png"])
         XCTAssertNil(result.zip)
-        let size = try pixelSize(result.frames[0])
+        let size = try pixelSize(try XCTUnwrap(result.frames.first))
         XCTAssertEqual(size, CGSize(width: 320, height: 180))
         XCTAssertEqual(try Data(contentsOf: video), before, "the original must not change")
 
@@ -104,7 +104,7 @@ final class ExtractFramesTests: XCTestCase {
                                                      destination: dir) { _, _ in }
         XCTAssertEqual(again.folder?.lastPathComponent, "clip Frames 2")
         XCTAssertEqual(again.frames.map(\.pathExtension), ["jpg", "jpg"])
-        XCTAssertEqual(try pixelSize(again.frames[0]), CGSize(width: 640, height: 360))
+        XCTAssertEqual(try pixelSize(try XCTUnwrap(again.frames.first)), CGSize(width: 640, height: 360))
     }
 
     func testZipOnlyLeavesJustTheArchive() async throws {
@@ -195,9 +195,9 @@ final class ExtractFramesTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for i in 0..<(seconds * 30) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &buffer)
             let b = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(b, [])
             memset(CVPixelBufferGetBaseAddress(b), Int32(i * 2 % 256), CVPixelBufferGetDataSize(b))

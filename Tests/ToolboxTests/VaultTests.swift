@@ -95,7 +95,7 @@ final class VaultTests: XCTestCase {
 
     func testAMoveStoppedByLockingKeepsTheOriginal() async throws {
         let photo = try makePhoto("kept.png")
-        let vault = vault!
+        let vault = try XCTUnwrap(vault)
         let stopped = Task {
             withUnsafeCurrentTask { $0?.cancel() }
             return try await VaultMover.move(photo, into: vault)
@@ -148,8 +148,9 @@ final class VaultTests: XCTestCase {
         let model = VaultModel(location: location, watchesSystem: false)
         XCTAssertEqual(model.phase, .locked)
 
+        defer { model.lockImmediately() }
         let unlocking = Task { await model.unlock(password: "race-pass") }
-        try await Task.sleep(for: .milliseconds(100))
+        try await waitUntil("the unlock is under way") { model.isWorking }
         model.lockImmediately()
         await unlocking.value
 
@@ -169,11 +170,11 @@ final class VaultTests: XCTestCase {
         try FileManager.default.copyItem(at: photo, to: twin)
 
         model.add([photo, twin])
-        try await waitUntil { model.moveProgress == nil && model.items.count == 2 }
+        try await waitUntil(timeout: .seconds(30), "both files are in the vault") { model.moveProgress == nil && model.items.count == 2 }
         model.mode = .duplicates
-        try await waitUntil { model.duplicateGroups != nil }
+        try await waitUntil(timeout: .seconds(30), "duplicates have been looked for") { model.duplicateGroups != nil }
         let group = try XCTUnwrap(model.visibleDuplicateGroups?.first)
-        let keeper = group.copies[0]
+        let keeper = try XCTUnwrap(group.copies.first)
 
         await model.keep(keeper, in: group)
 
@@ -187,9 +188,9 @@ final class VaultTests: XCTestCase {
         XCTAssertEqual(model.items.count, 2)
         XCTAssertTrue(model.trash.isEmpty)
 
-        try await waitUntil { model.duplicateGroups?.first?.copies.count == 2 }
+        try await waitUntil(timeout: .seconds(30), "the group has two copies again") { model.duplicateGroups?.first?.copies.count == 2 }
         let again = try XCTUnwrap(model.visibleDuplicateGroups?.first)
-        await model.keep(again.copies[0], in: again)
+        await model.keep(try XCTUnwrap(again.copies.first), in: again)
         model.emptyTrash()
         XCTAssertTrue(model.trash.isEmpty)
         XCTAssertEqual(model.items.count, 1)
@@ -204,7 +205,7 @@ final class VaultTests: XCTestCase {
         model.finishOpening()
         defer { model.lockImmediately() }
         model.add([try makePhoto("a.png")])
-        try await waitUntil { model.moveProgress == nil && model.items.count == 1 }
+        try await waitUntil(timeout: .seconds(30), "the file is in the vault") { model.moveProgress == nil && model.items.count == 1 }
         let photo = try XCTUnwrap(model.items.first)
         model.viewing = photo.id
         model.detailing = photo.id
@@ -223,15 +224,6 @@ final class VaultTests: XCTestCase {
             XCTFail("An empty name is refused")
         } catch {
             XCTAssertEqual(error as? VaultRenameError, .empty)
-        }
-    }
-
-    @MainActor
-    private func waitUntil(seconds: Double = 30, _ condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return XCTFail("Timed out waiting") }
-            try await Task.sleep(for: .milliseconds(50))
         }
     }
 
@@ -282,10 +274,10 @@ final class VaultTests: XCTestCase {
         let items = ["a", "b", "c"].map {
             VaultItem(url: URL(fileURLWithPath: "/v/\($0).png"), kind: .image, added: Date(), bytes: 1)
         }
-        XCTAssertEqual(VaultLibrary.neighbor(of: items[1].id, in: items, step: 1), items[2].id)
-        XCTAssertEqual(VaultLibrary.neighbor(of: items[1].id, in: items, step: -1), items[0].id)
-        XCTAssertNil(VaultLibrary.neighbor(of: items[2].id, in: items, step: 1))
-        XCTAssertNil(VaultLibrary.neighbor(of: items[0].id, in: items, step: -1))
+        XCTAssertEqual(VaultLibrary.neighbor(of: try items.element(at: 1).id, in: items, step: 1), try items.element(at: 2).id)
+        XCTAssertEqual(VaultLibrary.neighbor(of: try items.element(at: 1).id, in: items, step: -1), try XCTUnwrap(items.first).id)
+        XCTAssertNil(VaultLibrary.neighbor(of: try items.element(at: 2).id, in: items, step: 1))
+        XCTAssertNil(VaultLibrary.neighbor(of: try XCTUnwrap(items.first).id, in: items, step: -1))
         XCTAssertNil(VaultLibrary.neighbor(of: "/missing", in: items, step: 1))
     }
 

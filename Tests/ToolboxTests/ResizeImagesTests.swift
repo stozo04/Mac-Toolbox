@@ -164,12 +164,12 @@ final class ResizeImagesTests: XCTestCase {
 
     private func makeImage(_ type: UTType, name: String, width: Int, height: Int, transparent: Bool = false,
                            orientation: Int = 1, in folder: URL? = nil) throws -> URL {
-        let folder = folder ?? dir!
+        let folder = try folder ?? XCTUnwrap(dir)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ext = type == .jpeg ? "jpg" : "png"
         let url = folder.appendingPathComponent("\(name).\(ext)")
         let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
                                               bitmapInfo: (transparent ? CGImageAlphaInfo.premultipliedLast : .noneSkipLast).rawValue))
         for i in 0..<10 {
             context.setFillColor(CGColor(red: Double(i) / 10, green: 0.4, blue: 1 - Double(i) / 10, alpha: transparent && i % 2 == 0 ? 0 : 1))

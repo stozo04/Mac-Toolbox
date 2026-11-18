@@ -97,7 +97,7 @@ final class FixDamagedAppTests: XCTestCase {
         setxattr(app.path, Quarantine.attribute, "0081;00000000;Safari;", 21, 0, 0)
         let m = FixDamagedAppModel()
         m.load(app)
-        while m.app == nil { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(30), "the app is loaded") { m.app != nil }
         XCTAssertTrue(m.verdict?.text.contains("blocks") ?? false)
         m.clearQuarantine()
         XCTAssertEqual(m.outcome, .cleared)
@@ -125,6 +125,7 @@ final class ResetPermissionsTests: XCTestCase {
     }
 
     func testRealCommandSucceedsForAnAppThatHasNoPermissionToReset() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TOOLBOX_LIVE_TCC"] == "1", "set TOOLBOX_LIVE_TCC=1 to run the real tccutil")
         // Calculator never asks for the camera, so this changes nothing but exercises the real tccutil.
         try await PermissionResetter.reset(service: "Camera", bundleID: "com.apple.calculator")
     }
@@ -141,9 +142,9 @@ final class ResetPermissionsTests: XCTestCase {
     @MainActor func testModelReportsEachResult() async throws {
         let m = ResetPermissionsModel(reset: { service, _ in if service == "Camera" { throw PermissionResetter.ResetError.failed("nope") } })
         m.selected = InstalledApp(url: URL(fileURLWithPath: "/Applications/X.app"), name: "X", bundleID: "com.x.y")
-        m.reset(PrivacyService.all.first { $0.id == "Microphone" }!)
-        m.reset(PrivacyService.all.first { $0.id == "Camera" }!)
-        while m.results.count < 2 || m.results.values.contains(.working) { try await Task.sleep(for: .milliseconds(10)) }
+        m.reset(try XCTUnwrap(PrivacyService.all.first { $0.id == "Microphone" }))
+        m.reset(try XCTUnwrap(PrivacyService.all.first { $0.id == "Camera" }))
+        try await waitUntil(timeout: .seconds(30), "both resets have finished") { m.results.count >= 2 && !m.results.values.contains(.working) }
         XCTAssertEqual(m.results["Microphone"], .done)
         XCTAssertEqual(m.results["Camera"], .failed("nope"))
         m.selected = nil
@@ -183,8 +184,8 @@ final class UninstallAppTests: XCTestCase {
         let found = LeftoverScanner.scan(app: app, bundleID: "com.acme.Widget", appName: "Widget", library: lib)
         let names = Set(found.map { $0.url.lastPathComponent })
         XCTAssertEqual(names, ["Widget.app", "com.acme.Widget", "Widget", "com.acme.Widget.plist"])
-        XCTAssertGreaterThanOrEqual(found.first { $0.url.lastPathComponent == "com.acme.Widget" && $0.place == "Caches" }!.bytes, 50_000)
-        XCTAssertTrue(found.first!.isApp)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(found.first { $0.url.lastPathComponent == "com.acme.Widget" && $0.place == "Caches" }).bytes, 50_000)
+        XCTAssertTrue(try XCTUnwrap(found.first).isApp)
     }
 
     func testProtectedApps() {
@@ -202,7 +203,7 @@ final class UninstallAppTests: XCTestCase {
         var trashed: [String] = []
         let m = UninstallAppModel(library: lib, trash: { trashed.append($0.lastPathComponent) }, isRunning: { _ in false })
         m.load(app)
-        while m.phase != .ready { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(30), "the leftovers are found") { m.phase == .ready }
         let nameOnly = try XCTUnwrap(m.items.first { $0.confidence == .nameOnly })
         XCTAssertFalse(m.selection.contains(nameOnly.url), "look-alikes start unticked")
         XCTAssertEqual(m.selection.count, 2, "the app and its exact cache folder")
@@ -219,7 +220,7 @@ final class UninstallAppTests: XCTestCase {
         let app = try makeApp(in: root, name: "Widget", bundleID: "com.acme.Widget")
         let m = UninstallAppModel(library: root.appendingPathComponent("Library"), trash: { _ in XCTFail("must not trash") }, isRunning: { _ in true })
         m.load(app)
-        while m.phase != .ready { try await Task.sleep(for: .milliseconds(20)) }
+        try await waitUntil(timeout: .seconds(30), "the leftovers are found") { m.phase == .ready }
         m.remove()
         XCTAssertTrue(m.message?.contains("Quit") ?? false)
         XCTAssertEqual(m.phase, .ready)
@@ -277,12 +278,12 @@ final class LoginItemsTests: XCTestCase {
         try writePlist(["Label": "com.acme.two", "ProgramArguments": ["/does/not/exist"]], at: dir.appendingPathComponent("two.plist"))
         let items = LaunchItems.scan(directories: [(dir, .user)], overrides: ["com.acme.one": true])
         XCTAssertEqual(items.map(\.label), ["one", "two"].map { "com.acme.\($0)" })
-        XCTAssertFalse(items[0].isEnabled, "launchctl says it is disabled")
-        XCTAssertTrue(items[0].exists)
-        XCTAssertTrue(items[0].signature.isSigned, "/usr/bin/true is signed by Apple")
-        XCTAssertFalse(items[1].exists)
-        XCTAssertEqual(items[1].developerText, "Program is missing")
-        XCTAssertTrue(items[0].scope.canToggle)
+        XCTAssertFalse(try XCTUnwrap(items.first).isEnabled, "launchctl says it is disabled")
+        XCTAssertTrue(try XCTUnwrap(items.first).exists)
+        XCTAssertTrue(try XCTUnwrap(items.first).signature.isSigned, "/usr/bin/true is signed by Apple")
+        XCTAssertFalse(try items.element(at: 1).exists)
+        XCTAssertEqual(try items.element(at: 1).developerText, "Program is missing")
+        XCTAssertTrue(try XCTUnwrap(items.first).scope.canToggle)
     }
 
     func testNamesComeFromTheAppAndSignaturesAreDescribedPlainly() {
@@ -316,11 +317,11 @@ final class LoginItemsTests: XCTestCase {
         let bad = LaunchItem(label: "com.a.bad", plist: URL(fileURLWithPath: "/u/bad.plist"), scope: .user, program: nil, runsAtLogin: true, isEnabled: true, signature: .unsigned, exists: false)
         let m = LoginItemsModel(scan: { [ok, bad] }, setEnabled: { _, item in if item.label == "com.a.bad" { throw LaunchItems.ToggleError.failed("denied") } })
         m.refresh()
-        while m.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        try await waitUntil(timeout: .seconds(30), "the items are listed") { !m.items.isEmpty }
         m.toggle(ok, to: false)
         m.toggle(bad, to: false)
-        while m.errors.isEmpty || m.items.first(where: { $0.label == "com.a.ok" })?.isEnabled == true { try await Task.sleep(for: .milliseconds(10)) }
+        try await waitUntil(timeout: .seconds(30), "both switches have settled") { !m.errors.isEmpty && m.items.first(where: { $0.label == "com.a.ok" })?.isEnabled != true }
         XCTAssertEqual(m.errors[bad.id], "denied")
-        XCTAssertTrue(m.items.first { $0.label == "com.a.bad" }!.isEnabled, "a failed change leaves the switch on")
+        XCTAssertTrue(try XCTUnwrap(m.items.first { $0.label == "com.a.bad" }).isEnabled, "a failed change leaves the switch on")
     }
 }

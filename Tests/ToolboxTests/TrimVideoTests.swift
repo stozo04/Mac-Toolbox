@@ -77,10 +77,10 @@ final class TrimVideoTests: XCTestCase {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
         for frame in 0..<(seconds * 10) {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            try await waitUntilReady(input, of: writer)
             var buffer: CVPixelBuffer?
             CVPixelBufferCreate(nil, 64, 64, kCVPixelFormatType_32BGRA, nil, &buffer)
-            let pixels = buffer!
+            let pixels = try XCTUnwrap(buffer)
             CVPixelBufferLockBaseAddress(pixels, [])
             memset(CVPixelBufferGetBaseAddress(pixels), Int32(frame * 5 % 255), CVPixelBufferGetDataSize(pixels))
             CVPixelBufferUnlockBaseAddress(pixels, [])

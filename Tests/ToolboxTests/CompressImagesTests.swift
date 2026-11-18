@@ -39,8 +39,8 @@ final class CompressImagesTests: XCTestCase {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             sizes.append(try ImageCompressor.compress(source: source, settings: CompressSettings(level: level), into: folder).bytes)
         }
-        XCTAssertLessThan(sizes[0], sizes[1])
-        XCTAssertLessThan(sizes[1], sizes[2])
+        XCTAssertLessThan(try XCTUnwrap(sizes.first), try sizes.element(at: 1))
+        XCTAssertLessThan(try sizes.element(at: 1), try sizes.element(at: 2))
     }
 
     func testHEICIsReencodedAsHEIC() throws {
@@ -195,7 +195,7 @@ final class CompressImagesTests: XCTestCase {
         let withAlpha = transparent || opaqueAlphaChannel
         let image: CGImage = try bytes.withUnsafeMutableBytes { raw in
             let ctx = try XCTUnwrap(CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
                                               bitmapInfo: (withAlpha ? CGImageAlphaInfo.premultipliedLast : .noneSkipLast).rawValue))
             return try XCTUnwrap(ctx.makeImage())
         }
@@ -230,14 +230,8 @@ final class CompressImagesTests: XCTestCase {
     }
 
     private func rgb(_ image: CGImage, _ x: Int, _ y: Int) throws -> (Int, Int, Int) {
-        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
-        try bytes.withUnsafeMutableBytes { raw in
-            let ctx = try XCTUnwrap(CGContext(data: raw.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-            ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        }
-        let i = (y * image.width + x) * 4
-        return (Int(bytes[i]), Int(bytes[i + 1]), Int(bytes[i + 2]))
+        let p = try RGBAPixels(image, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)), alpha: .premultipliedLast).components(x, y)
+        return (Int(p.r), Int(p.g), Int(p.b))
     }
 
     private func hasLocation(_ url: URL) throws -> Bool {
