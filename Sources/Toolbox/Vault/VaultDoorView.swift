@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct VaultDoor: View {
+struct VaultDoorDrawing: View {
     var wheelTurn: Angle = .zero
     private static let boltCount = 16
     private static let spokeCount = 4
@@ -108,7 +108,7 @@ struct VaultDoorView: View {
             ZStack {
                 Circle().fill(Color.black.opacity(0.85))
                     .overlay(Circle().strokeBorder(Theme.stroke, lineWidth: 2))
-                VaultDoor(wheelTurn: wheelTurn)
+                VaultDoorDrawing(wheelTurn: wheelTurn)
                     .rotation3DEffect(.degrees(swing), axis: (x: 0, y: 1, z: 0), anchor: .leading, perspective: 0.45)
                     .modifier(Shake(attempts: CGFloat(vault.wrongPasswordAttempts)))
                     .animation(.linear(duration: 0.45), value: vault.wrongPasswordAttempts)
