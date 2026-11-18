@@ -69,11 +69,11 @@ enum SpeechTranscriber {
         let answer = CancellableAnswer<[TimedWord]>()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<[TimedWord], Error>) in
-                guard answer.wait(with: c) else { return }
+                guard answer.accepts(c) else { return }
                 let task = recognizer.recognitionTask(with: request) { result, error in
                     let words = result?.bestTranscription.segments.map { TimedWord(text: $0.substring, start: $0.timestamp, duration: $0.duration) }
                     let finalWords = result?.isFinal == true ? words : nil
-                    if let outcome = outcome(finalWords: finalWords, error: error, cancelled: answer.isCancelled) {
+                    if let outcome = outcome(finalWords: finalWords, error: result == nil ? error : nil, cancelled: answer.isCancelled) {
                         answer.resume(with: outcome)
                     } else if let last = words?.last {
                         progress(0.1 + 0.9 * min(last.end / total, 1))
@@ -88,7 +88,6 @@ enum SpeechTranscriber {
 
     private static let noSpeechErrorCodes: Set<Int> = [1110, 203]
 
-    /// What one recognizer callback means for the caller, or nil while the recognizer is still working.
     static func outcome(finalWords: [TimedWord]?, error: Error?, cancelled: Bool) -> Result<[TimedWord], Error>? {
         if cancelled { return .failure(CancellationError()) }
         if let finalWords { return finalWords.isEmpty ? .failure(SpeechError.noSpeech) : .success(finalWords) }
@@ -97,8 +96,6 @@ enum SpeechTranscriber {
     }
 }
 
-/// Carries the answer of a callback API to the task waiting for it, exactly once.
-///
 /// A callback runs outside the Swift task, so `Task.isCancelled` is always false there; the cancel is recorded here instead.
 /// Cancelling answers the waiting task at once, because the API may never call back after it is told to stop.
 final class CancellableAnswer<Value: Sendable>: @unchecked Sendable {
@@ -112,8 +109,7 @@ final class CancellableAnswer<Value: Sendable>: @unchecked Sendable {
         return cancelled
     }
 
-    /// False when the wait was cancelled before it began: the continuation is already answered and the work must not start.
-    func wait(with continuation: CheckedContinuation<Value, Error>) -> Bool {
+    func accepts(_ continuation: CheckedContinuation<Value, Error>) -> Bool {
         lock.lock()
         let begin = !cancelled
         if begin { self.continuation = continuation }

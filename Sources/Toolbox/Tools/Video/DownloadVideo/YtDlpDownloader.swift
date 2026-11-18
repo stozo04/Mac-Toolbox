@@ -54,7 +54,6 @@ struct YtDlpDownloader: Downloader {
     }
 }
 
-/// Program output arrives in arbitrary pieces; this hands on each line once it is complete.
 final class OutputLines: @unchecked Sendable {
     private let lock = NSLock()
     private var unfinished = ""

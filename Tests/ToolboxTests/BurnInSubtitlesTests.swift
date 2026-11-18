@@ -436,7 +436,7 @@ final class SpeechCancellationTests: XCTestCase {
         Task.detached {
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
-                    guard answer.wait(with: continuation) else { return }
+                    guard answer.accepts(continuation) else { return }
                     answer.onCancel { stopped.set(true) }
                     began.set(true)
                 }

@@ -15,8 +15,6 @@ enum YtDlpInstallError: LocalizedError, Equatable {
     }
 }
 
-/// Downloads the official standalone yt-dlp build into Application Support, keeping the copy already there unless the new one checks out.
-///
 /// The checksum comes from the same release as the program: it catches a damaged, cut-off or swapped download, not a release that was itself tampered with.
 struct YtDlpInstaller {
     static let assetName = "yt-dlp_macos"
@@ -44,7 +42,7 @@ struct YtDlpInstaller {
         try swapIn(downloaded)
     }
 
-    /// The line for exactly `asset` in a `sha256sum` listing ("<hash>  <name>", the name starred when hashed in binary mode).
+    /// `sha256sum` stars the name of a file it hashed in binary mode.
     static func sha256(for asset: String, inChecksums listing: String) -> String? {
         listing.split(whereSeparator: \.isNewline).lazy.compactMap { line -> String? in
             let fields = line.split(separator: " ", omittingEmptySubsequences: true)

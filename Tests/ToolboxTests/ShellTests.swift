@@ -78,7 +78,7 @@ final class ShellTests: XCTestCase {
         run.cancel()
         assertCancelled(await run.result)
         XCTAssertFalse(isRunning(pid))
-        XCTAssertLessThan(Date().timeIntervalSince(cancelled), Shell.killGrace + 3)
+        XCTAssertLessThan(Date().timeIntervalSince(cancelled), Shell.secondsFromTerminateToKill + 3)
     }
 
     // MARK: Timeouts

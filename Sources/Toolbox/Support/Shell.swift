@@ -1,6 +1,6 @@
 import AppKit
 
-/// Runs a command-line program without blocking the UI. The only place in the app that starts one.
+/// Runs a command-line program without blocking the UI.
 enum Shell {
     struct Result {
         let status: Int32
@@ -11,7 +11,7 @@ enum Shell {
 
     enum Timeout: Equatable {
         case seconds(TimeInterval)
-        /// For work whose length follows the user's file or waits for the person. It ends when the calling task is cancelled or the app quits.
+        /// For work whose length follows the user's file or that waits for the person; quitting the app cancels it too.
         case untilCancelled
 
         static let quick = Timeout.seconds(30)
@@ -31,8 +31,7 @@ enum Shell {
         }
     }
 
-    /// How long a program gets to end by itself after SIGTERM before it is sent SIGKILL.
-    static let killGrace: TimeInterval = 2
+    static let secondsFromTerminateToKill: TimeInterval = 2
 
     static var livePIDs: [Int32] { children.all().map(\.pid) }
 
@@ -86,8 +85,8 @@ enum Shell {
         } onCancel: { box.requestStop(.cancelled) }
     }
 
-    /// Cancels every program that would otherwise outlive the app. Blocks for at most `grace`, because the app is gone once quitting returns.
-    static func stopChildrenBeforeQuit(grace: TimeInterval = killGrace) {
+    /// Blocks for at most `grace`: the app is gone once quitting returns, so nothing scheduled for later would run.
+    static func stopChildrenBeforeQuit(grace: TimeInterval = secondsFromTerminateToKill) {
         let untilCancelled = { children.all().filter(\.endsWithApp) }
         untilCancelled().forEach { $0.requestStop(.cancelled) }
         let deadline = Date().addingTimeInterval(grace)
@@ -146,7 +145,7 @@ enum Shell {
             stopReason = reason
             guard launched else { return }
             kill(pid, SIGTERM)
-            schedule(after: Shell.killGrace) { [self] in killIfStillRunning() }
+            schedule(after: Shell.secondsFromTerminateToKill) { [self] in killIfStillRunning() }
         }
 
         func requestStop(_ reason: Stop, after seconds: TimeInterval) {
