@@ -16,7 +16,10 @@ final class VaultTests: XCTestCase {
         let taken = folder.appendingPathComponent("photo.png")
         try Data("theirs".utf8).write(to: taken)
 
-        XCTAssertThrowsError(try VaultMover.createEmptyFile(at: taken)) { error in
+        let source = folder.appendingPathComponent("source.png")
+        try Data("ours".utf8).write(to: source)
+
+        XCTAssertThrowsError(try VaultMover.copyAsNewFile(source, to: taken)) { error in
             XCTAssertEqual((error as? CocoaError)?.code, .fileWriteFileExists)
         }
         XCTAssertEqual(try Data(contentsOf: taken), Data("theirs".utf8))
@@ -27,8 +30,7 @@ final class VaultTests: XCTestCase {
         let source = folder.appendingPathComponent("source.png"), copy = folder.appendingPathComponent("copy.png")
         try Data("picture".utf8).write(to: source)
 
-        let made = try VaultMover.createEmptyFile(at: copy)
-        try VaultMover.copyContents(of: source, onto: copy)
+        let made = try VaultMover.copyAsNewFile(source, to: copy)
 
         XCTAssertEqual(VaultMover.fileIdentity(of: copy), made)
         XCTAssertEqual(try Data(contentsOf: copy), Data("picture".utf8))
@@ -37,13 +39,16 @@ final class VaultTests: XCTestCase {
     func testAnotherFileThatTookThePathIsNotTheFileThisMoveMade() throws {
         let folder = try makeScratchFolder("vault-replaced")
         let path = folder.appendingPathComponent("photo.png"), other = folder.appendingPathComponent("other.png")
-        let made = try VaultMover.createEmptyFile(at: path)
+        let source = folder.appendingPathComponent("source.png")
+        try Data("ours".utf8).write(to: source)
+        let made = try VaultMover.copyAsNewFile(source, to: path)
         try Data("theirs".utf8).write(to: other)
 
         try FileManager.default.removeItem(at: path)
         try FileManager.default.moveItem(at: other, to: path)
+        VaultMover.removeIfStill(made, at: path)
 
-        XCTAssertNotEqual(VaultMover.fileIdentity(of: path), made)
+        XCTAssertEqual(try Data(contentsOf: path), Data("theirs".utf8), "a file this move did not make is left alone")
     }
 
     func testAMoveThatFailsRemovesItsCopyEvenWhenTheOriginalIsOld() async throws {
