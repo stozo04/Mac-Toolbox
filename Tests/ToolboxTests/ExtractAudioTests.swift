@@ -247,18 +247,16 @@ final class ExtractAudioTests: XCTestCase {
         let long = dir.appendingPathComponent("Long.mov"), short = dir.appendingPathComponent("Short.mov")
         try await makeVideo(at: long, sound: .pcm(channels: 2, sampleRate: 48_000), seconds: Self.longSeconds)
         try await makeVideo(at: short, sound: .pcm(channels: 2, sampleRate: 48_000))
-        let model = ExtractAudioModel()
+        let model = ExtractAudioModel(outputParent: dir)
         model.settings = .init(format: .wav)
         model.add([long])
         model.extract()
-        removeAfterTest(model.folder)
         try await waitUntil("the first file is being extracted") { isExtracting(model.items.first?.status) }
 
         model.clear()
         XCTAssertFalse(model.isRunning)
         model.add([short])
         model.extract()
-        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
 
         XCTAssertEqual(model.items.count, 1)
@@ -270,12 +268,11 @@ final class ExtractAudioTests: XCTestCase {
     @MainActor func testFailedVideosCanBeTriedAgain() async throws {
         let broken = dir.appendingPathComponent("Broken.mov")
         try Data(repeating: 7, count: 4096).write(to: broken)
-        let model = ExtractAudioModel()
+        let model = ExtractAudioModel(outputParent: dir)
         model.add([broken])
         XCTAssertEqual(model.items.count, 1)
 
         model.extract()
-        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
         XCTAssertTrue(try XCTUnwrap(model.items.first).isFailed)
         XCTAssertTrue(model.hasPending, "a failed video can be tried again")
@@ -284,7 +281,6 @@ final class ExtractAudioTests: XCTestCase {
         try FileManager.default.removeItem(at: broken)
         try FileManager.default.moveItem(at: dir.appendingPathComponent("Fixed.mov"), to: broken)
         model.extract()
-        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
         XCTAssertEqual(model.results.count, 1)
     }
@@ -320,13 +316,12 @@ final class ExtractAudioTests: XCTestCase {
         try await makeVideo(at: a, sound: .aac(channels: 2))
         try await makeVideo(at: b, sound: .pcm(channels: 2, sampleRate: 48_000))
         try await makeVideo(at: quiet, sound: nil)
-        let model = ExtractAudioModel()
+        let model = ExtractAudioModel(outputParent: dir)
         model.settings = .init(format: .wav, bitrate: .kbps256)
         model.add([a, b, quiet, a])
         XCTAssertEqual(model.items.count, 3, "the same file is not added twice")
 
         model.extract()
-        removeAfterTest(model.folder)
         try await waitUntil(timeout: .seconds(120), "the extraction has finished") { !model.isRunning }
 
         XCTAssertEqual(model.results.map(\.url.lastPathComponent), ["One.wav", "Two.wav"])

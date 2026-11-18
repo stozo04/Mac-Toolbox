@@ -36,6 +36,7 @@ final class MuteVideoModel: BatchQueueModel {
     func add(_ urls: [URL]) { queue.add(urls) { Item(url: $0) } }
 
     func mute() {
+        guard hasPending else { return }
         queue.run { item, folder, step in
             switch try await VideoMuter.mute(source: item.url, into: folder, progress: step.progress { .muting($0) }) {
             case .muted(let result):

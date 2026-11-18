@@ -13,6 +13,10 @@ protocol BatchItem: Identifiable where ID == UUID {
     var status: QueueStatus { get set }
 }
 
+extension BatchItem {
+    var isFailed: Bool { status.isFailed }
+}
+
 struct BatchTool {
     let outputFolderName: String
     let logCategory: String
@@ -116,12 +120,14 @@ final class BatchQueue<Item: BatchItem> {
     @discardableResult
     func run(retryingFailed: Bool = true, failureContext: [String: String] = [:],
              where isPending: (Item) -> Bool = { $0.status == .waiting }, work: @escaping Work) -> Bool {
-        guard !isRunning, items.contains(where: isPending), let folder = outputFolder() else { return false }
-        isRunning = true
+        var queued = items
         if retryingFailed {
-            for index in items.indices where items[index].status.isFailed { items[index].status = .waiting }
+            for index in queued.indices where queued[index].status.isFailed { queued[index].status = .waiting }
         }
-        let ids = items.filter(isPending).map(\.id)
+        let ids = queued.filter(isPending).map(\.id)
+        guard !isRunning, !ids.isEmpty, let folder = outputFolder() else { return false }
+        items = queued
+        isRunning = true
         let run = UUID()
         runID = run
         task = Task { [weak self] in

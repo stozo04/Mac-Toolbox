@@ -303,9 +303,8 @@ final class BatchQueueTests: XCTestCase {
         try await waitUntilWorking(on: "a.job")
         try bench.fail("a.job", with: JobError())
         try await waitUntilIdle()
-
-        XCTAssertFalse(start(), "a queue with only failed items has nothing waiting")
         add("b.job")
+
         XCTAssertTrue(start())
 
         XCTAssertEqual(try status(of: "a.job"), .waiting)
@@ -316,6 +315,23 @@ final class BatchQueueTests: XCTestCase {
         try await waitUntilIdle()
         XCTAssertEqual(queue.items.map(\.status), [.done("saved a.job"), .done("saved b.job")])
         XCTAssertEqual(bench.started, ["a.job", "a.job", "b.job"])
+    }
+
+    func testARunCanStartWithNothingButFailedItems() async throws {
+        add("a.job")
+        start()
+        try await waitUntilWorking(on: "a.job")
+        try bench.fail("a.job", with: JobError())
+        try await waitUntilIdle()
+
+        XCTAssertFalse(start(retryingFailed: false))
+        XCTAssertEqual(try status(of: "a.job"), .failed("The job broke."))
+        XCTAssertTrue(start())
+
+        try await waitUntilWorking(on: "a.job")
+        try bench.finish("a.job")
+        try await waitUntilIdle()
+        XCTAssertEqual(queue.items.map(\.status), [.done("saved a.job")])
     }
 
     func testARunToldNotToRetryLeavesFailedItemsAlone() async throws {
