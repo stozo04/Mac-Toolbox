@@ -82,23 +82,81 @@ final class VaultDiskTests: XCTestCase {
     }
 
     @MainActor
-    func testAVaultOpenWhileAnotherCopyRunsIsNotEjectedAtLaunch() async throws {
+    func testAVaultAnotherCopyHasOpenIsNeverEjectedByThisCopy() async throws {
         let disk = try await makeOpenDisk("other-copy")
+        let steps = Locked<[String]>([])
+        let recording = VaultTool { path, arguments, input, timeout in
+            steps.update { $0.append(arguments.first ?? path) }
+            return try await VaultTool.system.run(path, arguments, input, timeout)
+        }
 
-        let model = VaultModel(location: disk.location, watchesSystem: false, anotherCopyIsRunning: { true })
+        let model = VaultModel(location: disk.location, watchesSystem: false, tool: recording, anotherCopyIsRunning: { true })
 
         XCTAssertTrue(disk.isOpen, "launching a second copy ejected the vault the first copy is using")
+        XCTAssertFalse(model.ownsMount)
+        await model.lock()
+        XCTAssertTrue(disk.isOpen, "the Lock button or leaving the Vault page ejected another copy's vault")
+        model.lockImmediately()
+        XCTAssertTrue(disk.isOpen, "sleep, screen lock or quit ejected another copy's vault")
         XCTAssertEqual(model.phase, .locked)
+        XCTAssertNil(model.message)
+
+        await model.unlock(password: Self.password)
+
+        XCTAssertEqual(model.message, "The vault is open in another copy of Toolbox. Lock it there first.")
+        XCTAssertEqual(model.phase, .locked)
+        XCTAssertFalse(model.ownsMount)
+        XCTAssertTrue(disk.isOpen, "unlocking ejected another copy's vault first")
+        XCTAssertEqual(steps.value, [], "this copy ran a disk tool on a vault another copy is using")
     }
 
     @MainActor
-    func testAVaultLeftOpenWithNoOtherCopyRunningIsLockedAtLaunch() async throws {
+    func testAVaultLeftOpenWithNoOtherCopyRunningIsLockedAtLaunchAndOpensAgain() async throws {
         let disk = try await makeOpenDisk("left-open")
 
         let model = VaultModel(location: disk.location, watchesSystem: false, anotherCopyIsRunning: { false })
 
         XCTAssertFalse(disk.isOpen)
         XCTAssertEqual(model.phase, .locked)
+        await model.unlock(password: Self.password)
+        XCTAssertTrue(disk.isOpen)
+        XCTAssertTrue(model.ownsMount)
+        model.lockImmediately()
+        XCTAssertFalse(disk.isOpen)
+        XCTAssertFalse(model.ownsMount)
+    }
+
+    @MainActor
+    func testThisCopyOwnsTheMountOnlyOnceItsOwnAttachSucceeded() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("ownership"))
+        try await VaultDisk(location: location).create(password: Self.password)
+        let ownedDuringAttach = Locked<[Bool]>([])
+        let model = Locked<VaultModel?>(nil)
+        let watching = VaultTool { path, arguments, input, timeout in
+            let result = try await VaultTool.system.run(path, arguments, input, timeout)
+            if arguments.contains("attach") {
+                let owned = await MainActor.run { model.value?.ownsMount ?? true }
+                ownedDuringAttach.update { $0.append(owned) }
+            }
+            return result
+        }
+        let vault = VaultModel(location: location, watchesSystem: false, tool: watching, anotherCopyIsRunning: { true })
+        model.set(vault)
+        addTeardownBlock { @MainActor in vault.lockImmediately() }
+
+        await vault.unlock(password: "wrong-pass")
+        XCTAssertFalse(vault.ownsMount, "a failed attach counted as this copy's mount")
+        XCTAssertFalse(vault.disk.isOpen)
+
+        await vault.unlock(password: Self.password)
+        XCTAssertTrue(vault.ownsMount)
+        XCTAssertTrue(vault.disk.isOpen)
+
+        XCTAssertEqual(ownedDuringAttach.value, [false, false], "the mount counted as owned before the attach had returned")
+
+        await vault.lock()
+        XCTAssertFalse(vault.disk.isOpen, "this copy did not eject its own mount while another copy was running")
+        XCTAssertFalse(vault.ownsMount)
     }
 
     func testUnlockRefusesAMountPointThatAlreadyHoldsFiles() async throws {
@@ -158,8 +216,7 @@ final class VaultDiskTests: XCTestCase {
     @MainActor
     func testCreatingTheVaultIsNeverCutShort() async throws {
         let disk = VaultDisk(location: VaultLocation(folder: dir.appendingPathComponent("slow-create")))
-        let image = disk.location.image.path
-        let stand = try standIn(for: "create", script: "cat > /dev/null; echo $$ > \"$1\"; /bin/sleep 1; /bin/mkdir \"$2\"", finishing: image)
+        let stand = try standIn(for: "create", script: "cat > /dev/null; echo $$ > \"$1\"; /bin/sleep 1; /bin/mkdir \"$2\"", finishing: nil)
         var slow = disk
         slow.tool = stand.tool
 
@@ -171,6 +228,7 @@ final class VaultDiskTests: XCTestCase {
         XCTAssertTrue(isRunning(pid), "creating the vault was stopped halfway")
         try await creating.value
         XCTAssertTrue(disk.exists)
+        XCTAssertEqual(unfinishedImages(in: disk.location), [])
         XCTAssertEqual(stand.timeouts.value, [.untilFinished])
     }
 
@@ -271,18 +329,15 @@ final class VaultDiskTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: location.mountPoint.path))
     }
 
-    func testACreationThatFailsRemovesTheHalfMadeImage() async throws {
+    func testACreationThatFailsRemovesOnlyItsOwnUnfinishedImage() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("half-made"))
-        let writesHalfAnImage: @Sendable () throws -> Void = {
-            try FileManager.default.createDirectory(at: location.image, withIntermediateDirectories: false)
-            try Data("partial".utf8).write(to: location.image.appendingPathComponent("band"))
-        }
-        let thrown = VaultDisk(location: location, tool: VaultTool { path, _, _, _ in
-            try writesHalfAnImage()
+        let thrown = VaultDisk(location: location, tool: VaultTool { path, arguments, _, _ in
+            try Self.writeImage(at: arguments.last, holding: "partial")
             throw Shell.ShellError.launchFailed(path)
         })
-        let failed = VaultDisk(location: location, tool: VaultTool { _, _, _, _ in
-            try writesHalfAnImage()
+        let failedWhileAnotherCopyMadeTheVault = VaultDisk(location: location, tool: VaultTool { _, arguments, _, _ in
+            try Self.writeImage(at: arguments.last, holding: "partial")
+            try Self.writeImage(at: location.image.path, holding: "another copy's vault")
             return Shell.Result(status: 1, out: "", err: "disk full")
         })
 
@@ -293,21 +348,79 @@ final class VaultDiskTests: XCTestCase {
             XCTAssertEqual(error as? VaultError, .diskTool(action: "be created", message: "Could not start diskutil."))
         }
         XCTAssertFalse(thrown.exists)
+        XCTAssertEqual(unfinishedImages(in: location), [])
 
         do {
-            try await failed.create(password: "half-pass")
+            try await failedWhileAnotherCopyMadeTheVault.create(password: "half-pass")
             XCTFail("A creation that failed counted as done")
         } catch {
             XCTAssertEqual(error as? VaultError, .diskTool(action: "be created", message: "disk full"))
         }
-        XCTAssertFalse(failed.exists)
+        XCTAssertEqual(unfinishedImages(in: location), [])
+        XCTAssertEqual(try String(contentsOf: location.image.appendingPathComponent("band"), encoding: .utf8), "another copy's vault")
+    }
+
+    func testAVaultThatAppearedWhileThisOneWasBeingMadeIsNeverReplaced() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("raced"))
+        let made = Locked<[String]>([])
+        let disk = VaultDisk(location: location, tool: VaultTool { _, arguments, _, timeout in
+            made.update { $0.append(arguments.last ?? "") }
+            XCTAssertEqual(timeout, .untilFinished)
+            try Self.writeImage(at: arguments.last, holding: "this copy's new image")
+            try Self.writeImage(at: location.image.path, holding: "another copy's vault")
+            return Shell.Result(status: 0, out: "", err: "")
+        })
+
+        do {
+            try await disk.create(password: "raced-pass")
+            XCTFail("A vault another copy had just made was replaced")
+        } catch {
+            XCTAssertEqual(error as? VaultError, .alreadyExists)
+        }
+
+        let target = try XCTUnwrap(made.value.first)
+        XCTAssertNotEqual(target, location.image.path, "the tool was pointed at the real image path")
+        XCTAssertTrue(URL(fileURLWithPath: target).lastPathComponent.hasPrefix(VaultDisk.unfinishedPrefix))
+        XCTAssertEqual(unfinishedImages(in: location), [])
+        XCTAssertEqual(try String(contentsOf: location.image.appendingPathComponent("band"), encoding: .utf8), "another copy's vault")
+    }
+
+    func testARealCreationLeavesTheImageInPlaceAndNothingUnfinished() async throws {
+        let disk = try await makeOpenDisk("in-place")
+
+        XCTAssertTrue(disk.exists)
+        XCTAssertEqual(unfinishedImages(in: disk.location), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: disk.location.mountPoint.appendingPathComponent(VaultDisk.spotlightOptOut).path))
+    }
+
+    func testAnUnfinishedImageLeftByACrashIsIgnoredAndRemovedOnceItIsOld() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("leftover"))
+        let old = location.folder.appendingPathComponent("\(VaultDisk.unfinishedPrefix)OLD\(VaultDisk.unfinishedSuffix)")
+        let recent = location.folder.appendingPathComponent("\(VaultDisk.unfinishedPrefix)RECENT\(VaultDisk.unfinishedSuffix)")
+        let unrelated = location.folder.appendingPathComponent("Keep.sparsebundle")
+        for image in [old, recent, unrelated] {
+            try FileManager.default.createDirectory(at: image, withIntermediateDirectories: true)
+        }
+        let longAgo = Date(timeIntervalSinceNow: -2 * VaultDisk.unfinishedIsAbandonedAfter)
+        try FileManager.default.setAttributes([.modificationDate: longAgo], ofItemAtPath: old.path)
+        try FileManager.default.setAttributes([.modificationDate: longAgo], ofItemAtPath: unrelated.path)
+        let disk = VaultDisk(location: location, tool: VaultTool { _, arguments, _, _ in
+            try Self.writeImage(at: arguments.last, holding: "new")
+            return Shell.Result(status: 0, out: "", err: "")
+        })
+        XCTAssertFalse(disk.exists, "an unfinished image counted as a vault")
+
+        try await disk.create(password: "fresh-pass")
+
+        XCTAssertTrue(disk.exists)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recent.path), "another copy may still be creating this one")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelated.path))
     }
 
     func testCreatingNeverTouchesAVaultThatIsAlreadyThere() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("already-there"))
-        try FileManager.default.createDirectory(at: location.image, withIntermediateDirectories: true)
-        let band = location.image.appendingPathComponent("band")
-        try Data("someone's vault".utf8).write(to: band)
+        try Self.writeImage(at: location.image.path, holding: "someone's vault")
         let ran = Locked(false)
         let disk = VaultDisk(location: location, tool: VaultTool { path, _, _, _ in
             ran.set(true)
@@ -322,7 +435,17 @@ final class VaultDiskTests: XCTestCase {
         }
 
         XCTAssertFalse(ran.value)
-        XCTAssertEqual(try Data(contentsOf: band), Data("someone's vault".utf8))
+        XCTAssertEqual(try String(contentsOf: location.image.appendingPathComponent("band"), encoding: .utf8), "someone's vault")
+    }
+
+    private static func writeImage(at path: String?, holding text: String) throws {
+        let image = URL(fileURLWithPath: try XCTUnwrap(path), isDirectory: true)
+        try FileManager.default.createDirectory(at: image, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: image.appendingPathComponent("band"))
+    }
+
+    private func unfinishedImages(in location: VaultLocation) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: location.folder.path)) ?? []).filter { $0.hasPrefix(VaultDisk.unfinishedPrefix) }
     }
 
     private struct StandIn {
@@ -331,7 +454,7 @@ final class VaultDiskTests: XCTestCase {
         let waitUntilRunning: @MainActor () async throws -> Int32
     }
 
-    private func standIn(for verb: String, script: String, finishing: String) throws -> StandIn {
+    private func standIn(for verb: String, script: String, finishing: String?) throws -> StandIn {
         let pidFile = dir.appendingPathComponent("\(verb).pid")
         let timeouts = Locked<[Shell.Timeout]>([])
         let child = Locked<Int32?>(nil)
@@ -339,7 +462,7 @@ final class VaultDiskTests: XCTestCase {
         let tool = VaultTool { _, arguments, input, timeout in
             guard arguments.contains(verb) else { throw Shell.ShellError.launchFailed(verb) }
             timeouts.update { $0.append(timeout) }
-            return try await VaultTool.system.run("/bin/sh", ["-c", script, "sh", pidFile.path, finishing], input, timeout)
+            return try await VaultTool.system.run("/bin/sh", ["-c", script, "sh", pidFile.path, finishing ?? arguments.last ?? ""], input, timeout)
         }
         return StandIn(tool: tool, timeouts: timeouts) {
             try await waitUntil("the stand-in for diskutil \(verb) is running") {

@@ -65,6 +65,10 @@ struct VaultDisk {
     static let volumeName = "Vault"
     static let spotlightOptOut = ".metadata_never_index"
     static let harmlessLeftovers: Set<String> = [".DS_Store", spotlightOptOut]
+    static let unfinishedPrefix = ".Vault-"
+    static let unfinishedSuffix = ".sparsebundle"
+    // Another copy of the app may be creating its image right now; one this old was left by a create that crashed.
+    static let unfinishedIsAbandonedAfter: TimeInterval = 3600
 
     let location: VaultLocation
     var tool = VaultTool.system
@@ -85,15 +89,36 @@ struct VaultDisk {
         guard !exists else { throw VaultError.alreadyExists }
         try FileManager.default.createDirectory(at: location.folder, withIntermediateDirectories: true)
         try hideFolder()
+        removeAbandonedUnfinishedImages()
+        let unfinished = location.folder.appendingPathComponent("\(Self.unfinishedPrefix)\(UUID().uuidString)\(Self.unfinishedSuffix)")
         do {
             let result = try await tool.run(Self.diskutil, ["image", "--stdinpass", "create", "blank", "--encrypt",
                                                             "--size", Self.maximumSize, "--volumeName", Self.volumeName,
-                                                            "--fs", "APFS", location.image.path],
+                                                            "--fs", "APFS", unfinished.path],
                                             Data(password.utf8), .untilFinished)
             guard result.succeeded else { throw VaultError.diskTool(action: "be created", message: Self.reason(result)) }
+            try moveIntoPlace(unfinished)
         } catch {
-            try? FileManager.default.removeItem(at: location.image)
+            try? FileManager.default.removeItem(at: unfinished)
             throw Self.diskToolError(error, action: "be created")
+        }
+    }
+
+    private func moveIntoPlace(_ unfinished: URL) throws {
+        guard renamex_np(unfinished.path, location.image.path, UInt32(RENAME_EXCL)) != 0 else { return }
+        let code = errno
+        if code == EEXIST || code == ENOTEMPTY { throw VaultError.alreadyExists }
+        throw VaultError.diskTool(action: "be created", message: String(cString: strerror(code)))
+    }
+
+    private func removeAbandonedUnfinishedImages() {
+        let fileManager = FileManager.default
+        let names = (try? fileManager.contentsOfDirectory(atPath: location.folder.path)) ?? []
+        for name in names where name.hasPrefix(Self.unfinishedPrefix) && name.hasSuffix(Self.unfinishedSuffix) {
+            let leftover = location.folder.appendingPathComponent(name)
+            let changed = (try? leftover.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let changed, Date().timeIntervalSince(changed) > Self.unfinishedIsAbandonedAfter else { continue }
+            try? fileManager.removeItem(at: leftover)
         }
     }
 

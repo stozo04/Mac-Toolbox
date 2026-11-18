@@ -90,14 +90,18 @@ final class VaultModel {
     private var lengthTasks: [Task<Void, Never>] = []
     private var openGeneration = 0
     private var filesStillToMove: [URL] = []
+    private(set) var ownsMount = false
+    private let anotherCopyIsRunning: @MainActor () -> Bool
+    fileprivate var mayEject: Bool { ownsMount || !anotherCopyIsRunning() }
     @ObservationIgnored var moveFile: @Sendable (_ file: URL, _ vaultRoot: URL) async throws -> URL = { try await VaultMover.move($0, into: $1) }
     @ObservationIgnored private(set) var libraryReloads = 0
     private static let duplicatePause: Duration = .milliseconds(400)
     private static let typingPause: Duration = .milliseconds(250)
 
     init(location: VaultLocation, watchesSystem: Bool = true, tool: VaultTool = .system,
-         anotherCopyIsRunning: @MainActor () -> Bool = VaultModel.anotherCopyOfThisAppIsRunning) {
+         anotherCopyIsRunning: @escaping @MainActor () -> Bool = VaultModel.anotherCopyOfThisAppIsRunning) {
         disk = VaultDisk(location: location, tool: tool)
+        self.anotherCopyIsRunning = anotherCopyIsRunning
         if disk.isOpen, !anotherCopyIsRunning() { disk.lockAndWait() }
         phase = disk.exists ? .locked : .setup
         if watchesSystem { watchSystem() }
@@ -121,6 +125,7 @@ final class VaultModel {
             Log.info("Vault created", category: VaultLog.category)
             self.phase = .locked
             try await self.disk.unlock(password: password)
+            self.ownsMount = true
             self.openUnlessLockedMeanwhile(since: locksBefore)
         }
     }
@@ -128,11 +133,16 @@ final class VaultModel {
     func unlock(password: String) async {
         guard !isWorking, !isLocking, !password.isEmpty else { return }
         clearDoorMessage()
+        guard !disk.isOpen || mayEject else {
+            message = Self.openInAnotherCopyMessage
+            return
+        }
         isWorking = true
         defer { isWorking = false }
         let locksBefore = lockCount
         do {
             try await disk.unlock(password: password)
+            ownsMount = true
             openUnlessLockedMeanwhile(since: locksBefore)
         } catch VaultError.wrongPassword {
             wrongPasswordAttempts += 1
@@ -159,11 +169,13 @@ final class VaultModel {
         await engine?.shutDown()
         await moveTask?.value
         clearOpenState()
-        do {
-            try await disk.lock()
-        } catch {
-            VaultLog.failure("Vault lock failed", error)
-            disk.lockAndWait()
+        if mayEject {
+            do {
+                try await disk.lock()
+            } catch {
+                VaultLog.failure("Vault lock failed", error)
+                disk.lockAndWait()
+            }
         }
         settleAfterLocking()
     }
@@ -171,7 +183,7 @@ final class VaultModel {
     func lockImmediately() {
         beginLocking()
         clearOpenState()
-        disk.lockAndWait()
+        if mayEject { disk.lockAndWait() }
         settleAfterLocking()
     }
 
@@ -194,7 +206,8 @@ final class VaultModel {
 
     private func settleAfterLocking() {
         isLocking = false
-        guard disk.isOpen else {
+        guard disk.isOpen, mayEject else {
+            ownsMount = false
             if disk.exists { phase = .locked }
             return
         }
@@ -556,25 +569,10 @@ final class VaultModel {
         }
     }
 
-    static func isUnexpected(_ error: Error) -> Bool {
-        guard let moveError = error as? VaultMoveError else { return true }
-        switch moveError {
-        case .copyDiffers, .unreadable, .vaultNotOpen, .notSaved, .originalKept: return true
-        case .interrupted, .changedWhileMoving: return false
-        case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
-        }
-    }
-
-    static func isUserMistake(_ error: Error) -> Bool {
-        switch error as? VaultError {
-        case .wrongPassword, .passwordTooShort, .passwordsDiffer: true
-        default: false
-        }
-    }
-
     private func openUnlessLockedMeanwhile(since locksBefore: Int) {
         guard lockCount == locksBefore else {
             disk.lockAndWait()
+            ownsMount = disk.isOpen
             Log.info("Vault locked while it was opening", category: VaultLog.category)
             return
         }
@@ -657,6 +655,24 @@ extension VaultModel {
     static let closedFromOutsideMessage = "The vault was closed from outside Toolbox. "
         + "Files that were being added at that moment were not moved and are still where they were. Unlock to continue."
 
+    static func isUnexpected(_ error: Error) -> Bool {
+        guard let moveError = error as? VaultMoveError else { return true }
+        switch moveError {
+        case .copyDiffers, .unreadable, .vaultNotOpen, .notSaved, .originalKept: return true
+        case .interrupted, .changedWhileMoving: return false
+        case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
+        }
+    }
+
+    static func isUserMistake(_ error: Error) -> Bool {
+        switch error as? VaultError {
+        case .wrongPassword, .passwordTooShort, .passwordsDiffer: true
+        default: false
+        }
+    }
+
+    static let openInAnotherCopyMessage = "The vault is open in another copy of Toolbox. Lock it there first."
+
     static func anotherCopyOfThisAppIsRunning() -> Bool {
         guard let identifier = Bundle.main.bundleIdentifier else { return false }
         return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).contains { $0 != .current }
@@ -676,6 +692,7 @@ extension VaultModel {
         beginLocking()
         clearOpenState()
         disk.removeEmptyMountPoint()
+        ownsMount = false
         isLocking = false
         phase = disk.exists ? .locked : .setup
         message = Self.closedFromOutsideMessage
