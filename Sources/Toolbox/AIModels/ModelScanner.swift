@@ -84,6 +84,7 @@ struct ModelScanner {
 
     // MARK: Scan
 
+    /// Gives up with an empty list as soon as its task is cancelled, so a caller that cancels must not use the result.
     func scan() -> [InstalledModel] {
         var byID: [String: InstalledModel] = [:]
         func add(_ original: InstalledModel) {
@@ -102,6 +103,7 @@ struct ModelScanner {
         }
         let roots = roots()
         for root in roots {
+            if Task.isCancelled { return [] }
             switch root.layout {
             case .huggingFace: huggingFaceModels(root).forEach(add)
             case .ollama: ollamaModels(root).forEach(add)
@@ -109,6 +111,7 @@ struct ModelScanner {
             }
         }
         for model in looseModels(outside: roots) { add(model) }
+        if Task.isCancelled { return [] }
         // An app's models together, in alphabetical order; loose files last.
         return byID.values.map(settled).sorted { ($0.owner ?? "\u{FFFF}", $0.name) < ($1.owner ?? "\u{FFFF}", $1.name) }
     }
@@ -145,6 +148,7 @@ struct ModelScanner {
         guard let walker = FileManager.default.enumerator(at: root.url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return [] }
         let base = root.url.standardizedFileURL.pathComponents.count
         for case let url as URL in walker {
+            if Task.isCancelled { return [] }
             if walker.level > 8 { walker.skipDescendants(); continue }
             let name = url.lastPathComponent.lowercased()
             if Self.skippedSuffixes.contains(where: name.hasSuffix) { continue }
@@ -296,6 +300,7 @@ struct ModelScanner {
         var out: [InstalledModel] = []
         let base = manifests.standardizedFileURL.pathComponents.count
         for case let url as URL in walker {
+            if Task.isCancelled { return [] }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
                   let data = try? Data(contentsOf: url),
                   let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -327,6 +332,7 @@ struct ModelScanner {
         var out: [InstalledModel] = []
         var modelFolders = Set<URL>()
         for path in extraPaths {
+            if Task.isCancelled { return [] }
             let url = path.standardizedFileURL
             let text = url.path + (url.hasDirectoryPath ? "/" : "")
             if roots.contains(where: { Self.isInside(url, $0.url) }) || Self.excludedForLooseFiles.contains(where: text.contains) { continue }
@@ -354,6 +360,7 @@ struct ModelScanner {
             out.append(single(found, root: Root(url: url.deletingLastPathComponent(), owner: nil)))
         }
         for folder in Self.outermostFolders(modelFolders) {
+            if Task.isCancelled { return [] }
             if let model = folderModel(folder) { out.append(model) }
         }
         return out
@@ -490,6 +497,7 @@ struct ModelScanner {
         guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey], options: []) else { return 0 }
         var total: Int64 = 0
         for case let file as URL in walker {
+            if Task.isCancelled { return 0 }
             let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
             if values?.isRegularFile == true { total += Int64(values?.fileSize ?? 0) }
         }
