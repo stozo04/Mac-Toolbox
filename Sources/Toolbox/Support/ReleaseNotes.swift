@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.12.0"
+    static let current = "0.12.1"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,9 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.12.1", date: "2026-11-19", changes: [
+            .init(kind: .fixed, text: "Behind the scenes: two of the app's own checks could fail by chance on a slow machine. They no longer depend on timing."),
+        ]),
         Release(version: "0.12.0", date: "2026-11-19", changes: [
             .init(kind: .new, text: "Download Video: an Add to Vault checkbox beside Send to Google opens your Vault with Touch ID, moves the videos in and makes them searchable, sends them to Google, then locks the Vault again. If Touch ID fails, the videos are still sent, just not added."),
             .init(kind: .new, text: "Vault: \"Use Touch ID to add downloads\" on the unlock screen lets Download Video open the Vault with your fingerprint."),
