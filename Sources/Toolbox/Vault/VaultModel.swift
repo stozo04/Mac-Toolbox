@@ -7,7 +7,7 @@ import Observation
 @Observable
 final class VaultModel {
     private(set) var phase: Phase
-    private(set) var isWorking = false
+    var isWorking = false
     private(set) var wrongPasswordAttempts = 0
     var message: String?
     private(set) var folderWithFilesLeftOutside: URL?
@@ -15,7 +15,7 @@ final class VaultModel {
     var selection: Set<VaultItem.ID> = []
     var viewing: VaultItem.ID?
     var detailing: VaultItem.ID?
-    private(set) var moveProgress: MoveProgress?
+    var moveProgress: MoveProgress? { moves.progress }
     var moveFailures: [VaultMoveFailure] = []
     private(set) var thumbnails: VaultThumbnails?
     private(set) var isLocking = false
@@ -57,29 +57,25 @@ final class VaultModel {
     private var lockInFlight: Task<Void, Never>?
     private(set) var lastLockFailure: String?
     /// Download Video opened the vault and has not seen it locked since, so it is that send's to lock, retries included.
-    private(set) var openedForDownloads = false
+    var openedForDownloads = false
     @ObservationIgnored private(set) lazy var quitGuard = VaultQuitGuard(self)
-    private var moveTask: Task<Void, Never>?
-    private var moveID: UUID?
+    var moves = VaultMoveTracker()
     private var observers: [NSObjectProtocol] = []
     private var searchEngine: VaultSearchEngine?
     private var indexTask: Task<Void, Never>?
     private var indexAgain = false
     private(set) var searchFailures: Set<VaultItem.ID> = []
-    private var searchFirst: [VaultItem.ID] = []
-    private let searchWaiters = VaultSearchWaiters()
+    private var indexQueue = VaultIndexQueue()
+    let searchWaiters = VaultSearchWaiters()
     private var renamesInFlight: Set<VaultItem.ID> = []
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
-    private var digests: [VaultItem: Data] = [:]
-    private var looks: [VaultItem: VaultLook] = [:]
+    private let duplicateFinder = VaultDuplicateFinder()
     private var lengthsInFlight: Set<VaultItem> = []
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
     private var openGeneration = 0
-    private var filesStillToMove: [URL] = []
-    fileprivate var outsideCloseNotice: (duringImport: Bool, unconfirmed: Int)?
     @ObservationIgnored var moveFile: @Sendable (_ file: URL, _ vaultRoot: URL) async throws -> URL = { try await VaultMover.move($0, into: $1) }
     @ObservationIgnored private(set) var libraryReloads = 0
     private static let duplicatePause: Duration = .milliseconds(400)
@@ -93,7 +89,7 @@ final class VaultModel {
         usesTouchID = self.passwordKeeper.hasPassword
         phase = door.disk.exists ? .locked : .setup
         if door.state == .openElsewhere { closeLeftoverFromACrash() }
-        if watchesSystem { watchSystem() }
+        if watchesSystem { observers = watchSystem() }
     }
 
     var root: URL { disk.location.mountPoint }
@@ -165,7 +161,7 @@ final class VaultModel {
         if let lockInFlight { return lockInFlight }
         let engine = searchEngine
         let indexing = indexTask
-        let moving = moveTask
+        let moving = moves.task
         searchEngine = nil
         beginLocking()
         let locking = Task {
@@ -182,7 +178,7 @@ final class VaultModel {
         lockCount += 1
         isLocking = true
         door.interruptUnlock()
-        moveTask?.cancel()
+        moves.task?.cancel()
         thumbnails?.gate.close()
         stopSearch()
         clearOpenState()
@@ -245,39 +241,16 @@ final class VaultModel {
         duplicateGroups.map { VaultDuplicates.filtered($0, by: filter) }
     }
 
-    private func findDuplicates() {
+    func findDuplicates() {
         duplicateTask?.cancel()
         let generation = openGeneration
         duplicateTask = Task {
             try? await Task.sleep(for: Self.duplicatePause)
             guard !Task.isCancelled else { return }
             let snapshot = items
-            let present = Set(snapshot)
             let lengths = await lengthsForDuplicates(of: snapshot)
             guard !Task.isCancelled, generation == openGeneration else { return }
-            let unlooked = VaultDuplicates.lookCandidates(in: snapshot, durations: lengths).filter { looks[$0] == nil }
-            let newLooks = await VaultLookReader.looks(of: unlooked, durations: lengths)
-            guard !Task.isCancelled, generation == openGeneration else { return }
-            looks.merge(newLooks) { _, new in new }
-            let knownLooks = looks.filter { present.contains($0.key) }
-            let known = digests.filter { present.contains($0.key) }
-            let stop = StopFlag()
-            let (groups, found) = await withTaskCancellationHandler {
-                await Task.detached(priority: .userInitiated) {
-                    var found = known
-                    let groups = VaultDuplicates.groups(in: snapshot, digest: { item in
-                        if let digest = found[item] { return digest }
-                        guard !stop.isSet else { throw CancellationError() }
-                        let digest = try VaultMover.sha256(item.url)
-                        found[item] = digest
-                        return digest
-                    }, durations: lengths, looks: knownLooks)
-                    return (groups, found)
-                }.value
-            } onCancel: { stop.set() }
-            guard generation == openGeneration else { return }
-            digests.merge(found) { _, new in new }
-            guard !Task.isCancelled else { return }
+            guard let groups = await duplicateFinder.groups(in: snapshot, lengths: lengths) else { return }
             duplicateGroups = groups
         }
     }
@@ -303,7 +276,7 @@ final class VaultModel {
     }
 
     func putBackTrash() {
-        guard moveTask == nil else { return }
+        guard !moves.isRunning else { return }
         let failures = VaultTrash.putBackAll(privateFolder: privateFolder, into: root)
         for (file, error) in failures { VaultLog.failure("Vault put back failed", error, file: file) }
         if !failures.isEmpty { message = failures.count == 1 ? "1 item couldn't be put back." : "\(failures.count) items couldn't be put back." }
@@ -312,7 +285,7 @@ final class VaultModel {
     }
 
     func emptyTrash() {
-        guard moveTask == nil else { return }
+        guard !moves.isRunning else { return }
         let failures = VaultTrash.empty(privateFolder: privateFolder)
         for (file, error) in failures { VaultLog.failure("Vault empty trash failed", error, file: file) }
         if !failures.isEmpty { message = failures.count == 1 ? "1 item couldn't be deleted." : "\(failures.count) items couldn't be deleted." }
@@ -340,46 +313,39 @@ final class VaultModel {
 
     func add(_ urls: [URL]) {
         guard phase == .open, !isLocking else { return }
-        guard moveTask == nil else {
+        guard !moves.isRunning else {
             message = VaultMoveError.busy.localizedDescription
             return
         }
         let files = VaultMover.expand(urls)
         guard !files.isEmpty else { return }
         moveFailures = []
-        filesStillToMove = files
+        let id = moves.begin(files)
         guard !lockIfClosedFromOutside() else { return }
-        moveProgress = MoveProgress(done: 0, total: files.count)
-        let id = UUID()
-        moveID = id
-        moveTask = Task { [moveFile] in
+        moves.task = Task { [moveFile] in
             for file in files {
                 if Task.isCancelled || !disk.isOpen { break }
                 do {
                     let moved = try await moveFile(file, root)
-                    if moveID == id { showMovedIn(moved) } else { correctReportIfMovedAfterAll(file) }
+                    if moves.isCurrent(id) { showMovedIn(moved) } else { correctReportIfMovedAfterAll(file) }
                 } catch {
-                    guard moveID == id else { break }
+                    guard moves.isCurrent(id) else { break }
                     moveFailures.append(VaultMoveFailure(name: file.lastPathComponent, reason: error.localizedDescription))
                     if VaultNotices.isUnexpected(error) { VaultLog.failure("Vault move failed", error, file: file) }
                 }
-                guard moveID == id else { break }
-                filesStillToMove.removeAll { $0 == file }
-                moveProgress?.done += 1
+                guard moves.isCurrent(id) else { break }
+                moves.settled(file)
             }
             Log.info("Moved into vault", category: VaultLog.category,
                      ["count": String(files.count), "failed": String(moveFailures.count)])
-            guard moveID == id, !lockIfClosedFromOutside() else { return }
-            filesStillToMove = []
+            guard moves.isCurrent(id), !lockIfClosedFromOutside() else { return }
             if !isLocking { reload() }
             refreshIndex()
-            moveProgress = nil
-            moveTask = nil
-            moveID = nil
+            moves.end()
         }
     }
 
-    private func showMovedIn(_ url: URL) {
+    func showMovedIn(_ url: URL) {
         guard !isLocking, let item = VaultLibrary.item(movedTo: url) else { return }
         items = VaultLibrary.inserting(item, into: items)
         if item.kind == .video { loadDurations() }
@@ -467,7 +433,7 @@ final class VaultModel {
         startSearch()
     }
 
-    private func startSearch() {
+    func startSearch() {
         guard searchEngine == nil, !isLocking else { return }
         guard let model = EmbeddingModel.locate() else {
             if downloadTask == nil { searchState = .needsModel }
@@ -486,12 +452,12 @@ final class VaultModel {
         searchEngine?.close()
         searchEngine = nil
         indexAgain = false
-        searchFirst = []
+        indexQueue.clear()
         isSearching = false
         if downloadTask == nil { searchState = .off }
     }
 
-    private func refreshIndex() {
+    func refreshIndex() {
         guard let engine = searchEngine else { return }
         guard indexTask == nil else {
             indexAgain = true
@@ -519,10 +485,10 @@ final class VaultModel {
             var queue = pending
             var done = 0
             var unreadable = 0
-            while let item = nextToIndex(from: &queue) {
+            while let item = indexQueue.next(from: &queue, in: items, gone: { searchWaiters.answer($0, searchable: false) }) {
                 guard !Task.isCancelled, searchEngine === engine else { return }
                 searchState = .indexing(done: done, total: max(pending.count, done + 1))
-                searchFirst.removeAll { $0 == item.id }
+                indexQueue.remove(item.id)
                 guard items.contains(where: { $0.id == item.id }) else { continue }
                 do {
                     try await engine.index(item)
@@ -589,7 +555,7 @@ final class VaultModel {
         }
     }
 
-    private func beginOpening() {
+    func beginOpening() {
         VaultPlayable.removeUnfinishedCopies(privateFolder: privateFolder)
         thumbnails = VaultThumbnails(vaultRoot: root)
         wrongPasswordAttempts = 0
@@ -603,10 +569,7 @@ final class VaultModel {
         detailing = nil
         selection = []
         items = []
-        moveProgress = nil
-        moveTask = nil
-        moveID = nil
-        filesStillToMove = []
+        moves.end()
         releasePlayer()
         openGeneration += 1
         lengthTasks.forEach { $0.cancel() }
@@ -618,9 +581,8 @@ final class VaultModel {
         duplicateTask?.cancel()
         duplicateTask = nil
         duplicateGroups = nil
-        digests = [:]
+        duplicateFinder.forget()
         searchFailures = []
-        looks = [:]
         mode = .library
         query = ""
         searchResult = nil
@@ -629,23 +591,6 @@ final class VaultModel {
         Task { await old?.forget() }
     }
 
-    private func watchSystem() {
-        let workspace = NSWorkspace.shared.notificationCenter
-        observers.append(workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.lockBeforeSleep() }
-        })
-        observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { _ = self?.lockImmediately() }
-        })
-        quitGuard.prepare(in: .shared)
-        observers.append(workspace.addObserver(forName: NSWorkspace.didUnmountNotification, object: nil, queue: .main) { [weak self] note in
-            let volume = note.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL
-            MainActor.assumeIsolated { self?.volumeDidUnmount(volume) }
-        })
-        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { _ = self?.lockIfClosedFromOutside() }
-        })
-    }
 }
 
 extension VaultModel {
@@ -663,49 +608,22 @@ extension VaultModel {
     @discardableResult
     func lockIfClosedFromOutside() -> Bool {
         guard phase == .open || phase == .opening, !isLocking, door.noticeOutsideEject() else { return false }
-        let duringImport = moveTask != nil || !filesStillToMove.isEmpty
-        let unconfirmed = filesStillToMove.filter { !FileManager.default.fileExists(atPath: $0.path) }
+        let close = moves.closedFromOutside()
         Log.warning("Vault closed from outside the app", category: VaultLog.category,
-                    ["still_to_move": String(filesStillToMove.count), "unconfirmed": String(unconfirmed.count)])
-        moveFailures += filesStillToMove.map {
-            VaultMoveFailure(name: $0.lastPathComponent,
-                             reason: unconfirmed.contains($0) ? VaultNotices.finishedAsVaultClosed : VaultMoveError.vaultNotOpen.localizedDescription,
-                             source: $0)
-        }
-        outsideCloseNotice = (duringImport, unconfirmed.count)
+                    ["still_to_move": String(close.stillToMove), "unconfirmed": String(close.unconfirmed)])
+        moveFailures += close.failures
         openedForDownloads = false
         beginLocking()
         isLocking = false
         phase = disk.exists ? .locked : .setup
-        message = VaultNotices.closedFromOutside(duringImport: duringImport, unconfirmed: unconfirmed.count)
+        message = close.notice
         return true
     }
 
-    // The move in flight when the eject was noticed can still finish: its copy was already checked and saved to the disk.
-    fileprivate func correctReportIfMovedAfterAll(_ file: URL) {
-        let kept = VaultMoveError.vaultNotOpen.localizedDescription
-        guard !FileManager.default.fileExists(atPath: file.path), let notice = outsideCloseNotice,
-              let listed = moveFailures.firstIndex(where: { $0.source == file && $0.reason == kept }) else { return }
-        moveFailures[listed] = VaultMoveFailure(name: file.lastPathComponent, reason: VaultNotices.finishedAsVaultClosed, source: file)
-        let noticeShown = message == VaultNotices.closedFromOutside(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed)
-        outsideCloseNotice = (notice.duringImport, notice.unconfirmed + 1)
-        if noticeShown { message = VaultNotices.closedFromOutside(duringImport: notice.duringImport, unconfirmed: notice.unconfirmed + 1) }
-    }
-
-    func changePassword(current: String, new: String, confirmation: String) async -> Bool {
-        do {
-            try VaultDisk.validateNewPassword(new, confirmation: confirmation)
-            let refusal = await door.changePassword(from: current, to: new)
-            quitGuard.forgetRefusal()
-            if let refusal { throw refusal }
-            Log.info("Vault password changed", category: VaultLog.category)
-            if passwordKeeper.hasPassword { rememberForTouchID(new) }
-            return true
-        } catch {
-            message = error.localizedDescription
-            if !VaultNotices.isUserMistake(error) { VaultLog.failure("Vault password change failed", error) }
-            return false
-        }
+    func correctReportIfMovedAfterAll(_ file: URL) {
+        guard let correction = moves.correction(for: file, among: moveFailures) else { return }
+        moveFailures[correction.listed] = correction.failure
+        if message == correction.noticeBefore { message = correction.notice }
     }
 
     fileprivate func clearDoorMessage() {
@@ -720,39 +638,6 @@ extension VaultModel {
 }
 
 extension VaultModel {
-    func keep(_ keeper: VaultItem, in group: VaultDuplicates.Group) async {
-        guard moveTask == nil else { return }
-        guard VaultDuplicates.isStillIntact(group, keeping: keeper) else {
-            message = "These copies changed since they were compared. Look again before choosing."
-            findDuplicates()
-            return
-        }
-        await moveToTrash(VaultDuplicates.others(than: keeper, in: group))
-    }
-
-    func trashChosenCopies(_ chosen: Set<VaultItem.ID>) async {
-        guard moveTask == nil, let groups = visibleDuplicateGroups else { return }
-        guard VaultDuplicates.groupsWithEveryCopy(of: chosen, in: groups).isEmpty else {
-            message = "Leave at least one copy of each set unselected."
-            return
-        }
-        let touched = groups.filter { group in group.copies.contains { chosen.contains($0.id) } }
-        let stillIntact = touched.allSatisfy { group in
-            group.copies.first { !chosen.contains($0.id) }.map { VaultDuplicates.isStillIntact(group, keeping: $0) } ?? false
-        }
-        guard stillIntact else {
-            message = "These copies changed since they were compared. Look again before choosing."
-            findDuplicates()
-            return
-        }
-        await moveToTrash(VaultDuplicates.chosenCopies(chosen, in: touched))
-    }
-
-    func chooseExtraCopies() {
-        guard let groups = visibleDuplicateGroups else { return }
-        selection = Set(VaultDuplicates.extraCopies(in: groups).map(\.id))
-    }
-
     fileprivate func lengthsForDuplicates(of snapshot: [VaultItem]) async -> [VaultItem: Double] {
         let missing = snapshot.filter { $0.kind == .video && durations[$0] == nil && !unreadableLengths.contains($0) }
         guard !missing.isEmpty else { return durations }
@@ -762,7 +647,7 @@ extension VaultModel {
     }
 
     func rename(_ item: VaultItem, to typed: String) async throws -> VaultItem {
-        guard phase == .open, moveTask == nil else { return item }
+        guard phase == .open, !moves.isRunning else { return item }
         guard let target = try VaultRename.destination(for: typed, renaming: item).get() else { return item }
         do {
             try VaultRename.move(item, to: target)
@@ -773,10 +658,9 @@ extension VaultModel {
         let renamed = VaultItem(url: target, kind: item.kind, added: item.added, bytes: item.bytes)
         VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
         if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
-        if let digest = digests.removeValue(forKey: item) { digests[renamed] = digest }
-        if let look = looks.removeValue(forKey: item) { looks[renamed] = look }
+        duplicateFinder.carry(from: item, to: renamed)
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
-        searchFirst = searchFirst.map { $0 == item.id ? renamed.id : $0 }
+        indexQueue.carry(from: item.id, to: renamed.id)
         searchWaiters.carry(from: item.id, to: renamed.id)
         if selection.remove(item.id) != nil { selection.insert(renamed.id) }
         if viewing == item.id { viewing = renamed.id }
@@ -811,98 +695,17 @@ extension VaultModel {
         return searchFailures.contains(item.id) ? .failed : .notIndexed
     }
 
-    /// Opens the vault with a password the user did not type here, so a refusal leaves no message or count on the door.
-    func openQuietly(password: String) async -> VaultDoor.UnlockOutcome? {
-        guard phase == .locked, !isWorking, !isLocking else { return nil }
-        isWorking = true
-        defer { isWorking = false }
-        let locksBefore = lockCount
-        let outcome = await door.unlock(password: password)
-        if case .opened = outcome, lockCount == locksBefore {
-            openedForDownloads = true
-            beginOpening()
-            finishOpening()
-        } else if case .refused = outcome, door.state == .open {
-            message = VaultNotices.leftMountedByFailedUnlock
-        }
-        return outcome
-    }
+    var isSearchRunning: Bool { searchEngine != nil }
 
-    fileprivate func rememberForTouchID(_ password: String) {
-        guard usesTouchID else { return passwordKeeper.forget() }
-        do {
-            try passwordKeeper.save(password)
-        } catch {
-            usesTouchID = false
-            passwordKeeper.forget()
-            VaultLog.failure("Saving the vault password for Touch ID failed", error)
-        }
-    }
-
-    /// Moves one file in, as a drop does, and returns where it landed in the vault.
-    func moveIn(_ file: URL) async throws -> URL {
-        guard phase == .open, !isLocking, !lockIfClosedFromOutside() else { throw VaultMoveError.vaultNotOpen }
-        guard moveTask == nil else { throw VaultMoveError.busy }
-        let id = UUID()
-        moveID = id
-        filesStillToMove = [file]
-        moveProgress = MoveProgress(done: 0, total: 1)
-        let move = Task { [moveFile, root] in try await moveFile(file, root) }
-        moveTask = Task { await withTaskCancellationHandler { _ = await move.result } onCancel: { move.cancel() } }
-        let result = await move.result
-        let ownMove = moveID == id
-        if ownMove {
-            moveTask = nil
-            moveID = nil
-            filesStillToMove = []
-            moveProgress = nil
-        } else {
-            correctReportIfMovedAfterAll(file)
-        }
-        if case .failure(VaultMoveError.originalKept(_, let copy)) = result, ownMove { showMovedIn(copy) }
-        let moved = try result.get()
-        if ownMove { showMovedIn(moved) }
-        return moved
-    }
-
-    /// Puts the file first in line for the search index and waits for it, at most `limit` (`searchWaitLimit` when not given).
-    /// False when there is no search model, the file could not be read, the vault locked first, or the wait ran out.
-    func makeSearchable(_ file: URL, waitingAtMost limit: Duration? = nil) async -> Bool {
-        guard phase == .open, !isLocking,
-              let item = items.first(where: { $0.url.standardizedFileURL == file.standardizedFileURL }) else { return false }
-        if searchEngine == nil { startSearch() }
-        guard searchEngine != nil else { return false }
+    func putFirstInIndex(_ item: VaultItem) {
         searchFailures.remove(item.id)
-        searchFirst.removeAll { $0 == item.id }
-        searchFirst.insert(item.id, at: 0)
-        let limit = limit ?? searchWaitLimit
-        return await searchWaiters.wait(for: item.id, atMost: limit) { refreshIndex() }
-    }
-
-    /// Files asked for by name go first, even ones that arrived after this pass listed what was pending.
-    private func nextToIndex(from queue: inout [VaultItem]) -> VaultItem? {
-        while let id = searchFirst.first {
-            searchFirst.removeFirst()
-            if let queued = queue.firstIndex(where: { $0.id == id }) { return queue.remove(at: queued) }
-            if let item = items.first(where: { $0.id == id }) { return item }
-            searchWaiters.answer(id, searchable: false)
-        }
-        return queue.isEmpty ? nil : queue.removeFirst()
+        indexQueue.putFirst(item.id)
     }
 
     func addToSearch(_ item: VaultItem) {
         guard phase == .open else { return }
-        searchFailures.remove(item.id)
         if searchEngine == nil { retrySearch() }
-        searchFirst.removeAll { $0 == item.id }
-        searchFirst.insert(item.id, at: 0)
+        putFirstInIndex(item)
         refreshIndex()
     }
-}
-
-private final class StopFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stopped = false
-    var isSet: Bool { lock.withLock { stopped } }
-    func set() { lock.withLock { stopped = true } }
 }
