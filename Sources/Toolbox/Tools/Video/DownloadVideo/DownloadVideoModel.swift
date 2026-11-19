@@ -63,6 +63,7 @@ final class DownloadVideoModel {
     static let vaultStillOpen = "The Vault didn't lock. Open the Vault page and lock it."
     static let vaultClosedWhileMoving = "the Vault closed before it went in, so it was sent from Downloads."
     static let vaultBusy = "the Vault was busy adding other files, so it was sent from Downloads."
+    static let vaultCantPlay = "the Vault only holds videos your Mac can play, so it was sent from Downloads."
     private static let addToVaultKey = "downloadVideo.addToVault"
 
     var linkText = ""
@@ -92,6 +93,7 @@ final class DownloadVideoModel {
     private let saveFolder: URL
     private let trash: (URL) throws -> Void
     private let sendToDrive: @Sendable ([URL]) throws -> DriveSender.Result
+    private let vaultCanHold: @Sendable (URL) async -> Bool
     private let defaults: UserDefaults
 
     /// `saveFolder`, `trash`, `sendToDrive` and `defaults` are injectable so tests never touch the real Downloads folder,
@@ -99,10 +101,12 @@ final class DownloadVideoModel {
     init(downloader: Downloader? = nil, saveFolder: URL = DownloadVideoModel.downloadsFolder,
          trash: @escaping (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
          sendToDrive: @escaping @Sendable ([URL]) throws -> DriveSender.Result = { try DriveSender.send($0) },
+         vaultCanHold: @escaping @Sendable (URL) async -> Bool = { await VaultMover.opens($0) },
          defaults: UserDefaults = .standard) {
         self.saveFolder = saveFolder
         self.trash = trash
         self.sendToDrive = sendToDrive
+        self.vaultCanHold = vaultCanHold
         self.defaults = defaults
         addToVault = defaults.bool(forKey: Self.addToVaultKey)
         if let downloader {
@@ -192,15 +196,30 @@ final class DownloadVideoModel {
         let downloads = items.compactMap { item -> Download? in
             if case .done(let file) = item.state { (item.id, file) } else { nil }
         }
-        let hasVideos = downloads.contains { VaultItem.kind(of: $0.file) != nil } || !vaultFiles.isEmpty
-        guard addToVault, hasVideos, let vault else {
-            let skipped = addToVault ? 0 : vaultFiles.count
-            sendState = .sending
-            Task { await sendFromDownloads(downloads, report: skipped > 0 ? VaultSendReport(skippedInVault: skipped) : nil) }
-            return
+        let skipped = addToVault ? 0 : vaultFiles.count
+        sendState = .sending
+        Task {
+            guard addToVault, let vault else {
+                return await sendFromDownloads(downloads, report: skipped > 0 ? VaultSendReport(skippedInVault: skipped) : nil)
+            }
+            let videos = await holdable(downloads)
+            guard !videos.isEmpty || !vaultFiles.isEmpty else { return await sendFromDownloads(downloads, report: nil) }
+            sendState = .unlocking
+            await sendThroughVault(vault, downloads, videos: videos)
         }
-        sendState = .unlocking
-        Task { await sendThroughVault(vault, downloads) }
+    }
+
+    /// What the vault can open, checked before Touch ID; a video it can't play, like WebM, goes from Downloads like audio.
+    private func holdable(_ downloads: [Download]) async -> [Download] {
+        var videos: [Download] = []
+        for download in downloads {
+            if await vaultCanHold(download.file) {
+                videos.append(download)
+            } else if VaultItem.kind(of: download.file) != nil {
+                update(download.id) { $0.vaultProblem = Self.vaultCantPlay }
+            }
+        }
+        return videos
     }
 
     private func sendFromDownloads(_ downloads: [Download], report: VaultSendReport?) async {
@@ -213,7 +232,7 @@ final class DownloadVideoModel {
         finishSend(await copyToDrive(downloads.map(\.file), fromVault: false), report: report)
     }
 
-    private func sendThroughVault(_ vault: DownloadVault, _ downloads: [Download]) async {
+    private func sendThroughVault(_ vault: DownloadVault, _ downloads: [Download], videos: [Download]) async {
         let opening = await vault.openWithTouchID()
         switch opening {
         case .cancelled:
@@ -223,8 +242,7 @@ final class DownloadVideoModel {
             await sendFromDownloads(downloads, report: VaultSendReport(notAddedBecause: reason, stillOpen: stillOpen))
         case .opened, .alreadyOpen:
             let openedHere = opening == .opened
-            let videos = downloads.filter { VaultItem.kind(of: $0.file) != nil }
-            let others = downloads.filter { VaultItem.kind(of: $0.file) == nil }
+            let others = downloads.filter { download in !videos.contains { $0.id == download.id } }
             var (report, keptOut) = await moveIn(videos, to: vault)
             report.usedVault = true
             report.keptOut = keptOut.count

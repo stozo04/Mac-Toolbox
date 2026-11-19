@@ -81,6 +81,7 @@ final class DownloadToVaultTests: XCTestCase {
                                            events.update { $0.append("drive " + files.map(\.lastPathComponent).joined(separator: ", ")) }
                                            return DriveSender.Result(copied: files.count)
                                        },
+                                       vaultCanHold: Self.standInVaultCanHold,
                                        defaults: try defaults ?? makeScratchDefaults())
         model.addToVault = addToVault
         model.linkText = links
@@ -88,6 +89,8 @@ final class DownloadToVaultTests: XCTestCase {
         try await waitUntil("the downloads have finished") { !model.isRunning }
         return model
     }
+
+    private static let standInVaultCanHold: @Sendable (URL) async -> Bool = { ["mp4", "mov"].contains($0.pathExtension) }
 
     private func send(_ model: DownloadVideoModel, vault: DownloadVault?) async throws {
         model.sendToGoogle(vault: vault)
@@ -192,6 +195,25 @@ final class DownloadToVaultTests: XCTestCase {
         try await send(model, vault: StandInVault(events: events))
 
         XCTAssertEqual(model.sendSummary, "Sent 1 to Google Drive, 1 in the Vault weren't sent; tick Add to Vault to send them.")
+    }
+
+    func testAVideoTheVaultCantPlayIsSentFromDownloadsAndSaysWhy() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1.webm https://b.example.com/2", addToVault: true)
+
+        try await send(model, vault: StandInVault(events: events))
+
+        XCTAssertTrue(events.value.contains("drive a.example.com.webm, vault b.example.com.mp4"), "\(events.value)")
+        let webm = try XCTUnwrap(model.items.first)
+        XCTAssertEqual(webm.state, .done(inDownloads("a.example.com.webm")))
+        XCTAssertEqual(webm.vaultProblem, DownloadVideoModel.vaultCantPlay)
+    }
+
+    func testOnlyVideosTheVaultCantPlayNeverAskForTouchID() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1.webm", addToVault: true)
+
+        try await send(model, vault: StandInVault(events: events))
+
+        XCTAssertEqual(events.value, ["drive a.example.com.webm"])
     }
 
     func testAVaultAnotherCopyHoldsIsNeverCalledLocked() async throws {
@@ -313,7 +335,7 @@ final class DownloadToVaultTests: XCTestCase {
     func testTheVaultLocksEvenWhenGoogleDriveFails() async throws {
         let model = DownloadVideoModel(downloader: NamedByHost(), saveFolder: downloads,
                                        sendToDrive: { _ in throw DriveSender.DriveError.notMounted },
-                                       defaults: try makeScratchDefaults())
+                                       vaultCanHold: Self.standInVaultCanHold, defaults: try makeScratchDefaults())
         model.addToVault = true
         model.linkText = "https://a.example.com/1"
         model.start()
