@@ -158,7 +158,7 @@ final class DownloadToVaultTests: XCTestCase {
                                       "drive vault a.example.com.mp4", "lock"])
         let item = try XCTUnwrap(model.items.first)
         XCTAssertEqual(item.state, .inVault(vault.root.appendingPathComponent("vault a.example.com.mp4")))
-        XCTAssertEqual(item.vaultProblem, "The copy in Downloads couldn't be deleted: busy")
+        XCTAssertEqual(item.vaultProblem, "The copy in Downloads couldn't be deleted, so Clear leaves it there: busy")
     }
 
     func testAudioGoesStraightFromDownloadsAndNeverAsksForTouchID() async throws {
@@ -238,6 +238,19 @@ final class DownloadToVaultTests: XCTestCase {
 
         XCTAssertEqual(trashed.value, [inDownloads("b.example.com.mp4")])
         XCTAssertTrue(model.items.isEmpty)
+    }
+
+    func testNoDownloadStartsWhileASendIsRunning() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.opening = .cancelled
+        model.sendToGoogle(vault: vault)
+        model.linkText = "https://b.example.com/2"
+
+        XCTAssertTrue(model.sendState.isBusy)
+        XCTAssertFalse(model.canStart)
+        try await waitUntil("the send has finished") { !model.sendState.isBusy }
+        XCTAssertTrue(model.canStart)
     }
 
     func testAddToVaultIsRemembered() async throws {

@@ -81,7 +81,7 @@ final class DownloadVideoModel {
 
     var isRunning: Bool { runTask != nil }
     var pendingLinks: [URL] { Self.links(in: linkText) }
-    var canStart: Bool { toolStatus == .ready && !pendingLinks.isEmpty && !isRunning }
+    var canStart: Bool { toolStatus == .ready && !pendingLinks.isEmpty && !isRunning && !sendState.isBusy }
     var finishedCount: Int { finishedFiles.count + vaultFiles.count }
     var finishedFiles: [URL] { items.compactMap { if case .done(let file) = $0.state { file } else { nil } } }
     var vaultFiles: [URL] { items.compactMap { if case .inVault(let file) = $0.state { file } else { nil } } }
@@ -150,7 +150,7 @@ final class DownloadVideoModel {
         guard canStart, let downloader else { return }
         let urls = pendingLinks
         linkText = ""
-        if !sendState.isBusy { sendState = .idle }
+        sendState = .idle
         let destination = saveFolder
         folder = destination
         let ids = urls.map { url -> UUID in
@@ -247,7 +247,7 @@ final class DownloadVideoModel {
             } catch VaultMoveError.vaultNotOpen, VaultMoveError.busy {
                 keptOut.append(video.file)
             } catch VaultMoveError.originalKept(let reason, let copy) {
-                update(video.id) { $0.state = .inVault(copy); $0.vaultProblem = "The copy in Downloads couldn't be deleted: \(reason)" }
+                update(video.id) { $0.state = .inVault(copy); $0.vaultProblem = "The copy in Downloads couldn't be deleted, so Clear leaves it there: \(reason)" }
                 moved.append(copy)
                 VaultLog.failure("Download in the vault but its original stayed", VaultMoveError.originalKept(reason, copy: copy), file: video.file)
             } catch {

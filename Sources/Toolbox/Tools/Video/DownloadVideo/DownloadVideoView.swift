@@ -240,6 +240,9 @@ private struct DownloadRow: View {
         case .inVault(let file):
             Text([item.quality?.summary, "In the Vault as \(file.lastPathComponent)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            if let problem = item.vaultProblem {
+                Text(problem).font(.caption).foregroundStyle(.orange).lineLimit(2)
+            }
         case .failed(let message):
             Text(message).font(.caption).foregroundStyle(.red).lineLimit(3)
         case .cancelled:
