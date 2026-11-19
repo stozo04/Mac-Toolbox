@@ -4,8 +4,8 @@ import Foundation
 enum DriveSender {
     struct Result: Equatable {
         var copied = 0
-        /// Already in the folder, or no longer on disk.
         var skipped = 0
+        var missing = 0
     }
 
     enum DriveError: LocalizedError {
@@ -14,8 +14,16 @@ enum DriveSender {
         var errorDescription: String? { "Google Drive isn't available. Open Google Drive and try again." }
     }
 
+    static let partialPrefix = ".toolbox-partial-"
+
+    /// `$TOOLBOX_DRIVE_FOLDER` (debug builds only) stands in for Google Drive, so a test run never uploads anything.
     static var driveRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        #if DEBUG
+        if let override = ProcessInfo.processInfo.environment["TOOLBOX_DRIVE_FOLDER"] {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/CloudStorage/GoogleDrive-gates.steven@gmail.com", isDirectory: true)
     }
 
@@ -30,14 +38,29 @@ enum DriveSender {
         let fm = FileManager.default
         guard fm.fileExists(atPath: root.path) else { throw DriveError.notMounted }
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        let leftovers = (try? fm.contentsOfDirectory(atPath: destination.path)) ?? []
+        for name in leftovers where name.hasPrefix(partialPrefix) { try? fm.removeItem(at: destination.appendingPathComponent(name)) }
         var result = Result()
         for file in files {
             let target = destination.appendingPathComponent(file.lastPathComponent)
-            if !fm.fileExists(atPath: file.path) || fm.fileExists(atPath: target.path) {
+            if !fm.fileExists(atPath: file.path) {
+                result.missing += 1
+                continue
+            }
+            if fm.fileExists(atPath: target.path) {
                 result.skipped += 1
                 continue
             }
-            try fm.copyItem(at: file, to: target)
+            // A copy cut off halfway must never sit under the real name, or every later send would skip it.
+            let partial = destination.appendingPathComponent(partialPrefix + file.lastPathComponent)
+            try? fm.removeItem(at: partial)
+            do {
+                try fm.copyItem(at: file, to: partial)
+                try fm.moveItem(at: partial, to: target)
+            } catch {
+                try? fm.removeItem(at: partial)
+                throw error
+            }
             result.copied += 1
         }
         return result

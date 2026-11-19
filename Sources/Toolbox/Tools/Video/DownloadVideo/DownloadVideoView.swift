@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DownloadVideoView: View {
     @State private var model = DownloadVideoModel.shared
+    @Environment(VaultModel.self) private var vault
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -113,8 +114,13 @@ struct DownloadVideoView: View {
             Spacer()
             if !model.items.isEmpty && !model.isRunning {
                 Button("Clear") { model.clearFinished() }
-                    .help("Clears the list and moves the downloaded files to the Trash")
-                Button { model.sendToGoogle() } label: { Label("Send to Google", systemImage: "icloud.and.arrow.up") }
+                    .help("Clears the list and moves the downloaded files to the Trash. Videos in the Vault stay there.")
+                    .disabled(model.sendState.isBusy)
+                Toggle("Add to Vault", isOn: $model.addToVault)
+                    .toggleStyle(.checkbox)
+                    .disabled(model.sendState.isBusy)
+                    .help("With Touch ID, moves the videos into the Vault and makes them searchable before sending them to Google, then locks the Vault")
+                Button { model.sendToGoogle(vault: vault) } label: { Label("Send to Google", systemImage: "icloud.and.arrow.up") }
                     .disabled(!model.canSend)
                 if model.folder != nil { Button("Open Folder") { model.openFolder() } }
             }
@@ -129,15 +135,7 @@ struct DownloadVideoView: View {
 
     private var footerText: String {
         if model.items.isEmpty { return "" }
-        switch model.sendState {
-        case .idle: break
-        case .sending: return "Sending to Google Drive…"
-        case .sent(let copied, let skipped):
-            return skipped == 0 ? "Sent \(copied) to Google Drive"
-                                : "Sent \(copied) to Google Drive, \(skipped) already there"
-        case .failed(let message): return message
-        }
-        return "\(model.finishedCount) of \(model.items.count) saved"
+        return model.sendSummary ?? "\(model.finishedCount) of \(model.items.count) saved"
     }
 
     // MARK: Options
@@ -216,6 +214,7 @@ private struct DownloadRow: View {
         case .queued: Image(systemName: "clock").foregroundStyle(.secondary)
         case .downloading: ProgressView().controlSize(.small)
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .inVault: Image(systemName: "lock.fill").foregroundStyle(Theme.accent)
         case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
         case .cancelled: Image(systemName: "xmark.circle").foregroundStyle(.secondary)
         }
@@ -231,9 +230,18 @@ private struct DownloadRow: View {
         case .done(let file):
             Text([item.quality?.summary, "Saved as \(file.lastPathComponent)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            if let problem = item.vaultProblem {
+                Text("Not added to the Vault: \(problem)").font(.caption).foregroundStyle(.orange).lineLimit(2)
+            }
             if let quality = item.quality, !quality.playsInQuickTime {
                 Text("\(quality.codec.rawValue) is the only format at this resolution. QuickTime can't open it; use IINA or VLC.")
                     .font(.caption).foregroundStyle(.orange).lineLimit(2)
+            }
+        case .inVault(let file):
+            Text([item.quality?.summary, "In the Vault as \(file.lastPathComponent)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            if let problem = item.vaultProblem {
+                Text(problem).font(.caption).foregroundStyle(.orange).lineLimit(2)
             }
         case .failed(let message):
             Text(message).font(.caption).foregroundStyle(.red).lineLimit(3)

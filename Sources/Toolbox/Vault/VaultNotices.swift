@@ -54,7 +54,7 @@ enum VaultNotices {
         guard let moveError = error as? VaultMoveError else { return true }
         switch moveError {
         case .copyDiffers, .unreadable, .vaultNotOpen, .notSaved, .originalKept: return true
-        case .interrupted, .changedWhileMoving: return false
+        case .interrupted, .changedWhileMoving, .busy: return false
         case .unsupportedType, .insidePhotosLibrary, .notDownloaded, .alreadyInVault, .link: return false
         }
     }
