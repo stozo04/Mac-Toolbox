@@ -56,6 +56,8 @@ final class VaultModel {
     private(set) var lockCount = 0
     private var lockInFlight: Task<Void, Never>?
     private(set) var lastLockFailure: String?
+    /// Download Video opened the vault and has not seen it locked since, so it is that send's to lock, retries included.
+    private(set) var openedForDownloads = false
     @ObservationIgnored private(set) lazy var quitGuard = VaultQuitGuard(self)
     private var moveTask: Task<Void, Never>?
     private var moveID: UUID?
@@ -132,6 +134,7 @@ final class VaultModel {
         let outcome = await door.unlock(password: password)
         switch outcome {
         case .opened where lockCount == locksBefore:
+            openedForDownloads = false
             beginOpening()
             rememberForTouchID(password)
         case .opened, .lockedMeanwhile:
@@ -197,6 +200,7 @@ final class VaultModel {
         isLocking = false
         guard case .stillMounted(let reason) = outcome else {
             lastLockFailure = nil
+            openedForDownloads = false
             if phase != .setup || disk.exists { phase = disk.exists ? .locked : .setup }
             return
         }
@@ -667,6 +671,7 @@ extension VaultModel {
                              source: $0)
         }
         outsideCloseNotice = (duringImport, unconfirmed.count)
+        openedForDownloads = false
         beginLocking()
         isLocking = false
         phase = disk.exists ? .locked : .setup
@@ -811,6 +816,7 @@ extension VaultModel {
         let locksBefore = lockCount
         let outcome = await door.unlock(password: password)
         if case .opened = outcome, lockCount == locksBefore {
+            openedForDownloads = true
             beginOpening()
             finishOpening()
         } else if case .refused = outcome, door.state == .open {

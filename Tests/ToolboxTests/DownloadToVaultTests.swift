@@ -382,6 +382,25 @@ final class VaultMoveInTests: XCTestCase {
         XCTAssertTrue(keeper.hasPassword, "a missed finger is not a reason to forget the password")
     }
 
+    func testAVaultOpenedForDownloadsStaysTheirsToLockUntilItLocks() async throws {
+        let keeper = StandInKeeper(answer: .password(Self.password))
+        let (model, _) = try await makeVault("touch-retry", keeper: keeper)
+        model.usesTouchID = true
+        await model.lock()
+        let first = await model.openWithTouchID()
+        XCTAssertEqual(first, .opened)
+
+        let retry = await model.openWithTouchID()
+
+        XCTAssertEqual(retry, .opened, "a vault a send opened and could not lock must be locked by the next send")
+        let locked = await model.lockAndConfirm()
+        XCTAssertTrue(locked)
+        await model.unlock(password: Self.password)
+        model.finishOpening()
+        let byHand = await model.openWithTouchID()
+        XCTAssertEqual(byHand, .alreadyOpen)
+    }
+
     func testUntickingTouchIDForgetsThePasswordAtOnce() async throws {
         let keeper = StandInKeeper(answer: .password(Self.password))
         let (model, _) = try await makeVault("touch-untick", keeper: keeper)
