@@ -14,7 +14,7 @@ protocol DownloadVault: AnyObject {
     var acceptsFiles: Bool { get }
     func openWithTouchID() async -> DownloadVaultOpening
     func moveIn(_ file: URL) async throws -> URL
-    func makeSearchable(_ file: URL) async -> Bool
+    func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int
     func lockAndConfirm() async -> Bool
 }
 
@@ -52,6 +52,26 @@ extension VaultModel: DownloadVault {
             case .opened?, .lockedMeanwhile?, nil:
                 return .unavailable("The Vault is busy. Try again in a moment.")
             }
+        }
+    }
+
+    /// Every file is put in line before any is waited for, so one pass of the index takes them all and the search model is
+    /// loaded once. A file may wait one `searchWaitLimit` for itself and one for each file ahead of it. Returns how many
+    /// became searchable; `onAnswer` hears how many have been answered so far.
+    func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int {
+        await withTaskGroup(of: Bool.self) { waits in
+            for (place, file) in files.enumerated() {
+                let turnsToWait = files.count - place
+                waits.addTask { @MainActor in await self.makeSearchable(file, waitingAtMost: self.searchWaitLimit * turnsToWait) }
+            }
+            var answered = 0
+            var searchable = 0
+            for await answer in waits {
+                answered += 1
+                if answer { searchable += 1 }
+                onAnswer(answered)
+            }
+            return searchable
         }
     }
 

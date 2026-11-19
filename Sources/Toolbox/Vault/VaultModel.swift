@@ -862,9 +862,9 @@ extension VaultModel {
         return moved
     }
 
-    /// Puts the file first in line for the search index and waits for it, at most `searchWaitLimit`. False when there is
-    /// no search model, the file could not be read, the vault locked first, or the wait ran out.
-    func makeSearchable(_ file: URL) async -> Bool {
+    /// Puts the file first in line for the search index and waits for it, at most `limit` (`searchWaitLimit` when not given).
+    /// False when there is no search model, the file could not be read, the vault locked first, or the wait ran out.
+    func makeSearchable(_ file: URL, waitingAtMost limit: Duration? = nil) async -> Bool {
         guard phase == .open, !isLocking,
               let item = items.first(where: { $0.url.standardizedFileURL == file.standardizedFileURL }) else { return false }
         if searchEngine == nil { startSearch() }
@@ -872,7 +872,7 @@ extension VaultModel {
         searchFailures.remove(item.id)
         searchFirst.removeAll { $0 == item.id }
         searchFirst.insert(item.id, at: 0)
-        let limit = searchWaitLimit
+        let limit = limit ?? searchWaitLimit
         return await withCheckedContinuation { waiter in
             let token = UUID()
             searchWaiters[item.id, default: [:]][token] = waiter

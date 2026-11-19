@@ -10,6 +10,8 @@ private final class StandInVault: DownloadVault {
     var refused: Set<String> = []
     var keepsOriginal: Set<String> = []
     var searchable = true
+    var interrupted: Set<String> = []
+    private(set) var searchRequests = 0
     var locksAfterMoves: Int?
     var locks = true
     let root = URL(fileURLWithPath: "/stand-in-vault")
@@ -27,6 +29,10 @@ private final class StandInVault: DownloadVault {
     func moveIn(_ file: URL) async throws -> URL {
         guard acceptsFiles else { throw VaultMoveError.vaultNotOpen }
         if refused.contains(file.lastPathComponent) { throw VaultMoveError.copyDiffers }
+        if interrupted.contains(file.lastPathComponent) {
+            acceptsFiles = false
+            throw VaultMoveError.interrupted
+        }
         events.update { $0.append("move \(file.lastPathComponent)") }
         if keepsOriginal.contains(file.lastPathComponent) {
             throw VaultMoveError.originalKept("busy", copy: root.appendingPathComponent("vault " + file.lastPathComponent))
@@ -36,9 +42,13 @@ private final class StandInVault: DownloadVault {
         return root.appendingPathComponent("vault " + file.lastPathComponent)
     }
 
-    func makeSearchable(_ file: URL) async -> Bool {
-        events.update { $0.append("index \(file.lastPathComponent)") }
-        return searchable
+    func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int {
+        searchRequests += 1
+        for (answered, file) in files.enumerated() {
+            events.update { $0.append("index \(file.lastPathComponent)") }
+            onAnswer(answered + 1)
+        }
+        return searchable ? files.count : 0
     }
 
     func lockAndConfirm() async -> Bool {
@@ -224,6 +234,30 @@ final class DownloadToVaultTests: XCTestCase {
         XCTAssertEqual(events.value, ["touch id", "move a.example.com.mp4", "drive b.example.com.mp4", "lock"])
         XCTAssertEqual(model.sendSummary,
                        "Added 1 to the Vault and sent 1 to Google Drive, 1 in the Vault weren't sent because it locked; send again. The Vault is locked again.")
+    }
+
+    func testAVideoWhoseMoveALockCutOffIsSentFromDownloadsLikeTheRest() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1 https://b.example.com/2", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.interrupted = ["a.example.com.mp4"]
+
+        try await send(model, vault: vault)
+
+        XCTAssertEqual(events.value, ["touch id", "drive a.example.com.mp4, b.example.com.mp4", "lock"])
+        let cutOff = try XCTUnwrap(model.items.first)
+        XCTAssertEqual(cutOff.state, .done(inDownloads("a.example.com.mp4")))
+        XCTAssertNil(cutOff.vaultProblem)
+        XCTAssertEqual(model.sendSummary, "Sent 2 to Google Drive.")
+    }
+
+    func testEveryVideoIsPutInLineForSearchInOneRequest() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1 https://b.example.com/2 https://c.example.com/3", addToVault: true)
+        let vault = StandInVault(events: events)
+
+        try await send(model, vault: vault)
+
+        XCTAssertEqual(vault.searchRequests, 1)
+        XCTAssertEqual(events.value.filter { $0.hasPrefix("index ") }.count, 3)
     }
 
     func testAVaultThatWillNotLockSaysSoFirst() async throws {
@@ -455,6 +489,18 @@ final class VaultMoveInTests: XCTestCase {
         model.usesTouchID = false
         await model.unlock(password: Self.password)
         XCTAssertNil(keeper.saved)
+    }
+
+    func testSeveralFilesAreAnsweredTogetherAndEachAnswerIsCounted() async throws {
+        let (model, dir) = try await makeVault("search-together", keeper: StandInKeeper(answer: .cancelled))
+        let first = try await model.moveIn(try await VaultTestMedia.video(at: dir.appendingPathComponent("one.mov"), seconds: 1))
+        let second = try await model.moveIn(try await VaultTestMedia.video(at: dir.appendingPathComponent("two.mov"), seconds: 1))
+        var answers: [Int] = []
+
+        let searchable = await model.makeSearchable([first, second]) { answers.append($0) }
+
+        XCTAssertEqual(answers, [1, 2])
+        XCTAssertEqual(searchable, EmbeddingModel.locate() == nil ? 0 : 2)
     }
 
     func testMoveInLandsTheFileInTheVaultAndMakeSearchableAnswers() async throws {

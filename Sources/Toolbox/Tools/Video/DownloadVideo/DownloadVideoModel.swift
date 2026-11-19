@@ -251,7 +251,7 @@ final class DownloadVideoModel {
                 let inVault = try await vault.moveIn(video.file)
                 update(video.id) { $0.state = .inVault(inVault); $0.vaultProblem = nil }
                 moved.append(inVault)
-            } catch VaultMoveError.vaultNotOpen, VaultMoveError.busy {
+            } catch VaultMoveError.vaultNotOpen, VaultMoveError.busy, VaultMoveError.interrupted {
                 keptOut.append(video.file)
             } catch VaultMoveError.originalKept(let reason, let copy) {
                 update(video.id) { $0.state = .inVault(copy); $0.vaultProblem = "The copy in Downloads couldn't be deleted, so Clear leaves it there: \(reason)" }
@@ -264,10 +264,12 @@ final class DownloadVideoModel {
             }
         }
         report.moved = moved.count
-        for (done, file) in moved.enumerated() {
-            guard vault.acceptsFiles else { break }
-            sendState = .makingSearchable(done: done, total: moved.count)
-            if await !vault.makeSearchable(file) { report.notSearchable += 1 }
+        if vault.acceptsFiles, !moved.isEmpty {
+            sendState = .makingSearchable(done: 0, total: moved.count)
+            let searchable = await vault.makeSearchable(moved) { answered in
+                if answered < moved.count { sendState = .makingSearchable(done: answered, total: moved.count) }
+            }
+            report.notSearchable = moved.count - searchable
         }
         return (report, keptOut)
     }
