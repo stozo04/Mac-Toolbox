@@ -95,7 +95,7 @@ final class DownloadToVaultTests: XCTestCase {
                                       "drive vault a.example.com.mp4, vault b.example.com.mp4", "lock"])
         XCTAssertEqual(model.items.map(\.state), [.inVault(vault.root.appendingPathComponent("vault a.example.com.mp4")),
                                                   .inVault(vault.root.appendingPathComponent("vault b.example.com.mp4"))])
-        XCTAssertEqual(model.sendSummary, "Sent 2 to Google Drive.")
+        XCTAssertEqual(model.sendSummary, "Added 2 to the Vault and sent 2 to Google Drive. The Vault is locked again.")
     }
 
     func testWithoutAddToVaultTheDownloadsAreSentAndTheVaultIsNeverTouched() async throws {
@@ -168,7 +168,7 @@ final class DownloadToVaultTests: XCTestCase {
         XCTAssertEqual(refused.state, .done(inDownloads("b.example.com.mp4")))
         XCTAssertEqual(refused.vaultProblem, VaultMoveError.copyDiffers.localizedDescription)
         XCTAssertEqual(model.sendSummary,
-                       "Sent 1 to Google Drive, 1 couldn't go into the Vault and weren't sent, 1 not searchable yet.")
+                       "Added 1 to the Vault and sent 1 to Google Drive, 1 couldn't go into the Vault and weren't sent, 1 not searchable yet. The Vault is locked again.")
     }
 
     func testAVideoInTheVaultWhoseOriginalStayedCountsAsMovedAndIsSentOnce() async throws {
@@ -211,7 +211,7 @@ final class DownloadToVaultTests: XCTestCase {
 
         XCTAssertEqual(events.value, ["touch id", "move a.example.com.mp4", "drive b.example.com.mp4", "lock"])
         XCTAssertEqual(model.sendSummary,
-                       "Sent 1 to Google Drive, 1 in the Vault weren't sent because it locked; send again.")
+                       "Added 1 to the Vault and sent 1 to Google Drive, 1 in the Vault weren't sent because it locked; send again. The Vault is locked again.")
     }
 
     func testAVaultThatWillNotLockSaysSoFirst() async throws {
@@ -221,7 +221,7 @@ final class DownloadToVaultTests: XCTestCase {
 
         try await send(model, vault: vault)
 
-        XCTAssertEqual(model.sendSummary, DownloadVideoModel.vaultStillOpen + " Sent 1 to Google Drive.")
+        XCTAssertEqual(model.sendSummary, DownloadVideoModel.vaultStillOpen + " Added 1 to the Vault and sent 1 to Google Drive.")
     }
 
     func testTheVaultLocksEvenWhenGoogleDriveFails() async throws {

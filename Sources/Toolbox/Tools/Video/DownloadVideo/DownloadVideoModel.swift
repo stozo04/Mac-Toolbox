@@ -314,7 +314,9 @@ final class DownloadVideoModel {
     private static func summary(of result: DriveSender.Result, vault: VaultSendReport?) -> String {
         var sentences: [String] = []
         if vault?.stillOpen == true { sentences.append(vaultStillOpen) }
-        var parts = ["Sent \(result.copied) to Google Drive"]
+        let added = vault.map { $0.notAddedBecause == nil ? $0.moved : 0 } ?? 0
+        var parts = [added > 0 ? "Added \(added) to the Vault and sent \(result.copied) to Google Drive"
+                               : "Sent \(result.copied) to Google Drive"]
         if result.skipped > 0 { parts.append("\(result.skipped) already there") }
         if result.missing > 0 { parts.append("\(result.missing) no longer on disk") }
         if let vault {
@@ -326,6 +328,7 @@ final class DownloadVideoModel {
         }
         sentences.append(parts.joined(separator: ", ") + ".")
         if let reason = vault?.notAddedBecause { sentences.append("Not added to the Vault: \(reason)") }
+        if added > 0, vault?.stillOpen == false { sentences.append("The Vault is locked again.") }
         return sentences.joined(separator: " ")
     }
 
