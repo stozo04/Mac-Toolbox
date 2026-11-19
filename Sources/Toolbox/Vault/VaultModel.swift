@@ -48,7 +48,10 @@ final class VaultModel {
 
     let door: VaultDoor
     let passwordKeeper: VaultPasswordKeeper
-    var usesTouchID: Bool
+    var usesTouchID: Bool {
+        didSet { if !usesTouchID { passwordKeeper.forget() } }
+    }
+    @ObservationIgnored var searchWaitLimit: Duration = .seconds(180)
     var disk: VaultDisk { door.disk }
     private(set) var lockCount = 0
     private var lockInFlight: Task<Void, Never>?
@@ -62,7 +65,7 @@ final class VaultModel {
     private var indexAgain = false
     private(set) var searchFailures: Set<VaultItem.ID> = []
     private var searchFirst: [VaultItem.ID] = []
-    private var searchWaiters: [VaultItem.ID: [CheckedContinuation<Bool, Never>]] = [:]
+    private var searchWaiters: [VaultItem.ID: [UUID: CheckedContinuation<Bool, Never>]] = [:]
     private var renamesInFlight: Set<VaultItem.ID> = []
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
@@ -471,7 +474,7 @@ final class VaultModel {
     }
 
     private func stopSearch() {
-        searchWaiters.values.joined().forEach { $0.resume(returning: false) }
+        searchWaiters.values.flatMap(\.values).forEach { $0.resume(returning: false) }
         searchWaiters = [:]
         indexTask?.cancel()
         indexTask = nil
@@ -496,6 +499,7 @@ final class VaultModel {
                 indexAgain = false
                 await index(with: engine)
             } while indexAgain && !Task.isCancelled && searchEngine === engine
+            guard searchEngine === engine else { return }
             await answerSearchWaiters(using: engine)
             guard searchEngine === engine else { return }
             indexTask = nil
@@ -821,6 +825,7 @@ extension VaultModel {
             try passwordKeeper.save(password)
         } catch {
             usesTouchID = false
+            passwordKeeper.forget()
             VaultLog.failure("Saving the vault password for Touch ID failed", error)
         }
     }
@@ -851,8 +856,8 @@ extension VaultModel {
         return moved
     }
 
-    /// Puts the file first in line for the search index and waits for it. False when there is no search model,
-    /// the file could not be read, or the vault locked first.
+    /// Puts the file first in line for the search index and waits for it, at most `searchWaitLimit`. False when there is
+    /// no search model, the file could not be read, the vault locked first, or the wait ran out.
     func makeSearchable(_ file: URL) async -> Bool {
         guard phase == .open, !isLocking,
               let item = items.first(where: { $0.url.standardizedFileURL == file.standardizedFileURL }) else { return false }
@@ -861,9 +866,15 @@ extension VaultModel {
         searchFailures.remove(item.id)
         searchFirst.removeAll { $0 == item.id }
         searchFirst.insert(item.id, at: 0)
+        let limit = searchWaitLimit
         return await withCheckedContinuation { waiter in
-            searchWaiters[item.id, default: []].append(waiter)
+            let token = UUID()
+            searchWaiters[item.id, default: [:]][token] = waiter
             refreshIndex()
+            Task { [weak self] in
+                try? await Task.sleep(for: limit)
+                self?.searchWaiters[item.id]?.removeValue(forKey: token)?.resume(returning: false)
+            }
         }
     }
 
@@ -879,7 +890,7 @@ extension VaultModel {
     }
 
     private func answerSearchWaiters(for id: VaultItem.ID, searchable: Bool) {
-        searchWaiters.removeValue(forKey: id)?.forEach { $0.resume(returning: searchable) }
+        searchWaiters.removeValue(forKey: id)?.values.forEach { $0.resume(returning: searchable) }
     }
 
     /// Files that were already indexed never come up as pending, so whoever still waits is answered from the index itself.
@@ -889,7 +900,7 @@ extension VaultModel {
         for (id, waiters) in waiting {
             var searchable = false
             if let item = items.first(where: { $0.id == id }) { searchable = (try? await engine.coverage(of: item)) != nil }
-            waiters.forEach { $0.resume(returning: searchable) }
+            waiters.values.forEach { $0.resume(returning: searchable) }
         }
     }
 

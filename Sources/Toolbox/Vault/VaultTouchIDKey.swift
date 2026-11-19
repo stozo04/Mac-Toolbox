@@ -24,11 +24,16 @@ protocol VaultPasswordKeeper: AnyObject {
 final class VaultTouchIDKey: VaultPasswordKeeper {
     static let fileName = "TouchID.key"
     static let attempts = 3
+    static let notSetUp = "Touch ID isn't set up for the Vault yet. Unlock it once on the Vault page with \"Use Touch ID\" on."
+    static let notRecognized = "Touch ID didn't recognize your finger."
+    static let lockedOut = "Touch ID is locked after too many tries. Unlock your Mac with its password to turn it back on."
+    static let fingerprintsChanged = "Your fingerprints changed since Touch ID was set up for the Vault. Unlock it once on the Vault page to set it up again."
 
-    private struct Sealed: Codable {
+    struct Sealed: Codable, Equatable {
         let enclaveKey: Data
         let ephemeralPublicKey: Data
         let box: Data
+        var fingerprints: Data?
     }
 
     enum KeyError: LocalizedError {
@@ -57,14 +62,9 @@ final class VaultTouchIDKey: VaultPasswordKeeper {
             throw KeyError.unreadable
         }
         let enclaveKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: access)
-        let ephemeral = P256.KeyAgreement.PrivateKey()
-        let secret = try ephemeral.sharedSecretFromKeyAgreement(with: enclaveKey.publicKey)
-        let box = try AES.GCM.seal(Data(password.utf8), using: Self.boxKey(from: secret, ephemeral: ephemeral.publicKey))
-        guard let combined = box.combined else { throw KeyError.unreadable }
-        let sealed = Sealed(enclaveKey: enclaveKey.dataRepresentation, ephemeralPublicKey: ephemeral.publicKey.rawRepresentation, box: combined)
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(sealed).write(to: file, options: [.atomic, .completeFileProtection])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        var sealed = try Self.seal(password, to: enclaveKey.publicKey, enclaveKey: enclaveKey.dataRepresentation)
+        sealed.fingerprints = Self.currentFingerprints()
+        try write(JSONEncoder().encode(sealed))
     }
 
     func forget() {
@@ -73,14 +73,14 @@ final class VaultTouchIDKey: VaultPasswordKeeper {
 
     func password(reason: String) async -> VaultKeyAnswer {
         guard let data = try? Data(contentsOf: file), let sealed = try? JSONDecoder().decode(Sealed.self, from: data) else {
-            return .failed("Touch ID isn't set up for the Vault yet. Unlock it once on the Vault page with \"Use Touch ID\" on.")
+            return .failed(Self.notSetUp)
         }
         for attempt in 1...Self.attempts {
             let context = LAContext()
             context.localizedFallbackTitle = ""
             var unavailable: NSError?
             guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &unavailable) else {
-                return .failed("Touch ID isn't available right now.")
+                return .failed(Self.message(for: (unavailable as? LAError)?.code))
             }
             do {
                 try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
@@ -90,28 +90,69 @@ final class VaultTouchIDKey: VaultPasswordKeeper {
             } catch let error as LAError where error.code == .authenticationFailed && attempt < Self.attempts {
                 continue
             } catch {
-                return .failed("Touch ID didn't recognize your finger.")
+                return .failed(Self.message(for: (error as? LAError)?.code))
             }
         }
-        return .failed("Touch ID didn't recognize your finger.")
+        return .failed(Self.notRecognized)
+    }
+
+    private static func message(for code: LAError.Code?) -> String {
+        switch code {
+        case .biometryLockout?: lockedOut
+        case .biometryNotEnrolled?: "No fingerprints are set up on this Mac. Add one in System Settings > Touch ID & Password."
+        case .biometryNotAvailable?, .biometryDisconnected?: "Touch ID isn't available right now."
+        default: notRecognized
+        }
     }
 
     private func open(_ sealed: Sealed, with context: LAContext) -> VaultKeyAnswer {
         do {
             let enclaveKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: sealed.enclaveKey,
                                                                             authenticationContext: context)
-            let ephemeral = try P256.KeyAgreement.PublicKey(rawRepresentation: sealed.ephemeralPublicKey)
-            let secret = try enclaveKey.sharedSecretFromKeyAgreement(with: ephemeral)
-            let box = try AES.GCM.SealedBox(combined: sealed.box)
-            let password = try AES.GCM.open(box, using: Self.boxKey(from: secret, ephemeral: ephemeral))
-            guard let text = String(data: password, encoding: .utf8) else { throw KeyError.unreadable }
-            return .password(text)
+            return .password(try Self.unseal(sealed) { try enclaveKey.sharedSecretFromKeyAgreement(with: $0) })
         } catch {
-            // A fingerprint added or removed since saving retires the enclave key for good.
-            forget()
-            Log.warning("Vault Touch ID key no longer opens", category: VaultLog.category, Log.details(error))
-            return .failed("Your fingerprints changed since Touch ID was set up for the Vault. Unlock it once on the Vault page to set it up again.")
+            // Only a changed set of fingerprints retires the enclave key for good; anything else may pass, so the key stays.
+            let changed = sealed.fingerprints != nil && sealed.fingerprints != context.evaluatedPolicyDomainState
+            if changed { forget() }
+            Log.warning("Vault Touch ID key did not open", category: VaultLog.category,
+                        Log.details(error, ["fingerprints_changed": String(changed)]))
+            return .failed(changed ? Self.fingerprintsChanged : "Touch ID couldn't open the saved key. Try again.")
         }
+    }
+
+    private func write(_ data: Data) throws {
+        let folder = file.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let fresh = folder.appendingPathComponent(".\(Self.fileName)-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: fresh.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+            throw KeyError.unreadable
+        }
+        guard rename(fresh.path, file.path) == 0 else {
+            try? FileManager.default.removeItem(at: fresh)
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    private static func currentFingerprints() -> Data? {
+        let context = LAContext()
+        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return context.evaluatedPolicyDomainState
+    }
+
+    static func seal(_ password: String, to publicKey: P256.KeyAgreement.PublicKey, enclaveKey: Data) throws -> Sealed {
+        let ephemeral = P256.KeyAgreement.PrivateKey()
+        let secret = try ephemeral.sharedSecretFromKeyAgreement(with: publicKey)
+        let box = try AES.GCM.seal(Data(password.utf8), using: boxKey(from: secret, ephemeral: ephemeral.publicKey))
+        guard let combined = box.combined else { throw KeyError.unreadable }
+        return Sealed(enclaveKey: enclaveKey, ephemeralPublicKey: ephemeral.publicKey.rawRepresentation, box: combined)
+    }
+
+    static func unseal(_ sealed: Sealed, agree: (P256.KeyAgreement.PublicKey) throws -> SharedSecret) throws -> String {
+        let ephemeral = try P256.KeyAgreement.PublicKey(rawRepresentation: sealed.ephemeralPublicKey)
+        let box = try AES.GCM.SealedBox(combined: sealed.box)
+        let password = try AES.GCM.open(box, using: boxKey(from: try agree(ephemeral), ephemeral: ephemeral))
+        guard let text = String(data: password, encoding: .utf8) else { throw KeyError.unreadable }
+        return text
     }
 
     private static func boxKey(from secret: SharedSecret, ephemeral: P256.KeyAgreement.PublicKey) -> SymmetricKey {

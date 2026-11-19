@@ -9,6 +9,7 @@ enum VaultLog {
     }
 
     static func details(_ error: Error, file: URL?, _ context: [String: String] = [:]) -> [String: String] {
+        let error = (error as? VaultMoveError)?.withoutVaultPath ?? error
         var metadata = Log.details(error, file: nil, context)
         if let file {
             metadata = metadata.mapValues { hideName(of: file, in: $0) }

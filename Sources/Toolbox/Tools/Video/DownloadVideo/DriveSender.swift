@@ -15,6 +15,8 @@ enum DriveSender {
     }
 
     /// `$TOOLBOX_DRIVE_FOLDER` (debug builds only) stands in for Google Drive, so a test run never uploads anything.
+    static let partialPrefix = ".toolbox-partial-"
+
     static var driveRoot: URL {
         #if DEBUG
         if let override = ProcessInfo.processInfo.environment["TOOLBOX_DRIVE_FOLDER"] {
@@ -36,6 +38,8 @@ enum DriveSender {
         let fm = FileManager.default
         guard fm.fileExists(atPath: root.path) else { throw DriveError.notMounted }
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        let leftovers = (try? fm.contentsOfDirectory(atPath: destination.path)) ?? []
+        for name in leftovers where name.hasPrefix(partialPrefix) { try? fm.removeItem(at: destination.appendingPathComponent(name)) }
         var result = Result()
         for file in files {
             let target = destination.appendingPathComponent(file.lastPathComponent)
@@ -48,7 +52,7 @@ enum DriveSender {
                 continue
             }
             // A copy cut off halfway must never sit under the real name, or every later send would skip it.
-            let partial = destination.appendingPathComponent(".toolbox-partial-" + file.lastPathComponent)
+            let partial = destination.appendingPathComponent(partialPrefix + file.lastPathComponent)
             try? fm.removeItem(at: partial)
             do {
                 try fm.copyItem(at: file, to: partial)

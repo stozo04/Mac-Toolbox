@@ -114,7 +114,7 @@ final class DownloadToVaultTests: XCTestCase {
 
         try await send(model, vault: vault)
 
-        XCTAssertEqual(events.value, ["touch id", "lock", "drive a.example.com.mp4"])
+        XCTAssertEqual(events.value, ["touch id", "drive a.example.com.mp4"], "a vault Touch ID never opened is not locked")
         XCTAssertEqual(model.items.map(\.state), [.done(inDownloads("a.example.com.mp4"))])
         XCTAssertEqual(model.sendSummary,
                        "Sent 1 to Google Drive. Not added to the Vault: Touch ID didn't recognize your finger.")
@@ -333,6 +333,46 @@ final class VaultMoveInTests: XCTestCase {
         XCTAssertTrue(keeper.hasPassword, "a missed finger is not a reason to forget the password")
     }
 
+    func testUntickingTouchIDForgetsThePasswordAtOnce() async throws {
+        let keeper = StandInKeeper(answer: .password(Self.password))
+        let (model, _) = try await makeVault("touch-untick", keeper: keeper)
+        model.usesTouchID = true
+        await model.lock()
+
+        model.usesTouchID = false
+        let opening = await model.openWithTouchID()
+
+        XCTAssertNil(keeper.saved)
+        XCTAssertEqual(opening, .unavailable(VaultTouchIDKey.notSetUp))
+        XCTAssertFalse(model.disk.isOpen)
+    }
+
+    func testAPasswordChangeReSealsTheSavedPassword() async throws {
+        let keeper = StandInKeeper(answer: .cancelled)
+        let (model, _) = try await makeVault("touch-change", keeper: keeper)
+        model.usesTouchID = true
+        await model.lock()
+        await model.unlock(password: Self.password)
+        XCTAssertEqual(keeper.saved, Self.password)
+
+        let changed = await model.changePassword(current: Self.password, new: "changed-pass-9", confirmation: "changed-pass-9")
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(keeper.saved, "changed-pass-9")
+    }
+
+    func testASearchWaitThatRunsOutAnswersNotSearchable() async throws {
+        guard EmbeddingModel.locate() != nil else { throw XCTSkip("EmbeddingGemma 2 isn't on this Mac") }
+        let (model, dir) = try await makeVault("search-limit", keeper: StandInKeeper(answer: .cancelled))
+        model.searchWaitLimit = .milliseconds(1)
+        let video = try await VaultTestMedia.video(at: dir.appendingPathComponent("long.mov"), seconds: 20)
+        let landed = try await model.moveIn(video)
+
+        let searchable = await model.makeSearchable(landed)
+
+        XCTAssertFalse(searchable)
+    }
+
     func testUnlockingSavesThePasswordOnlyWhenTouchIDIsTicked() async throws {
         let keeper = StandInKeeper(answer: .cancelled, saved: nil)
         let (model, _) = try await makeVault("touch-save", keeper: keeper)
@@ -409,8 +449,30 @@ final class VaultMoveInTests: XCTestCase {
 
 @MainActor
 final class VaultTouchIDKeyTests: XCTestCase {
+    func testASealedPasswordOpensOnlyWithItsOwnKey() throws {
+        let key = P256.KeyAgreement.PrivateKey(), stranger = P256.KeyAgreement.PrivateKey()
+        let sealed = try VaultTouchIDKey.seal("round-trip-pass", to: key.publicKey, enclaveKey: Data())
+
+        XCTAssertEqual(try VaultTouchIDKey.unseal(sealed) { try key.sharedSecretFromKeyAgreement(with: $0) }, "round-trip-pass")
+        XCTAssertThrowsError(try VaultTouchIDKey.unseal(sealed) { try stranger.sharedSecretFromKeyAgreement(with: $0) })
+        XCTAssertNil(sealed.box.range(of: Data("round-trip-pass".utf8)))
+    }
+
+    func testAVaultFileNameNeverReachesTheLogs() {
+        let original = URL(fileURLWithPath: "/Users/someone/Downloads/My Clip [abc].mp4")
+        let copy = URL(fileURLWithPath: "/Users/someone/Library/Open.noindex/My Clip [abc].mp4")
+        let error = VaultMoveError.originalKept("“My Clip [abc].mp4” couldn't be removed.", copy: copy)
+
+        let logged = VaultLog.details(error, file: original).values.joined(separator: " ")
+
+        XCTAssertFalse(logged.contains("My Clip"), logged)
+        XCTAssertFalse(logged.contains("My%20Clip"), logged)
+    }
+
     func testThePasswordIsSavedSealedAndForgotten() throws {
-        guard SecureEnclave.isAvailable else { throw XCTSkip("No Secure Enclave on this Mac") }
+        guard SecureEnclave.isAvailable, VaultTouchIDKey(file: URL(fileURLWithPath: "/dev/null")).isAvailable else {
+            throw XCTSkip("No Touch ID on this Mac")
+        }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("touch-key-\(UUID())")
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
         let key = VaultTouchIDKey(file: folder.appendingPathComponent(VaultTouchIDKey.fileName))

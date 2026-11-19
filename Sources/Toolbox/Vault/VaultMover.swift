@@ -18,6 +18,12 @@ enum VaultMoveError: LocalizedError, Equatable {
     case notSaved(String)
     case originalKept(String, copy: URL)
 
+    /// The copy's path names a file inside the vault, so it is dropped before the error is logged.
+    var withoutVaultPath: VaultMoveError {
+        if case .originalKept(let reason, _) = self { return .originalKept(reason, copy: URL(fileURLWithPath: "/")) }
+        return self
+    }
+
     var errorDescription: String? {
         switch self {
         case .unsupportedType: "Only photos and videos can go in the vault."

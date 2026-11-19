@@ -59,6 +59,18 @@ final class DriveSenderTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dest.path), [])
     }
 
+    func testALeftoverPartialCopyIsRemovedOnTheNextSend() throws {
+        let a = try makeFile("a.mp4")
+        let root = base.appendingPathComponent("drive")
+        let dest = root.appendingPathComponent("verified")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        try Data("half".utf8).write(to: dest.appendingPathComponent(DriveSender.partialPrefix + "old.mp4"))
+
+        _ = try DriveSender.send([a], to: dest, root: root)
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dest.path), ["a.mp4"])
+    }
+
     func testThrowsWhenDriveIsNotMounted() throws {
         let a = try makeFile("a.mp4")
         let root = base.appendingPathComponent("no-drive")

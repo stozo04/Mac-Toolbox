@@ -24,16 +24,17 @@ extension VaultModel: DownloadVault {
 
     func openWithTouchID() async -> DownloadVaultOpening {
         if acceptsFiles { return .opened }
-        guard passwordKeeper.hasPassword else {
-            return .unavailable("Touch ID isn't set up for the Vault yet. Unlock it once on the Vault page with \"Use Touch ID\" on.")
-        }
+        guard usesTouchID, passwordKeeper.hasPassword else { return .unavailable(VaultTouchIDKey.notSetUp) }
         switch await passwordKeeper.password(reason: Self.touchIDReason) {
         case .cancelled:
             return .cancelled
         case .failed(let reason):
             return .unavailable(reason)
         case .password(let password):
-            switch await openQuietly(password: password) {
+            if acceptsFiles { return .opened }
+            let outcome = await openQuietly(password: password)
+            if case .refused? = outcome, door.state == .open { _ = await lockAndConfirm() }
+            switch outcome {
             case .opened? where acceptsFiles:
                 return .opened
             case .refused(.wrongPassword)?:
@@ -50,17 +51,19 @@ extension VaultModel: DownloadVault {
         }
     }
 
-    /// Locks, then believes it only when the door's own answer, its state and the disk all say locked.
+    /// Locks, then believes it only when the door's answer to the lock, its state and a second ask of the door all say locked.
+    /// A vault another copy of Toolbox has open is not this copy's to lock.
     func lockAndConfirm() async -> Bool {
         for attempt in 1...Self.lockAttempts {
             await lockImmediately().value
-            let doorSaysLocked = lastLockFailure == nil
-            let stateSaysLocked = door.state == .closed
-            let diskSaysLocked = !disk.isOpen
-            if doorSaysLocked && stateSaysLocked && diskSaysLocked && phase != .open { return true }
+            if door.state == .openElsewhere { return true }
+            let lockSucceeded = lastLockFailure == nil
+            let doorIsClosed = door.state == .closed
+            let doorConfirms = await door.lock() == .locked
+            if lockSucceeded && doorIsClosed && doorConfirms && phase != .open { return true }
             Log.warning("Vault not locked after adding downloads", category: VaultLog.category,
-                        ["attempt": String(attempt), "door": String(doorSaysLocked), "state": String(stateSaysLocked),
-                         "disk": String(diskSaysLocked)])
+                        ["attempt": String(attempt), "lock": String(lockSucceeded), "state": String(doorIsClosed),
+                         "confirmed": String(doorConfirms)])
         }
         Log.error("Vault still open after adding downloads", category: VaultLog.category,
                   ["reason": lastLockFailure ?? "unknown"])

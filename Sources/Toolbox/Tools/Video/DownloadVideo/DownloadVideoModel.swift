@@ -201,8 +201,8 @@ final class DownloadVideoModel {
     }
 
     private func sendFromDownloads(_ downloads: [Download], report: VaultSendReport?) async {
-        guard !downloads.isEmpty || report != nil else {
-            sendState = .failed(Self.onlyInVault)
+        guard !downloads.isEmpty else {
+            sendState = .failed(report?.notAddedBecause.map { "These videos are in the Vault and weren't sent. \($0)" } ?? Self.onlyInVault)
             return
         }
         finishSend(await copyToDrive(downloads.map(\.file), fromVault: false), report: report)
@@ -213,10 +213,8 @@ final class DownloadVideoModel {
         case .cancelled:
             sendState = .failed(Self.touchIDCancelled)
         case .unavailable(let reason):
-            var report = VaultSendReport(notAddedBecause: reason)
-            report.stillOpen = !(await vault.lockAndConfirm())
             sendState = .sending
-            await sendFromDownloads(downloads, report: report)
+            await sendFromDownloads(downloads, report: VaultSendReport(notAddedBecause: reason))
         case .opened:
             let videos = downloads.filter { VaultItem.kind(of: $0.file) != nil }
             let others = downloads.filter { VaultItem.kind(of: $0.file) == nil }
@@ -291,8 +289,10 @@ final class DownloadVideoModel {
                       "not_searchable": String(report?.notSearchable ?? 0), "vault_used": String(report?.notAddedBecause == nil),
                       "vault_still_open": String(report?.stillOpen ?? false)])
         case .failure(let error):
-            let message = error.localizedDescription
-            sendState = .failed(report?.stillOpen == true ? Self.vaultStillOpen + " " + message : message)
+            var sentences = [error.localizedDescription]
+            if report?.stillOpen == true { sentences.insert(Self.vaultStillOpen, at: 0) }
+            if let reason = report?.notAddedBecause { sentences.append("Not added to the Vault: \(reason)") }
+            sendState = .failed(sentences.joined(separator: " "))
         }
     }
 
