@@ -96,6 +96,7 @@ struct VaultDoorView: View {
     @State private var wheelTurn: Angle = .zero
     @State private var swing: Double = 0
     @State private var fade: Double = 1
+    @State private var touchIDAvailable = false
     @FocusState private var focused: Bool
 
     static let doorSize: CGFloat = 300
@@ -123,6 +124,10 @@ struct VaultDoorView: View {
         .onAppear {
             focused = true
             prefillDebugPassword()
+            touchIDAvailable = vault.passwordKeeper.isAvailable
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            touchIDAvailable = vault.passwordKeeper.isAvailable
         }
     }
 
@@ -150,7 +155,7 @@ struct VaultDoorView: View {
             } else {
                 SecureField("Vault password", text: $password).focused($focused).onSubmit(submit)
             }
-            if vault.passwordKeeper.isAvailable {
+            if touchIDAvailable || vault.usesTouchID {
                 @Bindable var vault = vault
                 Toggle("Use Touch ID to add downloads", isOn: $vault.usesTouchID)
                     .toggleStyle(.checkbox).font(.callout)

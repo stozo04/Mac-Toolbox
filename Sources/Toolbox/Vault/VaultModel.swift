@@ -67,7 +67,7 @@ final class VaultModel {
     private var indexAgain = false
     private(set) var searchFailures: Set<VaultItem.ID> = []
     private var searchFirst: [VaultItem.ID] = []
-    private var searchWaiters: [VaultItem.ID: [UUID: CheckedContinuation<Bool, Never>]] = [:]
+    private let searchWaiters = VaultSearchWaiters()
     private var renamesInFlight: Set<VaultItem.ID> = []
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
@@ -478,8 +478,7 @@ final class VaultModel {
     }
 
     private func stopSearch() {
-        searchWaiters.values.flatMap(\.values).forEach { $0.resume(returning: false) }
-        searchWaiters = [:]
+        searchWaiters.answerAll(searchable: false)
         indexTask?.cancel()
         indexTask = nil
         queryTask?.cancel()
@@ -504,7 +503,10 @@ final class VaultModel {
                 await index(with: engine)
             } while indexAgain && !Task.isCancelled && searchEngine === engine
             guard searchEngine === engine else { return }
-            await answerSearchWaiters(using: engine)
+            await searchWaiters.answerEach { id in
+                guard let item = items.first(where: { $0.id == id }) else { return false }
+                return (try? await engine.coverage(of: item)) != nil
+            }
             guard searchEngine === engine else { return }
             indexTask = nil
             if indexAgain { refreshIndex() }
@@ -525,7 +527,7 @@ final class VaultModel {
                 do {
                     try await engine.index(item)
                     searchFailures.remove(item.id)
-                    answerSearchWaiters(for: item.id, searchable: true)
+                    searchWaiters.answer(item.id, searchable: true)
                 } catch VaultSearchError.closed {
                     return
                 } catch is CancellationError {
@@ -533,12 +535,12 @@ final class VaultModel {
                 } catch let error as VaultSearchError {
                     throw error
                 } catch where !FileManager.default.fileExists(atPath: item.url.path) {
-                    answerSearchWaiters(for: item.id, searchable: false)
+                    searchWaiters.answer(item.id, searchable: false)
                     continue
                 } catch {
                     unreadable += 1
                     searchFailures.insert(item.id)
-                    answerSearchWaiters(for: item.id, searchable: false)
+                    searchWaiters.answer(item.id, searchable: false)
                     VaultLog.failure("Vault search indexing failed", error, file: item.url)
                 }
                 done += 1
@@ -775,6 +777,7 @@ extension VaultModel {
         if let look = looks.removeValue(forKey: item) { looks[renamed] = look }
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
         searchFirst = searchFirst.map { $0 == item.id ? renamed.id : $0 }
+        searchWaiters.carry(from: item.id, to: renamed.id)
         if selection.remove(item.id) != nil { selection.insert(renamed.id) }
         if viewing == item.id { viewing = renamed.id }
         if detailing == item.id { detailing = renamed.id }
@@ -873,15 +876,7 @@ extension VaultModel {
         searchFirst.removeAll { $0 == item.id }
         searchFirst.insert(item.id, at: 0)
         let limit = limit ?? searchWaitLimit
-        return await withCheckedContinuation { waiter in
-            let token = UUID()
-            searchWaiters[item.id, default: [:]][token] = waiter
-            refreshIndex()
-            Task { [weak self] in
-                try? await Task.sleep(for: limit)
-                self?.searchWaiters[item.id]?.removeValue(forKey: token)?.resume(returning: false)
-            }
-        }
+        return await searchWaiters.wait(for: item.id, atMost: limit) { refreshIndex() }
     }
 
     /// Files asked for by name go first, even ones that arrived after this pass listed what was pending.
@@ -890,24 +885,9 @@ extension VaultModel {
             searchFirst.removeFirst()
             if let queued = queue.firstIndex(where: { $0.id == id }) { return queue.remove(at: queued) }
             if let item = items.first(where: { $0.id == id }) { return item }
-            answerSearchWaiters(for: id, searchable: false)
+            searchWaiters.answer(id, searchable: false)
         }
         return queue.isEmpty ? nil : queue.removeFirst()
-    }
-
-    private func answerSearchWaiters(for id: VaultItem.ID, searchable: Bool) {
-        searchWaiters.removeValue(forKey: id)?.values.forEach { $0.resume(returning: searchable) }
-    }
-
-    /// Files that were already indexed never come up as pending, so whoever still waits is answered from the index itself.
-    private func answerSearchWaiters(using engine: VaultSearchEngine) async {
-        let waiting = searchWaiters
-        searchWaiters = [:]
-        for (id, waiters) in waiting {
-            var searchable = false
-            if let item = items.first(where: { $0.id == id }) { searchable = (try? await engine.coverage(of: item)) != nil }
-            waiters.values.forEach { $0.resume(returning: searchable) }
-        }
     }
 
     func addToSearch(_ item: VaultItem) {

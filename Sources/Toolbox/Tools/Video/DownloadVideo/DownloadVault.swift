@@ -8,6 +8,13 @@ enum DownloadVaultOpening: Equatable {
     case unavailable(String, stillOpen: Bool = false)
 }
 
+enum VaultLockCheck: Equatable {
+    case locked
+    /// Another copy of Toolbox opened it, so this copy has nothing to lock and cannot say it is locked.
+    case heldByAnotherCopy
+    case stillOpen
+}
+
 /// The part of the vault Download Video uses, so its tests can stand in for the encrypted disk and Touch ID.
 @MainActor
 protocol DownloadVault: AnyObject {
@@ -15,7 +22,7 @@ protocol DownloadVault: AnyObject {
     func openWithTouchID() async -> DownloadVaultOpening
     func moveIn(_ file: URL) async throws -> URL
     func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int
-    func lockAndConfirm() async -> Bool
+    func lockAndConfirm() async -> VaultLockCheck
 }
 
 extension VaultModel: DownloadVault {
@@ -36,7 +43,7 @@ extension VaultModel: DownloadVault {
             if acceptsFiles { return openedForDownloads ? .opened : .alreadyOpen }
             let outcome = await openQuietly(password: password)
             var stillOpen = false
-            if case .refused? = outcome, door.state == .open { stillOpen = !(await lockAndConfirm()) }
+            if case .refused? = outcome, door.state == .open { stillOpen = await lockAndConfirm() == .stillOpen }
             switch outcome {
             case .opened? where acceptsFiles:
                 return .opened
@@ -79,21 +86,21 @@ extension VaultModel: DownloadVault {
     /// Locks, then believes it only when the door's answer to the lock, its state and its released claim on the vault all say
     /// locked. Every check only reads the door: asking it to lock again would eject behind the model's back.
     /// A vault another copy of Toolbox has open is not this copy's to lock.
-    func lockAndConfirm() async -> Bool {
+    func lockAndConfirm() async -> VaultLockCheck {
         for attempt in 1...Self.lockAttempts {
             await lockImmediately().value
-            if door.state == .openElsewhere { return true }
+            if door.state == .openElsewhere { return .heldByAnotherCopy }
             let lockSucceeded = lastLockFailure == nil
             let doorIsClosed = door.state == .closed
             let claimReleased = !door.holdsOwnership
-            if lockSucceeded && doorIsClosed && claimReleased && phase != .open { return true }
+            if lockSucceeded && doorIsClosed && claimReleased && phase != .open { return .locked }
             Log.warning("Vault not locked after adding downloads", category: VaultLog.category,
                         ["attempt": String(attempt), "lock": String(lockSucceeded), "state": String(doorIsClosed),
                          "claim_released": String(claimReleased)])
         }
         Log.error("Vault still open after adding downloads", category: VaultLog.category,
                   ["reason": lastLockFailure ?? "unknown"])
-        return false
+        return .stillOpen
     }
 }
 
@@ -105,4 +112,8 @@ struct VaultSendReport: Equatable {
     var notAddedBecause: String?
     var stillOpen = false
     var lockedAgain = false
+    var heldByAnotherCopy = false
+    var keptOut = 0
+    var skippedInVault = 0
+    var usedVault = false
 }

@@ -23,7 +23,6 @@ protocol VaultPasswordKeeper: AnyObject {
 @MainActor
 final class VaultTouchIDKey: VaultPasswordKeeper {
     static let fileName = "TouchID.key"
-    static let attempts = 3
     static let notSetUp = "Touch ID isn't set up for the Vault yet. Unlock it once on the Vault page with \"Use Touch ID\" on."
     static let notRecognized = "Touch ID didn't recognize your finger."
     static let lockedOut = "Touch ID is locked after too many tries. Unlock your Mac with its password to turn it back on."
@@ -75,25 +74,22 @@ final class VaultTouchIDKey: VaultPasswordKeeper {
         guard let data = try? Data(contentsOf: file), let sealed = try? JSONDecoder().decode(Sealed.self, from: data) else {
             return .failed(Self.notSetUp)
         }
-        for attempt in 1...Self.attempts {
-            let context = LAContext()
-            context.localizedFallbackTitle = ""
-            var unavailable: NSError?
-            guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &unavailable) else {
-                return .failed(Self.message(for: (unavailable as? LAError)?.code))
-            }
-            do {
-                try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
-                return open(sealed, with: context)
-            } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
-                return .cancelled
-            } catch let error as LAError where error.code == .authenticationFailed && attempt < Self.attempts {
-                continue
-            } catch {
-                return .failed(Self.message(for: (error as? LAError)?.code))
-            }
+        // One prompt: it already lets you try your finger several times, and a second one is what reaches the misses
+        // after which macOS locks Touch ID for the whole Mac until the login password is typed.
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        var unavailable: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &unavailable) else {
+            return .failed(Self.message(for: (unavailable as? LAError)?.code))
         }
-        return .failed(Self.notRecognized)
+        do {
+            try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
+            return open(sealed, with: context)
+        } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
+            return .cancelled
+        } catch {
+            return .failed(Self.message(for: (error as? LAError)?.code))
+        }
     }
 
     private static func message(for code: LAError.Code?) -> String {

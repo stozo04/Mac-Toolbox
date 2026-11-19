@@ -61,6 +61,8 @@ final class DownloadVideoModel {
     static let touchIDCancelled = "Touch ID was cancelled. Nothing was sent."
     static let onlyInVault = "These videos are in the Vault. Tick Add to Vault to send them."
     static let vaultStillOpen = "The Vault didn't lock. Open the Vault page and lock it."
+    static let vaultClosedWhileMoving = "the Vault closed before it went in, so it was sent from Downloads."
+    static let vaultBusy = "the Vault was busy adding other files, so it was sent from Downloads."
     private static let addToVaultKey = "downloadVideo.addToVault"
 
     var linkText = ""
@@ -192,8 +194,9 @@ final class DownloadVideoModel {
         }
         let hasVideos = downloads.contains { VaultItem.kind(of: $0.file) != nil } || !vaultFiles.isEmpty
         guard addToVault, hasVideos, let vault else {
+            let skipped = addToVault ? 0 : vaultFiles.count
             sendState = .sending
-            Task { await sendFromDownloads(downloads, report: nil) }
+            Task { await sendFromDownloads(downloads, report: skipped > 0 ? VaultSendReport(skippedInVault: skipped) : nil) }
             return
         }
         sendState = .unlocking
@@ -223,14 +226,18 @@ final class DownloadVideoModel {
             let videos = downloads.filter { VaultItem.kind(of: $0.file) != nil }
             let others = downloads.filter { VaultItem.kind(of: $0.file) == nil }
             var (report, keptOut) = await moveIn(videos, to: vault)
+            report.usedVault = true
+            report.keptOut = keptOut.count
             let inVault = vault.acceptsFiles ? vaultFiles : []
             if !vault.acceptsFiles { report.lockedBeforeSending = vaultFiles.count }
             let files = others.map(\.file) + keptOut + inVault
             let sent = files.isEmpty ? .success(DriveSender.Result()) : await copyToDrive(files, fromVault: !inVault.isEmpty)
             if openedHere {
                 sendState = .locking
-                report.lockedAgain = await vault.lockAndConfirm()
-                report.stillOpen = !report.lockedAgain
+                let check = await vault.lockAndConfirm()
+                report.lockedAgain = check == .locked
+                report.stillOpen = check == .stillOpen
+                report.heldByAnotherCopy = check == .heldByAnotherCopy
             }
             finishSend(sent, report: report)
         }
@@ -244,6 +251,7 @@ final class DownloadVideoModel {
         for (done, video) in videos.enumerated() {
             guard vault.acceptsFiles else {
                 keptOut.append(video.file)
+                update(video.id) { $0.vaultProblem = Self.vaultClosedWhileMoving }
                 continue
             }
             sendState = .addingToVault(done: done, total: videos.count)
@@ -251,8 +259,12 @@ final class DownloadVideoModel {
                 let inVault = try await vault.moveIn(video.file)
                 update(video.id) { $0.state = .inVault(inVault); $0.vaultProblem = nil }
                 moved.append(inVault)
-            } catch VaultMoveError.vaultNotOpen, VaultMoveError.busy, VaultMoveError.interrupted {
+            } catch VaultMoveError.busy {
                 keptOut.append(video.file)
+                update(video.id) { $0.vaultProblem = Self.vaultBusy }
+            } catch VaultMoveError.vaultNotOpen, VaultMoveError.interrupted {
+                keptOut.append(video.file)
+                update(video.id) { $0.vaultProblem = Self.vaultClosedWhileMoving }
             } catch VaultMoveError.originalKept(let reason, let copy) {
                 update(video.id) { $0.state = .inVault(copy); $0.vaultProblem = "The copy in Downloads couldn't be deleted, so Clear leaves it there: \(reason)" }
                 moved.append(copy)
@@ -295,7 +307,8 @@ final class DownloadVideoModel {
             Log.info("Sent to Google Drive", category: "download",
                      ["copied": String(result.copied), "skipped": String(result.skipped), "missing": String(result.missing),
                       "vault_moved": String(report?.moved ?? 0), "vault_failed": String(report?.failed ?? 0),
-                      "not_searchable": String(report?.notSearchable ?? 0), "vault_used": String(report?.notAddedBecause == nil),
+                      "not_searchable": String(report?.notSearchable ?? 0), "vault_used": String(report?.usedVault ?? false),
+                      "kept_out": String(report?.keptOut ?? 0),
                       "vault_still_open": String(report?.stillOpen ?? false)])
         case .failure(let error):
             var sentences = [error.localizedDescription]
@@ -332,10 +345,15 @@ final class DownloadVideoModel {
             if vault.lockedBeforeSending > 0 {
                 parts.append("\(vault.lockedBeforeSending) in the Vault weren't sent because it locked; send again")
             }
+            if vault.keptOut > 0 { parts.append("\(vault.keptOut) not added to the Vault, sent from Downloads") }
+            if vault.skippedInVault > 0 {
+                parts.append("\(vault.skippedInVault) in the Vault weren't sent; tick Add to Vault to send them")
+            }
         }
         sentences.append(parts.joined(separator: ", ") + ".")
         if let reason = vault?.notAddedBecause { sentences.append("Not added to the Vault: \(reason)") }
         if added > 0, vault?.lockedAgain == true { sentences.append("The Vault is locked again.") }
+        if vault?.heldByAnotherCopy == true { sentences.append("Another copy of Toolbox has the Vault open, so it wasn't locked here.") }
         return sentences.joined(separator: " ")
     }
 

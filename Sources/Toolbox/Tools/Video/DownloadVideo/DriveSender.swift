@@ -14,9 +14,9 @@ enum DriveSender {
         var errorDescription: String? { "Google Drive isn't available. Open Google Drive and try again." }
     }
 
-    /// `$TOOLBOX_DRIVE_FOLDER` (debug builds only) stands in for Google Drive, so a test run never uploads anything.
     static let partialPrefix = ".toolbox-partial-"
 
+    /// `$TOOLBOX_DRIVE_FOLDER` (debug builds only) stands in for Google Drive, so a test run never uploads anything.
     static var driveRoot: URL {
         #if DEBUG
         if let override = ProcessInfo.processInfo.environment["TOOLBOX_DRIVE_FOLDER"] {

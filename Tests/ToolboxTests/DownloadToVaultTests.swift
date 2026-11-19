@@ -13,7 +13,8 @@ private final class StandInVault: DownloadVault {
     var interrupted: Set<String> = []
     private(set) var searchRequests = 0
     var locksAfterMoves: Int?
-    var locks = true
+    var lockCheck = VaultLockCheck.locked
+    var busyFor: Set<String> = []
     let root = URL(fileURLWithPath: "/stand-in-vault")
     let events: Locked<[String]>
     private var moves = 0
@@ -28,6 +29,7 @@ private final class StandInVault: DownloadVault {
 
     func moveIn(_ file: URL) async throws -> URL {
         guard acceptsFiles else { throw VaultMoveError.vaultNotOpen }
+        if busyFor.contains(file.lastPathComponent) { throw VaultMoveError.busy }
         if refused.contains(file.lastPathComponent) { throw VaultMoveError.copyDiffers }
         if interrupted.contains(file.lastPathComponent) {
             acceptsFiles = false
@@ -51,10 +53,10 @@ private final class StandInVault: DownloadVault {
         return searchable ? files.count : 0
     }
 
-    func lockAndConfirm() async -> Bool {
+    func lockAndConfirm() async -> VaultLockCheck {
         events.update { $0.append("lock") }
-        if locks { acceptsFiles = false }
-        return locks
+        if lockCheck == .locked { acceptsFiles = false }
+        return lockCheck
     }
 }
 
@@ -166,6 +168,43 @@ final class DownloadToVaultTests: XCTestCase {
         XCTAssertEqual(model.sendSummary, "Added 1 to the Vault and sent 1 to Google Drive.")
     }
 
+    func testVideosKeptOutBecauseTheVaultWasBusyAreSentAndSaySo() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1 https://b.example.com/2", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.busyFor = ["b.example.com.mp4"]
+
+        try await send(model, vault: vault)
+
+        XCTAssertTrue(events.value.contains("drive b.example.com.mp4, vault a.example.com.mp4"), "\(events.value)")
+        XCTAssertEqual(try model.items.element(at: 1).vaultProblem, DownloadVideoModel.vaultBusy)
+        XCTAssertEqual(model.sendSummary, "Added 1 to the Vault and sent 2 to Google Drive, 1 not added to the Vault, "
+                       + "sent from Downloads. The Vault is locked again.")
+    }
+
+    func testWithAddToVaultOffVaultRowsLeftOutAreNamed() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
+        try await send(model, vault: StandInVault(events: events))
+        model.addToVault = false
+        model.linkText = "https://b.example.com/2"
+        model.start()
+        try await waitUntil("the second download has finished") { !model.isRunning }
+
+        try await send(model, vault: StandInVault(events: events))
+
+        XCTAssertEqual(model.sendSummary, "Sent 1 to Google Drive, 1 in the Vault weren't sent; tick Add to Vault to send them.")
+    }
+
+    func testAVaultAnotherCopyHoldsIsNeverCalledLocked() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.lockCheck = .heldByAnotherCopy
+
+        try await send(model, vault: vault)
+
+        XCTAssertEqual(model.sendSummary, "Added 1 to the Vault and sent 1 to Google Drive. "
+                       + "Another copy of Toolbox has the Vault open, so it wasn't locked here.")
+    }
+
     func testCancellingTouchIDSendsNothing() async throws {
         let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
         let vault = StandInVault(events: events)
@@ -233,7 +272,8 @@ final class DownloadToVaultTests: XCTestCase {
 
         XCTAssertEqual(events.value, ["touch id", "move a.example.com.mp4", "drive b.example.com.mp4", "lock"])
         XCTAssertEqual(model.sendSummary,
-                       "Added 1 to the Vault and sent 1 to Google Drive, 1 in the Vault weren't sent because it locked; send again. The Vault is locked again.")
+                       "Added 1 to the Vault and sent 1 to Google Drive, 1 in the Vault weren't sent because it locked; send again, "
+                       + "1 not added to the Vault, sent from Downloads. The Vault is locked again.")
     }
 
     func testAVideoWhoseMoveALockCutOffIsSentFromDownloadsLikeTheRest() async throws {
@@ -246,8 +286,8 @@ final class DownloadToVaultTests: XCTestCase {
         XCTAssertEqual(events.value, ["touch id", "drive a.example.com.mp4, b.example.com.mp4", "lock"])
         let cutOff = try XCTUnwrap(model.items.first)
         XCTAssertEqual(cutOff.state, .done(inDownloads("a.example.com.mp4")))
-        XCTAssertNil(cutOff.vaultProblem)
-        XCTAssertEqual(model.sendSummary, "Sent 2 to Google Drive.")
+        XCTAssertEqual(cutOff.vaultProblem, DownloadVideoModel.vaultClosedWhileMoving)
+        XCTAssertEqual(model.sendSummary, "Sent 2 to Google Drive, 2 not added to the Vault, sent from Downloads.")
     }
 
     func testEveryVideoIsPutInLineForSearchInOneRequest() async throws {
@@ -263,7 +303,7 @@ final class DownloadToVaultTests: XCTestCase {
     func testAVaultThatWillNotLockSaysSoFirst() async throws {
         let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
         let vault = StandInVault(events: events)
-        vault.locks = false
+        vault.lockCheck = .stillOpen
 
         try await send(model, vault: vault)
 
@@ -379,7 +419,7 @@ final class VaultMoveInTests: XCTestCase {
         let landed = try await model.moveIn(video)
         XCTAssertTrue(model.items.contains { $0.url.standardizedFileURL == landed.standardizedFileURL })
 
-        let locked = await model.lockAndConfirm()
+        let locked = await model.lockAndConfirm() == .locked
 
         XCTAssertTrue(locked)
         XCTAssertFalse(model.disk.isOpen)
@@ -427,7 +467,7 @@ final class VaultMoveInTests: XCTestCase {
         let retry = await model.openWithTouchID()
 
         XCTAssertEqual(retry, .opened, "a vault a send opened and could not lock must be locked by the next send")
-        let locked = await model.lockAndConfirm()
+        let locked = await model.lockAndConfirm() == .locked
         XCTAssertTrue(locked)
         await model.unlock(password: Self.password)
         model.finishOpening()
