@@ -1,4 +1,5 @@
 import ImageIO
+import Observation
 import UniformTypeIdentifiers
 import XCTest
 @testable import Toolbox
@@ -320,6 +321,30 @@ final class VaultTests: XCTestCase {
         XCTAssertEqual(model.items, VaultLibrary.items(in: model.root))
         XCTAssertEqual(model.items.count, files.count)
         XCTAssertEqual(model.libraryReloads - reloadsBefore, 1, "moving \(files.count) files in read the whole library once per file")
+    }
+
+    @MainActor
+    func testAViewShowingTheMoveProgressIsToldWhenAMoveStartsAndEnds() async throws {
+        let location = VaultLocation(folder: dir.appendingPathComponent("watched"))
+        let model = VaultModel(location: location, watchesSystem: false)
+        await model.create(password: "watch-pass", confirmation: "watch-pass")
+        model.finishOpening()
+        addTeardownBlock { @MainActor in await model.lock() }
+        let changes = Locked(0)
+        func watchProgress() {
+            withObservationTracking { _ = model.moveProgress } onChange: { changes.update { $0 += 1 } }
+        }
+
+        watchProgress()
+        model.add([try makePhoto("watched.png")])
+
+        XCTAssertEqual(model.moveProgress, VaultModel.MoveProgress(done: 0, total: 1))
+        XCTAssertEqual(changes.value, 1, "the progress bar would not appear when a move starts")
+
+        watchProgress()
+        try await waitUntil(timeout: .seconds(30), "the file is in the vault") { model.moveProgress == nil }
+
+        XCTAssertEqual(changes.value, 2, "the progress bar would not go away when the move ends")
     }
 
     func testAnItemAddedToTheListMatchesWhatReadingTheLibraryFinds() async throws {
