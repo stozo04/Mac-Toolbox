@@ -212,9 +212,9 @@ final class DownloadVideoModel {
         switch await vault.openWithTouchID() {
         case .cancelled:
             sendState = .failed(Self.touchIDCancelled)
-        case .unavailable(let reason):
+        case .unavailable(let reason, let stillOpen):
             sendState = .sending
-            await sendFromDownloads(downloads, report: VaultSendReport(notAddedBecause: reason))
+            await sendFromDownloads(downloads, report: VaultSendReport(notAddedBecause: reason, stillOpen: stillOpen))
         case .opened:
             let videos = downloads.filter { VaultItem.kind(of: $0.file) != nil }
             let others = downloads.filter { VaultItem.kind(of: $0.file) == nil }

@@ -120,6 +120,18 @@ final class DownloadToVaultTests: XCTestCase {
                        "Sent 1 to Google Drive. Not added to the Vault: Touch ID didn't recognize your finger.")
     }
 
+    func testAFailedUnlockThatLeftTheVaultOpenSaysSo() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.opening = .unavailable("The Vault didn't open.", stillOpen: true)
+
+        try await send(model, vault: vault)
+
+        XCTAssertEqual(events.value, ["touch id", "drive a.example.com.mp4"])
+        XCTAssertEqual(model.sendSummary, DownloadVideoModel.vaultStillOpen
+                       + " Sent 1 to Google Drive. Not added to the Vault: The Vault didn't open.")
+    }
+
     func testCancellingTouchIDSendsNothing() async throws {
         let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
         let vault = StandInVault(events: events)
