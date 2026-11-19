@@ -56,13 +56,14 @@ extension VaultModel: DownloadVault {
     }
 
     /// Every file is put in line before any is waited for, so one pass of the index takes them all and the search model is
-    /// loaded once. A file may wait one `searchWaitLimit` for itself and one for each file ahead of it. Returns how many
-    /// became searchable; `onAnswer` hears how many have been answered so far.
+    /// loaded once. They share one deadline, a `searchWaitLimit` for each file: the order the waits start in is not fixed,
+    /// so a limit per place in the list could cut off whichever file ended up last in line. Returns how many became
+    /// searchable; `onAnswer` hears how many have been answered so far.
     func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int {
-        await withTaskGroup(of: Bool.self) { waits in
-            for (place, file) in files.enumerated() {
-                let turnsToWait = files.count - place
-                waits.addTask { @MainActor in await self.makeSearchable(file, waitingAtMost: self.searchWaitLimit * turnsToWait) }
+        let sharedLimit = searchWaitLimit * files.count
+        return await withTaskGroup(of: Bool.self) { waits in
+            for file in files {
+                waits.addTask { @MainActor in await self.makeSearchable(file, waitingAtMost: sharedLimit) }
             }
             var answered = 0
             var searchable = 0
