@@ -16,7 +16,17 @@ final class VaultSearchWaiters {
             start()
             Task { [weak self] in
                 try? await Task.sleep(for: limit)
-                self?.waiting[id]?.removeValue(forKey: token)?.resume(returning: false)
+                self?.runOut(token)
+            }
+        }
+    }
+
+    /// Found by its token, not its item, because a rename may have carried the wait to another id.
+    private func runOut(_ token: UUID) {
+        for id in waiting.keys {
+            if let waiter = waiting[id]?.removeValue(forKey: token) {
+                if waiting[id]?.isEmpty == true { waiting[id] = nil }
+                return waiter.resume(returning: false)
             }
         }
     }

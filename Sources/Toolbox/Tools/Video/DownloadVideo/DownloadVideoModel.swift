@@ -61,9 +61,9 @@ final class DownloadVideoModel {
     static let touchIDCancelled = "Touch ID was cancelled. Nothing was sent."
     static let onlyInVault = "These videos are in the Vault. Tick Add to Vault to send them."
     static let vaultStillOpen = "The Vault didn't lock. Open the Vault page and lock it."
-    static let vaultClosedWhileMoving = "the Vault closed before it went in, so it was sent from Downloads."
-    static let vaultBusy = "the Vault was busy adding other files, so it was sent from Downloads."
-    static let vaultCantPlay = "the Vault only holds videos your Mac can play, so it was sent from Downloads."
+    static let vaultClosedWhileMoving = "the Vault closed before it went in."
+    static let vaultBusy = "the Vault was busy adding other files."
+    static let vaultCantPlay = "the Vault only holds videos your Mac can play."
     private static let addToVaultKey = "downloadVideo.addToVault"
 
     var linkText = ""

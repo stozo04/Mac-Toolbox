@@ -66,6 +66,17 @@ final class VaultSearchWaitersTests: XCTestCase {
         XCTAssertTrue(answer)
     }
 
+    func testARenamedItemsWaitStillRunsOut() async throws {
+        let waiters = VaultSearchWaiters()
+        let waiting = try await startWaiting(waiters, for: "old.mov", atMost: .milliseconds(50))
+
+        waiters.carry(from: "old.mov", to: "new.mov")
+
+        let answer = await waiting.value
+        XCTAssertFalse(answer)
+        XCTAssertEqual(waiters.count, 0)
+    }
+
     func testAnsweringFromTheIndexLeavesAWaitThatStartsMeanwhileForTheNextPass() async throws {
         let waiters = VaultSearchWaiters()
         let early = try await startWaiting(waiters, for: "a", atMost: long)
