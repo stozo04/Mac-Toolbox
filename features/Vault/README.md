@@ -40,6 +40,8 @@ Built: storage, lock screen, move in, delete, viewer, browsing by kind and lengt
   - Indexing starts when the vault opens and after files move in; the full model (about 1 GB) is freed when it finishes, and searches use the text half (about 0.3 GB).
 - Tests: `VaultBrowseTests.swift`, `VaultDetailsTests.swift` (rename rules, search entry following a rename, details of a real clip and photo), `VaultDuplicatesTests.swift`, `VaultLikelyDuplicatesTests.swift` (post IDs, look matching, two real encodes of one video), `VaultPlayableTests.swift` (with an HEVC + MP3 fixture; needs ffmpeg, which CI builds with `scripts/fetch-tools.sh`), `VaultTests.swift`, including a real encrypted image (create, wrong password refused, move in, lock, change password, old password refused); `VaultSearchTests.swift`, including a real-model search (skipped when the model isn't on the Mac, as on CI).
 
+- Download Video's "Add to Vault" moves downloads in with `VaultModel.moveIn` (one file, awaited, refused with `VaultMoveError.busy` while a drop is moving files in) and waits for each with `VaultModel.makeSearchable`, which puts the file first in line for the index and answers once it is indexed, could not be, or the vault locked.
+
 ## Rules for this page
 - Moving in deletes the original. This is a deliberate exception to "never modify original user files" (see AGENTS.md).
 - Delete inside the vault is permanent (no Trash), after a confirmation. Duplicates you don't keep go to the vault's own Trash (`VaultTrash`) instead, inside the encrypted image, until you put them back or empty it.

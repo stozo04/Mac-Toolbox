@@ -60,6 +60,7 @@ final class VaultModel {
     private var indexAgain = false
     private(set) var searchFailures: Set<VaultItem.ID> = []
     private var searchFirst: [VaultItem.ID] = []
+    private var searchWaiters: [VaultItem.ID: [CheckedContinuation<Bool, Never>]] = [:]
     private var renamesInFlight: Set<VaultItem.ID> = []
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
@@ -483,7 +484,10 @@ final class VaultModel {
                 indexAgain = false
                 await index(with: engine)
             } while indexAgain && !Task.isCancelled && searchEngine === engine
-            if searchEngine === engine { indexTask = nil }
+            await answerSearchWaiters(using: engine)
+            guard searchEngine === engine else { return }
+            indexTask = nil
+            if indexAgain { refreshIndex() }
         }
     }
 
@@ -502,6 +506,7 @@ final class VaultModel {
                 do {
                     try await engine.index(item)
                     searchFailures.remove(item.id)
+                    answerSearchWaiters(for: item.id, searchable: true)
                 } catch VaultSearchError.closed {
                     return
                 } catch is CancellationError {
@@ -509,10 +514,12 @@ final class VaultModel {
                 } catch let error as VaultSearchError {
                     throw error
                 } catch where !FileManager.default.fileExists(atPath: item.url.path) {
+                    answerSearchWaiters(for: item.id, searchable: false)
                     continue
                 } catch {
                     unreadable += 1
                     searchFailures.insert(item.id)
+                    answerSearchWaiters(for: item.id, searchable: false)
                     VaultLog.failure("Vault search indexing failed", error, file: item.url)
                 }
                 done += 1
@@ -778,6 +785,59 @@ extension VaultModel {
         }
         if indexTask != nil && !searchFailures.contains(item.id) { return .adding }
         return searchFailures.contains(item.id) ? .failed : .notIndexed
+    }
+
+    /// Moves one file in, as a drop does, and returns where it landed in the vault.
+    func moveIn(_ file: URL) async throws -> URL {
+        guard phase == .open, !isLocking, !lockIfClosedFromOutside() else { throw VaultMoveError.vaultNotOpen }
+        guard moveTask == nil else { throw VaultMoveError.busy }
+        let id = UUID()
+        moveID = id
+        filesStillToMove = [file]
+        let move = Task { [moveFile, root] in try await moveFile(file, root) }
+        moveTask = Task { await withTaskCancellationHandler { _ = await move.result } onCancel: { move.cancel() } }
+        let result = await move.result
+        if moveID == id {
+            moveTask = nil
+            moveID = nil
+            filesStillToMove = []
+        } else {
+            correctReportIfMovedAfterAll(file)
+        }
+        let moved = try result.get()
+        showMovedIn(moved)
+        return moved
+    }
+
+    /// Puts the file first in line for the search index and waits for it. False when there is no search model,
+    /// the file could not be read, or the vault locked first.
+    func makeSearchable(_ file: URL) async -> Bool {
+        guard phase == .open, !isLocking,
+              let item = items.first(where: { $0.url.standardizedFileURL == file.standardizedFileURL }) else { return false }
+        if searchEngine == nil { startSearch() }
+        guard searchEngine != nil else { return false }
+        searchFailures.remove(item.id)
+        searchFirst.removeAll { $0 == item.id }
+        searchFirst.insert(item.id, at: 0)
+        return await withCheckedContinuation { waiter in
+            searchWaiters[item.id, default: []].append(waiter)
+            refreshIndex()
+        }
+    }
+
+    private func answerSearchWaiters(for id: VaultItem.ID, searchable: Bool) {
+        searchWaiters.removeValue(forKey: id)?.forEach { $0.resume(returning: searchable) }
+    }
+
+    /// Files that were already indexed never come up as pending, so whoever still waits is answered from the index itself.
+    private func answerSearchWaiters(using engine: VaultSearchEngine) async {
+        let waiting = searchWaiters
+        searchWaiters = [:]
+        for (id, waiters) in waiting {
+            var searchable = false
+            if let item = items.first(where: { $0.id == id }) { searchable = (try? await engine.coverage(of: item)) != nil }
+            waiters.forEach { $0.resume(returning: searchable) }
+        }
     }
 
     func addToSearch(_ item: VaultItem) {

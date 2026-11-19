@@ -14,6 +14,7 @@ enum VaultMoveError: LocalizedError, Equatable {
     case changedWhileMoving
     case unreadable
     case vaultNotOpen
+    case busy
     case notSaved(String)
     case originalKept(String)
 
@@ -29,6 +30,7 @@ enum VaultMoveError: LocalizedError, Equatable {
         case .copyDiffers: "The copy in the vault didn't match the original, so the original was kept."
         case .unreadable: "The copy in the vault couldn't be opened, so the original was kept."
         case .vaultNotOpen: "The vault closed before it was safely inside, so the original was kept."
+        case .busy: "The vault is busy moving other files in. Try again when it's done."
         case .notSaved(let reason): "The copy in the vault couldn't be saved to the disk, so the original was kept: \(reason)"
         case .originalKept(let reason): "It's in the vault, but the original couldn't be deleted: \(reason)"
         }

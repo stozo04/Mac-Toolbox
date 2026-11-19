@@ -20,8 +20,9 @@ Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (arg
 - Unfinished files go to a temporary folder of their own (`-P temp:<dir>`), which is removed when the download ends, fails or is cancelled, so nothing half-downloaded shows up in Downloads. Cancelling, or quitting the app, stops yt-dlp (SIGTERM, then SIGKILL).
 - ffmpeg is looked up in the bundle and Homebrew; without it only ready-made MP4s can be saved.
 - Every batch saves straight into `~/Downloads/`, and "Open Folder" opens it.
-- "Clear" (footer) empties the list and moves the files this tool downloaded to the Trash; other files in Downloads are never touched. Tests inject `saveFolder` and `trash` so they never touch the real Downloads folder.
-- "Send to Google" (footer) copies every finished download to the Google Drive folder `~/Library/CloudStorage/GoogleDrive-gates.steven@gmail.com/Other computers/My Laptop/My Stuff/Kayley/rosie/Videos/verified/` (`DriveSender`). It copies, never moves or overwrites; files already there are skipped; it fails if Drive isn't mounted.
+- "Clear" (footer) empties the list and moves the files this tool downloaded to the Trash; other files in Downloads, and videos moved into the Vault, are never touched. Tests inject `saveFolder`, `trash`, `sendToDrive` and `defaults` so they never touch the real Downloads folder, Google Drive or settings.
+- "Send to Google" (footer) copies every finished download to the Google Drive folder `~/Library/CloudStorage/GoogleDrive-gates.steven@gmail.com/Other computers/My Laptop/My Stuff/Kayley/rosie/Videos/verified/` (`DriveSender`). It copies, never moves or overwrites; files already there are skipped; it fails if Drive isn't mounted. Debug builds take `$TOOLBOX_DRIVE_FOLDER` in place of the Drive folder, so a test run never uploads.
+- "Add to Vault" (checkbox beside Send to Google, remembered between launches) makes Send to Google go through the Vault first, through the app's one `VaultModel` (`DownloadVault` in `DownloadVault.swift`): each finished download is moved into the vault (`VaultModel.moveIn`, the same verified move as a drop, which deletes the copy in Downloads), then each is put first in line for smart search and waited for (`VaultModel.makeSearchable`), and only then are the vault copies sent to Drive. The vault must be unlocked first; otherwise nothing is sent. A download that can't go in (audio only, or a failed move) stays in Downloads and is not sent. Without the search model, or when a video can't be indexed, it is still sent and the footer says how many are "not searchable yet"; the vault indexes them later on its own. If the vault locks partway, nothing is sent and the footer asks to unlock and send again. Rows in the vault show a lock and are not revealed in Finder.
 - Integration test (network, opt-in, debug build): `TOOLBOX_YTDLP=... TOOLBOX_TEST_URL=<link> swift test --filter Integration`.
 - Release app: `scripts/fetch-tools.sh` (downloads yt-dlp with checksum, builds LGPL static ffmpeg + ffprobe into `build/tools/`), then `scripts/make-app.sh` (assembles, signs and zips `dist/Toolbox.app`). Set `SIGN_IDENTITY` and notarize for distribution. Licenses: `THIRD_PARTY_NOTICES.md`.
 - The bundled yt-dlp goes stale; "Update yt-dlp" (in the YouTube failure alert) saves a newer copy to Application Support, and the newer of the two files wins.
@@ -31,6 +32,7 @@ Implemented in `Sources/Toolbox/Tools/Video/DownloadVideo/`: `YtDlpCommand` (arg
 - Format: Best Quality / specific resolution / audio only
 - Most compatible (H.264) toggle
 - Per-link progress, cancel, reveal in Finder
+- Add to Vault before Send to Google
 - Legal note shown: only download videos you own or may save
 
 ## Implementation notes for an agent
