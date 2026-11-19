@@ -211,13 +211,15 @@ final class DownloadVideoModel {
     }
 
     private func sendThroughVault(_ vault: DownloadVault, _ downloads: [Download]) async {
-        switch await vault.openWithTouchID() {
+        let opening = await vault.openWithTouchID()
+        switch opening {
         case .cancelled:
             sendState = .failed(Self.touchIDCancelled)
         case .unavailable(let reason, let stillOpen):
             sendState = .sending
             await sendFromDownloads(downloads, report: VaultSendReport(notAddedBecause: reason, stillOpen: stillOpen))
-        case .opened:
+        case .opened, .alreadyOpen:
+            let openedHere = opening == .opened
             let videos = downloads.filter { VaultItem.kind(of: $0.file) != nil }
             let others = downloads.filter { VaultItem.kind(of: $0.file) == nil }
             var (report, keptOut) = await moveIn(videos, to: vault)
@@ -225,8 +227,11 @@ final class DownloadVideoModel {
             if !vault.acceptsFiles { report.lockedBeforeSending = vaultFiles.count }
             let files = others.map(\.file) + keptOut + inVault
             let sent = files.isEmpty ? .success(DriveSender.Result()) : await copyToDrive(files, fromVault: !inVault.isEmpty)
-            sendState = .locking
-            report.stillOpen = !(await vault.lockAndConfirm())
+            if openedHere {
+                sendState = .locking
+                report.lockedAgain = await vault.lockAndConfirm()
+                report.stillOpen = !report.lockedAgain
+            }
             finishSend(sent, report: report)
         }
     }
@@ -328,7 +333,7 @@ final class DownloadVideoModel {
         }
         sentences.append(parts.joined(separator: ", ") + ".")
         if let reason = vault?.notAddedBecause { sentences.append("Not added to the Vault: \(reason)") }
-        if added > 0, vault?.stillOpen == false { sentences.append("The Vault is locked again.") }
+        if added > 0, vault?.lockedAgain == true { sentences.append("The Vault is locked again.") }
         return sentences.joined(separator: " ")
     }
 

@@ -2,6 +2,8 @@ import Foundation
 
 enum DownloadVaultOpening: Equatable {
     case opened
+    /// You opened it yourself on the Vault page, so the send leaves it open for you.
+    case alreadyOpen
     case cancelled
     case unavailable(String, stillOpen: Bool = false)
 }
@@ -23,7 +25,7 @@ extension VaultModel: DownloadVault {
     var acceptsFiles: Bool { phase == .open && !isLocking }
 
     func openWithTouchID() async -> DownloadVaultOpening {
-        if acceptsFiles { return .opened }
+        if acceptsFiles { return .alreadyOpen }
         guard usesTouchID, passwordKeeper.hasPassword else { return .unavailable(VaultTouchIDKey.notSetUp) }
         switch await passwordKeeper.password(reason: Self.touchIDReason) {
         case .cancelled:
@@ -31,7 +33,7 @@ extension VaultModel: DownloadVault {
         case .failed(let reason):
             return .unavailable(reason)
         case .password(let password):
-            if acceptsFiles { return .opened }
+            if acceptsFiles { return .alreadyOpen }
             let outcome = await openQuietly(password: password)
             var stillOpen = false
             if case .refused? = outcome, door.state == .open { stillOpen = !(await lockAndConfirm()) }
@@ -81,4 +83,5 @@ struct VaultSendReport: Equatable {
     var lockedBeforeSending = 0
     var notAddedBecause: String?
     var stillOpen = false
+    var lockedAgain = false
 }

@@ -20,7 +20,7 @@ private final class StandInVault: DownloadVault {
 
     func openWithTouchID() async -> DownloadVaultOpening {
         events.update { $0.append("touch id") }
-        if opening == .opened { acceptsFiles = true }
+        if opening == .opened || opening == .alreadyOpen { acceptsFiles = true }
         return opening
     }
 
@@ -142,6 +142,18 @@ final class DownloadToVaultTests: XCTestCase {
 
         XCTAssertEqual(model.sendState, .failed(DownloadVideoModel.vaultStillOpen
                                                 + " These videos are in the Vault and weren't sent. The Vault didn't open."))
+    }
+
+    func testAVaultYouOpenedYourselfIsLeftOpen() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.opening = .alreadyOpen
+
+        try await send(model, vault: vault)
+
+        XCTAssertEqual(events.value, ["touch id", "move a.example.com.mp4", "index vault a.example.com.mp4",
+                                      "drive vault a.example.com.mp4"])
+        XCTAssertEqual(model.sendSummary, "Added 1 to the Vault and sent 1 to Google Drive.")
     }
 
     func testCancellingTouchIDSendsNothing() async throws {
