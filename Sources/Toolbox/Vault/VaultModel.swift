@@ -47,8 +47,10 @@ final class VaultModel {
     private(set) var trash = VaultTrash.Summary()
 
     let door: VaultDoor
+    let passwordKeeper: VaultPasswordKeeper
+    var usesTouchID: Bool
     var disk: VaultDisk { door.disk }
-    private var lockCount = 0
+    private(set) var lockCount = 0
     private var lockInFlight: Task<Void, Never>?
     private(set) var lastLockFailure: String?
     @ObservationIgnored private(set) lazy var quitGuard = VaultQuitGuard(self)
@@ -79,8 +81,11 @@ final class VaultModel {
     private static let typingPause: Duration = .milliseconds(250)
 
     init(location: VaultLocation, watchesSystem: Bool = true, tool: VaultTool = .system, bounds: VaultDoor.Bounds = VaultDoor.Bounds(),
-         anotherCopyIsRunning: @escaping @Sendable () -> Bool = VaultDoor.anotherCopyOfThisAppIsRunning) {
+         anotherCopyIsRunning: @escaping @Sendable () -> Bool = VaultDoor.anotherCopyOfThisAppIsRunning,
+         passwordKeeper: VaultPasswordKeeper? = nil) {
         door = VaultDoor(location: location, tool: tool, bounds: bounds, anotherCopyIsRunning: anotherCopyIsRunning)
+        self.passwordKeeper = passwordKeeper ?? VaultTouchIDKey(location: location)
+        usesTouchID = self.passwordKeeper.hasPassword
         phase = door.disk.exists ? .locked : .setup
         if door.state == .openElsewhere { closeLeftoverFromACrash() }
         if watchesSystem { watchSystem() }
@@ -125,6 +130,7 @@ final class VaultModel {
         switch outcome {
         case .opened where lockCount == locksBefore:
             beginOpening()
+            rememberForTouchID(password)
         case .opened, .lockedMeanwhile:
             Log.info("Vault locked while it was opening", category: VaultLog.category)
         case .refused(.wrongPassword):
@@ -326,7 +332,11 @@ final class VaultModel {
     }
 
     func add(_ urls: [URL]) {
-        guard phase == .open, !isLocking, moveTask == nil else { return }
+        guard phase == .open, !isLocking else { return }
+        guard moveTask == nil else {
+            message = VaultMoveError.busy.localizedDescription
+            return
+        }
         let files = VaultMover.expand(urls)
         guard !files.isEmpty else { return }
         moveFailures = []
@@ -461,6 +471,8 @@ final class VaultModel {
     }
 
     private func stopSearch() {
+        searchWaiters.values.joined().forEach { $0.resume(returning: false) }
+        searchWaiters = [:]
         indexTask?.cancel()
         indexTask = nil
         queryTask?.cancel()
@@ -497,10 +509,9 @@ final class VaultModel {
             var queue = pending
             var done = 0
             var unreadable = 0
-            while !queue.isEmpty {
+            while let item = nextToIndex(from: &queue) {
                 guard !Task.isCancelled, searchEngine === engine else { return }
-                searchState = .indexing(done: done, total: pending.count)
-                let item = queue.remove(at: queue.firstIndex { searchFirst.contains($0.id) } ?? 0)
+                searchState = .indexing(done: done, total: max(pending.count, done + 1))
                 searchFirst.removeAll { $0 == item.id }
                 guard items.contains(where: { $0.id == item.id }) else { continue }
                 do {
@@ -677,6 +688,7 @@ extension VaultModel {
             quitGuard.forgetRefusal()
             if let refusal { throw refusal }
             Log.info("Vault password changed", category: VaultLog.category)
+            if passwordKeeper.hasPassword { rememberForTouchID(new) }
             return true
         } catch {
             message = error.localizedDescription
@@ -787,6 +799,32 @@ extension VaultModel {
         return searchFailures.contains(item.id) ? .failed : .notIndexed
     }
 
+    /// Opens the vault with a password the user did not type here, so a refusal leaves no message or count on the door.
+    func openQuietly(password: String) async -> VaultDoor.UnlockOutcome? {
+        guard phase == .locked, !isWorking, !isLocking else { return nil }
+        isWorking = true
+        defer { isWorking = false }
+        let locksBefore = lockCount
+        let outcome = await door.unlock(password: password)
+        if case .opened = outcome, lockCount == locksBefore {
+            beginOpening()
+            finishOpening()
+        } else if case .refused = outcome, door.state == .open {
+            message = VaultNotices.leftMountedByFailedUnlock
+        }
+        return outcome
+    }
+
+    fileprivate func rememberForTouchID(_ password: String) {
+        guard usesTouchID else { return passwordKeeper.forget() }
+        do {
+            try passwordKeeper.save(password)
+        } catch {
+            usesTouchID = false
+            VaultLog.failure("Saving the vault password for Touch ID failed", error)
+        }
+    }
+
     /// Moves one file in, as a drop does, and returns where it landed in the vault.
     func moveIn(_ file: URL) async throws -> URL {
         guard phase == .open, !isLocking, !lockIfClosedFromOutside() else { throw VaultMoveError.vaultNotOpen }
@@ -794,18 +832,22 @@ extension VaultModel {
         let id = UUID()
         moveID = id
         filesStillToMove = [file]
+        moveProgress = MoveProgress(done: 0, total: 1)
         let move = Task { [moveFile, root] in try await moveFile(file, root) }
         moveTask = Task { await withTaskCancellationHandler { _ = await move.result } onCancel: { move.cancel() } }
         let result = await move.result
-        if moveID == id {
+        let ownMove = moveID == id
+        if ownMove {
             moveTask = nil
             moveID = nil
             filesStillToMove = []
+            moveProgress = nil
         } else {
             correctReportIfMovedAfterAll(file)
         }
+        if case .failure(VaultMoveError.originalKept(_, let copy)) = result, ownMove { showMovedIn(copy) }
         let moved = try result.get()
-        showMovedIn(moved)
+        if ownMove { showMovedIn(moved) }
         return moved
     }
 
@@ -823,6 +865,17 @@ extension VaultModel {
             searchWaiters[item.id, default: []].append(waiter)
             refreshIndex()
         }
+    }
+
+    /// Files asked for by name go first, even ones that arrived after this pass listed what was pending.
+    private func nextToIndex(from queue: inout [VaultItem]) -> VaultItem? {
+        while let id = searchFirst.first {
+            searchFirst.removeFirst()
+            if let queued = queue.firstIndex(where: { $0.id == id }) { return queue.remove(at: queued) }
+            if let item = items.first(where: { $0.id == id }) { return item }
+            answerSearchWaiters(for: id, searchable: false)
+        }
+        return queue.isEmpty ? nil : queue.removeFirst()
     }
 
     private func answerSearchWaiters(for id: VaultItem.ID, searchable: Bool) {

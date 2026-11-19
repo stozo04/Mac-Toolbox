@@ -29,7 +29,8 @@ enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
         Release(version: "0.12.0", date: "2026-11-19", changes: [
-            .init(kind: .new, text: "Download Video: an Add to Vault checkbox beside Send to Google moves the videos into your Vault and makes them searchable before sending them to Google."),
+            .init(kind: .new, text: "Download Video: an Add to Vault checkbox beside Send to Google opens your Vault with Touch ID, moves the videos in and makes them searchable, sends them to Google, then locks the Vault again. If Touch ID fails, the videos are still sent, just not added."),
+            .init(kind: .new, text: "Vault: \"Use Touch ID to add downloads\" on the unlock screen lets Download Video open the Vault with your fingerprint."),
         ]),
         Release(version: "0.11.9", date: "2026-11-18", changes: [
             .init(kind: .fixed, text: "Vault: locking no longer freezes the app while the disk ejects; the door shows at once and the eject finishes behind it."),

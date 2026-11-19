@@ -118,8 +118,8 @@ struct DownloadVideoView: View {
                     .disabled(model.sendState.isBusy)
                 Toggle("Add to Vault", isOn: $model.addToVault)
                     .toggleStyle(.checkbox)
-                    .disabled(!model.canAddToVault || model.sendState.isBusy)
-                    .help("Moves the videos into the Vault and makes them searchable there before sending them to Google")
+                    .disabled(model.sendState.isBusy)
+                    .help("With Touch ID, moves the videos into the Vault and makes them searchable before sending them to Google, then locks the Vault")
                 Button { model.sendToGoogle(vault: vault) } label: { Label("Send to Google", systemImage: "icloud.and.arrow.up") }
                     .disabled(!model.canSend)
                 if model.folder != nil { Button("Open Folder") { model.openFolder() } }
@@ -230,6 +230,9 @@ private struct DownloadRow: View {
         case .done(let file):
             Text([item.quality?.summary, "Saved as \(file.lastPathComponent)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            if let problem = item.vaultProblem {
+                Text("Not added to the Vault: \(problem)").font(.caption).foregroundStyle(.orange).lineLimit(2)
+            }
             if let quality = item.quality, !quality.playsInQuickTime {
                 Text("\(quality.codec.rawValue) is the only format at this resolution. QuickTime can't open it; use IINA or VLC.")
                     .font(.caption).foregroundStyle(.orange).lineLimit(2)

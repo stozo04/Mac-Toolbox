@@ -6,7 +6,6 @@ struct DownloadItem: Identifiable, Equatable {
         case queued
         case downloading(fraction: Double?, speed: Double?, eta: Int?)
         case done(URL)
-        /// Moved out of Downloads into the vault; the URL is its place inside the vault.
         case inVault(URL)
         case failed(String)
         case cancelled
@@ -17,6 +16,7 @@ struct DownloadItem: Identifiable, Equatable {
     var title: String?
     var quality: FormatChoice?
     var state: State = .queued
+    var vaultProblem: String?
 }
 
 enum DownloadAlert: Identifiable {
@@ -42,22 +42,25 @@ final class DownloadVideoModel {
     enum ToolStatus: Equatable { case checking, ready, missing, installing, installFailed(String) }
     enum SendState: Equatable {
         case idle
+        case unlocking
         case addingToVault(done: Int, total: Int)
         case makingSearchable(done: Int, total: Int)
         case sending
-        case sent(copied: Int, skipped: Int, vault: VaultSendReport?)
+        case locking
+        case sent(DriveSender.Result, vault: VaultSendReport?)
         case failed(String)
 
         var isBusy: Bool {
             switch self {
-            case .addingToVault, .makingSearchable, .sending: true
+            case .unlocking, .addingToVault, .makingSearchable, .sending, .locking: true
             case .idle, .sent, .failed: false
             }
         }
     }
 
-    static let unlockVaultFirst = "Unlock the Vault first. Nothing was sent."
-    static let vaultLockedMidway = "The Vault locked before the videos were sent to Google. Unlock it and send again."
+    static let touchIDCancelled = "Touch ID was cancelled. Nothing was sent."
+    static let onlyInVault = "These videos are in the Vault. Tick Add to Vault to send them."
+    static let vaultStillOpen = "The Vault didn't lock. Open the Vault page and lock it."
     private static let addToVaultKey = "downloadVideo.addToVault"
 
     var linkText = ""
@@ -78,13 +81,11 @@ final class DownloadVideoModel {
 
     var isRunning: Bool { runTask != nil }
     var pendingLinks: [URL] { Self.links(in: linkText) }
-    var canStart: Bool { toolStatus == .ready && !pendingLinks.isEmpty && !isRunning && !sendState.isBusy }
+    var canStart: Bool { toolStatus == .ready && !pendingLinks.isEmpty && !isRunning }
     var finishedCount: Int { finishedFiles.count + vaultFiles.count }
-    /// Finished downloads still in the Downloads folder.
     var finishedFiles: [URL] { items.compactMap { if case .done(let file) = $0.state { file } else { nil } } }
     var vaultFiles: [URL] { items.compactMap { if case .inVault(let file) = $0.state { file } else { nil } } }
     var canSend: Bool { !(finishedFiles.isEmpty && vaultFiles.isEmpty) && !isRunning && !sendState.isBusy }
-    var canAddToVault: Bool { !vaultFiles.isEmpty || finishedFiles.contains { VaultItem.kind(of: $0) != nil } }
 
     private let saveFolder: URL
     private let trash: (URL) throws -> Void
@@ -149,7 +150,7 @@ final class DownloadVideoModel {
         guard canStart, let downloader else { return }
         let urls = pendingLinks
         linkText = ""
-        sendState = .idle
+        if !sendState.isBusy { sendState = .idle }
         let destination = saveFolder
         folder = destination
         let ids = urls.map { url -> UUID in
@@ -179,45 +180,82 @@ final class DownloadVideoModel {
         sendState = .idle
     }
 
-    /// Copies every finished download to the Google Drive folder. With Add to Vault on, each one is first moved into the
-    /// vault and made searchable there, and only what reached the vault is sent, from its copy in the vault.
+    private typealias Download = (id: UUID, file: URL)
+
+    /// Copies every finished download to the Google Drive folder. With Add to Vault on, Touch ID opens the vault, each video
+    /// is moved in and made searchable, the vault copies are sent, and the vault is locked again. Without Touch ID the videos
+    /// are sent from Downloads and stay out of the vault.
     func sendToGoogle(vault: DownloadVault?) {
         guard canSend else { return }
-        let usesVault = addToVault
-        if usesVault && vault?.acceptsFiles != true {
-            sendState = .failed(Self.unlockVaultFirst)
+        let downloads = items.compactMap { item -> Download? in
+            if case .done(let file) = item.state { (item.id, file) } else { nil }
+        }
+        let hasVideos = downloads.contains { VaultItem.kind(of: $0.file) != nil } || !vaultFiles.isEmpty
+        guard addToVault, hasVideos, let vault else {
+            sendState = .sending
+            Task { await sendFromDownloads(downloads, report: nil) }
             return
         }
-        sendState = usesVault ? .addingToVault(done: 0, total: finishedFiles.count) : .sending
-        Task {
-            var report: VaultSendReport?
-            if usesVault, let vault { report = await addFinishedDownloads(to: vault) }
-            let vaultOpen = vault?.acceptsFiles == true
-            if usesVault && !vaultOpen {
-                sendState = .failed(Self.vaultLockedMidway)
-                Log.warning("Vault locked before sending to Google Drive", category: "download")
-                return
-            }
-            await copyToDrive(usesVault ? vaultFiles : finishedFiles + (vaultOpen ? vaultFiles : []), report: report)
+        sendState = .unlocking
+        Task { await sendThroughVault(vault, downloads) }
+    }
+
+    private func sendFromDownloads(_ downloads: [Download], report: VaultSendReport?) async {
+        guard !downloads.isEmpty || report != nil else {
+            sendState = .failed(Self.onlyInVault)
+            return
+        }
+        finishSend(await copyToDrive(downloads.map(\.file), fromVault: false), report: report)
+    }
+
+    private func sendThroughVault(_ vault: DownloadVault, _ downloads: [Download]) async {
+        switch await vault.openWithTouchID() {
+        case .cancelled:
+            sendState = .failed(Self.touchIDCancelled)
+        case .unavailable(let reason):
+            var report = VaultSendReport(notAddedBecause: reason)
+            report.stillOpen = !(await vault.lockAndConfirm())
+            sendState = .sending
+            await sendFromDownloads(downloads, report: report)
+        case .opened:
+            let videos = downloads.filter { VaultItem.kind(of: $0.file) != nil }
+            let others = downloads.filter { VaultItem.kind(of: $0.file) == nil }
+            var (report, keptOut) = await moveIn(videos, to: vault)
+            let inVault = vault.acceptsFiles ? vaultFiles : []
+            if !vault.acceptsFiles { report.lockedBeforeSending = vaultFiles.count }
+            let files = others.map(\.file) + keptOut + inVault
+            let sent = files.isEmpty ? .success(DriveSender.Result()) : await copyToDrive(files, fromVault: !inVault.isEmpty)
+            sendState = .locking
+            report.stillOpen = !(await vault.lockAndConfirm())
+            finishSend(sent, report: report)
         }
     }
 
-    private func addFinishedDownloads(to vault: DownloadVault) async -> VaultSendReport {
-        let downloads = items.compactMap { item -> (id: UUID, file: URL)? in
-            if case .done(let file) = item.state { (item.id, file) } else { nil }
-        }
+    /// Videos the vault refuses for a reason of their own stay unsent; ones kept out because it closed go from Downloads.
+    private func moveIn(_ videos: [Download], to vault: DownloadVault) async -> (VaultSendReport, keptOut: [URL]) {
         var report = VaultSendReport()
+        var keptOut: [URL] = []
         var moved: [URL] = []
-        for (done, download) in downloads.enumerated() {
-            guard vault.acceptsFiles else { break }
-            sendState = .addingToVault(done: done, total: downloads.count)
+        for (done, video) in videos.enumerated() {
+            guard vault.acceptsFiles else {
+                keptOut.append(video.file)
+                continue
+            }
+            sendState = .addingToVault(done: done, total: videos.count)
             do {
-                let inVault = try await vault.moveIn(download.file)
-                update(download.id) { $0.state = .inVault(inVault) }
+                let inVault = try await vault.moveIn(video.file)
+                update(video.id) { $0.state = .inVault(inVault); $0.vaultProblem = nil }
                 moved.append(inVault)
+            } catch VaultMoveError.vaultNotOpen, VaultMoveError.busy {
+                keptOut.append(video.file)
+            } catch VaultMoveError.originalKept(let reason, let copy) {
+                update(video.id) { $0.state = .inVault(copy); $0.vaultProblem = "The copy in Downloads couldn't be deleted: \(reason)" }
+                moved.append(copy)
+                VaultLog.failure("Download in the vault but its original stayed", VaultMoveError.originalKept(reason, copy: copy), file: video.file)
             } catch {
                 report.failed += 1
-                if VaultNotices.isUnexpected(error) { VaultLog.failure("Download could not go into the vault", error, file: download.file) }
+                update(video.id) { $0.vaultProblem = error.localizedDescription }
+                if VaultNotices.isUnexpected(error) { VaultLog.failure("Download could not go into the vault", error, file: video.file) }
             }
         }
         report.moved = moved.count
@@ -226,44 +264,67 @@ final class DownloadVideoModel {
             sendState = .makingSearchable(done: done, total: moved.count)
             if await !vault.makeSearchable(file) { report.notSearchable += 1 }
         }
-        return report
+        return (report, keptOut)
     }
 
-    private func copyToDrive(_ files: [URL], report: VaultSendReport?) async {
-        guard !files.isEmpty else {
-            sendState = .sent(copied: 0, skipped: 0, vault: report)
-            return
-        }
+    private func copyToDrive(_ files: [URL], fromVault: Bool) async -> Result<DriveSender.Result, Error> {
         sendState = .sending
         let sendToDrive = sendToDrive
-        do {
-            let result = try await Task.detached { try sendToDrive(files) }.value
-            sendState = .sent(copied: result.copied, skipped: result.skipped, vault: report)
+        let result = await Task.detached { Result { try sendToDrive(files) } }.value
+        if case .failure(let error) = result {
+            let nsError = error as NSError
+            // Vault file names must not leave the Mac, and a copy error carries the path it failed on.
+            let details = fromVault ? ["error_domain": nsError.domain, "error_code": String(nsError.code)] : Log.details(error)
+            Log.warning("Send to Google Drive failed", category: "download",
+                        details.merging(["files": String(files.count), "from_vault": String(fromVault)]) { $1 })
+        }
+        return result
+    }
+
+    private func finishSend(_ sent: Result<DriveSender.Result, Error>, report: VaultSendReport?) {
+        switch sent {
+        case .success(let result):
+            sendState = .sent(result, vault: report)
             Log.info("Sent to Google Drive", category: "download",
-                     ["copied": String(result.copied), "skipped": String(result.skipped),
+                     ["copied": String(result.copied), "skipped": String(result.skipped), "missing": String(result.missing),
                       "vault_moved": String(report?.moved ?? 0), "vault_failed": String(report?.failed ?? 0),
-                      "not_searchable": String(report?.notSearchable ?? 0)])
-        } catch {
-            sendState = .failed(error.localizedDescription)
-            Log.warning("Send to Google Drive failed", category: "download", Log.details(error, ["files": String(files.count)]))
+                      "not_searchable": String(report?.notSearchable ?? 0), "vault_used": String(report?.notAddedBecause == nil),
+                      "vault_still_open": String(report?.stillOpen ?? false)])
+        case .failure(let error):
+            let message = error.localizedDescription
+            sendState = .failed(report?.stillOpen == true ? Self.vaultStillOpen + " " + message : message)
         }
     }
 
     var sendSummary: String? {
         switch sendState {
         case .idle: return nil
+        case .unlocking: return "Waiting for Touch ID…"
         case .addingToVault(let done, let total): return "Adding to the Vault, \(done + 1) of \(total)…"
         case .makingSearchable(let done, let total): return "Making searchable, \(done + 1) of \(total)…"
         case .sending: return "Sending to Google Drive…"
+        case .locking: return "Locking the Vault…"
         case .failed(let message): return message
-        case .sent(let copied, let skipped, let vault):
-            if let vault, vault.moved == 0, copied == 0, skipped == 0 { return "Nothing went into the Vault, so nothing was sent" }
-            var parts = ["Sent \(copied) to Google Drive"]
-            if skipped > 0 { parts.append("\(skipped) already there") }
-            if let vault, vault.failed > 0 { parts.append("\(vault.failed) couldn't go into the Vault and weren't sent") }
-            if let vault, vault.notSearchable > 0 { parts.append("\(vault.notSearchable) not searchable yet") }
-            return parts.joined(separator: ", ")
+        case .sent(let result, let vault): return Self.summary(of: result, vault: vault)
         }
+    }
+
+    private static func summary(of result: DriveSender.Result, vault: VaultSendReport?) -> String {
+        var sentences: [String] = []
+        if vault?.stillOpen == true { sentences.append(vaultStillOpen) }
+        var parts = ["Sent \(result.copied) to Google Drive"]
+        if result.skipped > 0 { parts.append("\(result.skipped) already there") }
+        if result.missing > 0 { parts.append("\(result.missing) no longer on disk") }
+        if let vault {
+            if vault.failed > 0 { parts.append("\(vault.failed) couldn't go into the Vault and weren't sent") }
+            if vault.notSearchable > 0 { parts.append("\(vault.notSearchable) not searchable yet") }
+            if vault.lockedBeforeSending > 0 {
+                parts.append("\(vault.lockedBeforeSending) in the Vault weren't sent because it locked; send again")
+            }
+        }
+        sentences.append(parts.joined(separator: ", ") + ".")
+        if let reason = vault?.notAddedBecause { sentences.append("Not added to the Vault: \(reason)") }
+        return sentences.joined(separator: " ")
     }
 
     func reveal(_ item: DownloadItem) {

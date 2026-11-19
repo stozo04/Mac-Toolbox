@@ -4,8 +4,8 @@ import Foundation
 enum DriveSender {
     struct Result: Equatable {
         var copied = 0
-        /// Already in the folder, or no longer on disk.
         var skipped = 0
+        var missing = 0
     }
 
     enum DriveError: LocalizedError {
@@ -39,11 +39,24 @@ enum DriveSender {
         var result = Result()
         for file in files {
             let target = destination.appendingPathComponent(file.lastPathComponent)
-            if !fm.fileExists(atPath: file.path) || fm.fileExists(atPath: target.path) {
+            if !fm.fileExists(atPath: file.path) {
+                result.missing += 1
+                continue
+            }
+            if fm.fileExists(atPath: target.path) {
                 result.skipped += 1
                 continue
             }
-            try fm.copyItem(at: file, to: target)
+            // A copy cut off halfway must never sit under the real name, or every later send would skip it.
+            let partial = destination.appendingPathComponent(".toolbox-partial-" + file.lastPathComponent)
+            try? fm.removeItem(at: partial)
+            do {
+                try fm.copyItem(at: file, to: partial)
+                try fm.moveItem(at: partial, to: target)
+            } catch {
+                try? fm.removeItem(at: partial)
+                throw error
+            }
             result.copied += 1
         }
         return result

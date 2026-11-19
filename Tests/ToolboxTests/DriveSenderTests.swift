@@ -42,8 +42,21 @@ final class DriveSenderTests: XCTestCase {
 
         let result = try DriveSender.send([a, gone], to: dest, root: root)
 
-        XCTAssertEqual(result, DriveSender.Result(copied: 0, skipped: 2))
+        XCTAssertEqual(result, DriveSender.Result(copied: 0, skipped: 1, missing: 1))
         XCTAssertEqual(try Data(contentsOf: dest.appendingPathComponent("a.mp4")), Data("old".utf8))
+    }
+
+    func testAFailedCopyLeavesNothingUnderTheRealName() throws {
+        let unreadable = try makeFile("locked.mp4")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path) }
+        let root = base.appendingPathComponent("drive")
+        let dest = root.appendingPathComponent("verified")
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try DriveSender.send([unreadable], to: dest, root: root))
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dest.path), [])
     }
 
     func testThrowsWhenDriveIsNotMounted() throws {

@@ -150,6 +150,12 @@ struct VaultDoorView: View {
             } else {
                 SecureField("Vault password", text: $password).focused($focused).onSubmit(submit)
             }
+            if vault.passwordKeeper.isAvailable {
+                @Bindable var vault = vault
+                Toggle("Use Touch ID to add downloads", isOn: $vault.usesTouchID)
+                    .toggleStyle(.checkbox).font(.callout)
+                    .help("Download Video's Add to Vault opens the Vault with your fingerprint, then locks it again. Saved when you unlock.")
+            }
             if let message = vault.message {
                 Text(message).font(.callout).foregroundStyle(.red).multilineTextAlignment(.center)
                 if let folder = vault.folderWithFilesLeftOutside {

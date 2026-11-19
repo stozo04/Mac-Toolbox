@@ -16,7 +16,7 @@ enum VaultMoveError: LocalizedError, Equatable {
     case vaultNotOpen
     case busy
     case notSaved(String)
-    case originalKept(String)
+    case originalKept(String, copy: URL)
 
     var errorDescription: String? {
         switch self {
@@ -32,7 +32,7 @@ enum VaultMoveError: LocalizedError, Equatable {
         case .vaultNotOpen: "The vault closed before it was safely inside, so the original was kept."
         case .busy: "The vault is busy moving other files in. Try again when it's done."
         case .notSaved(let reason): "The copy in the vault couldn't be saved to the disk, so the original was kept: \(reason)"
-        case .originalKept(let reason): "It's in the vault, but the original couldn't be deleted: \(reason)"
+        case .originalKept(let reason, _): "It's in the vault, but the original couldn't be deleted: \(reason)"
         }
     }
 }
@@ -97,7 +97,7 @@ enum VaultMover {
         do {
             try FileManager.default.removeItem(at: source)
         } catch {
-            throw VaultMoveError.originalKept(error.localizedDescription)
+            throw VaultMoveError.originalKept(error.localizedDescription, copy: destination)
         }
         return destination
     }
