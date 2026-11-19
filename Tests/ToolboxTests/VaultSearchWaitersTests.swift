@@ -31,9 +31,7 @@ final class VaultSearchWaitersTests: XCTestCase {
 
     func testAWaitThatRunsOutIsAnsweredOnceAndALateAnswerIsHarmless() async throws {
         let waiters = VaultSearchWaiters()
-        let waiting = try await startWaiting(waiters, for: "a", atMost: .milliseconds(10))
-
-        let answer = await waiting.value
+        let answer = await waiters.wait(for: "a", atMost: .milliseconds(10)) {}
         waiters.answer("a", searchable: true)
 
         XCTAssertFalse(answer)
@@ -68,11 +66,10 @@ final class VaultSearchWaitersTests: XCTestCase {
 
     func testARenamedItemsWaitStillRunsOut() async throws {
         let waiters = VaultSearchWaiters()
-        let waiting = try await startWaiting(waiters, for: "old.mov", atMost: .milliseconds(50))
+        let answer = await waiters.wait(for: "old.mov", atMost: .milliseconds(50)) {
+            waiters.carry(from: "old.mov", to: "new.mov")
+        }
 
-        waiters.carry(from: "old.mov", to: "new.mov")
-
-        let answer = await waiting.value
         XCTAssertFalse(answer)
         XCTAssertEqual(waiters.count, 0)
     }
