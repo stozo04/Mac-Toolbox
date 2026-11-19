@@ -132,6 +132,18 @@ final class DownloadToVaultTests: XCTestCase {
                        + " Sent 1 to Google Drive. Not added to the Vault: The Vault didn't open.")
     }
 
+    func testAVaultLeftOpenIsReportedEvenWhenOnlyVaultVideosWereListed() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
+        try await send(model, vault: StandInVault(events: events))
+        let vault = StandInVault(events: events)
+        vault.opening = .unavailable("The Vault didn't open.", stillOpen: true)
+
+        try await send(model, vault: vault)
+
+        XCTAssertEqual(model.sendState, .failed(DownloadVideoModel.vaultStillOpen
+                                                + " These videos are in the Vault and weren't sent. The Vault didn't open."))
+    }
+
     func testCancellingTouchIDSendsNothing() async throws {
         let model = try await makeModel(links: "https://a.example.com/1", addToVault: true)
         let vault = StandInVault(events: events)

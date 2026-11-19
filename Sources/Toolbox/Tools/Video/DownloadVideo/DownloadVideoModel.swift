@@ -202,7 +202,9 @@ final class DownloadVideoModel {
 
     private func sendFromDownloads(_ downloads: [Download], report: VaultSendReport?) async {
         guard !downloads.isEmpty else {
-            sendState = .failed(report?.notAddedBecause.map { "These videos are in the Vault and weren't sent. \($0)" } ?? Self.onlyInVault)
+            var sentences = [report?.notAddedBecause.map { "These videos are in the Vault and weren't sent. \($0)" } ?? Self.onlyInVault]
+            if report?.stillOpen == true { sentences.insert(Self.vaultStillOpen, at: 0) }
+            sendState = .failed(sentences.joined(separator: " "))
             return
         }
         finishSend(await copyToDrive(downloads.map(\.file), fromVault: false), report: report)
