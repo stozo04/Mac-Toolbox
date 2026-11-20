@@ -1,8 +1,10 @@
-# Toolbox
+# Sidekit
 
-**Every tool, right on your Mac.**
+**One app for the small jobs on your Mac.** [sidekit-mac.vercel.app](https://sidekit-mac.vercel.app)
 
-Toolbox puts the small utilities you reach for every day into one app: convert a video, trim a recording, compress photos, sign a PDF, rename a pile of files, keep your Mac awake. Everything runs on your Mac, and your original files are never changed.
+Sidekit puts the small utilities you reach for every day into one free, open-source app: trim a video, compress photos, black out part of a PDF, keep your Mac awake. The tools run on your Mac, and your original files are never changed.
+
+Sidekit is the project's new name. The app, its window and the commands below still say **Toolbox** until the app itself is renamed.
 
 > **Status: early preview (version 0.12.2).** Thirty-nine tools are fully working: ten **Video**, two **Audio** (**Trim Audio** and **Extract Audio**), all eleven **Images**, two **Docs** (**Scan Document** and **Redact PDF**) and all fourteen **Mac** tools. Two pages sit beside the tools: **AI Models**, which finds the AI models on your Mac, and the **Vault**, a password-protected place for private photos and videos. The other tools can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
 
@@ -20,10 +22,10 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 
 ## Privacy
 
-- Tools work on your Mac, with nothing uploaded.
+- The tools do their work on your Mac. Your files stay there unless you use one of the features listed below.
 - Originals stay untouched. Results are saved as new files. The exceptions say so up front: the Mac tools change Mac settings (anything they remove goes to the Trash), and the Vault moves files into itself.
-- Only a few things use the internet: Download Video (the downloads, and updating yt-dlp), Network Speed Test, and the Vault's one-time download of its search model.
-- The installed app reports its own warnings and errors (never file contents, passwords or link details) so problems can be fixed. Runs from the project folder never send anything.
+- These use the internet: Download Video (the downloads, updating yt-dlp, and Send to Google, which copies finished downloads to your Google Drive folder), Network Speed Test, the Vault's one-time download of its search model, and Media Info's Open in Maps, which hands a video's location to Apple Maps when you click it.
+- The installed app reports its own warnings and errors so problems can be fixed. A report can include file names, the address of a link without its query string, your macOS version and a random install ID. It never includes file contents, passwords, tokens or your account name, and Vault reports leave out file names too. Runs from the project folder never send anything.
 
 ## Using the app
 
@@ -104,7 +106,7 @@ Download Video can also copy finished downloads to a Google Drive folder, and wi
 | **Reset Permissions** | Unstick an app's Screen Recording, Microphone, Camera and other privacy permissions. |
 | **Hidden Settings** | Dock delay and animation, hidden files, path bar, screenshot format and location, and more, with a reset arrow for each. |
 | **Display Control** | Change an external monitor's brightness, contrast and volume over DDC/CI. Apple silicon only; some adapters and docks block it. |
-| **Mouse Fixes** | Reverse, speed up or smooth out the mouse wheel without touching the trackpad. Needs Accessibility access and works while Toolbox is open. |
+| **Mouse Fixes** | Reverse, speed up or smooth out the mouse wheel without touching the trackpad. Needs Accessibility access and works while the app is open. |
 
 ### AI Models
 
@@ -112,7 +114,7 @@ Lists the AI models on your Mac in plain words: what each one does, where it is,
 
 ### Vault
 
-A hidden, password-protected library for photos and videos. They are stored in an AES-256 encrypted disk image, so even Finder only opens it with the password. Toolbox shows a vault door you unlock; inside you can:
+A hidden, password-protected library for photos and videos. They are stored in an AES-256 encrypted disk image, so even Finder only opens it with the password. The app shows a vault door you unlock; inside you can:
 
 - **Move files in** by dropping them or clicking Add. Each copy is checked against the original before the original is deleted.
 - **Browse** all items, only images or only videos (sorted by length), and step through them in a viewer with the arrow keys.
@@ -166,10 +168,12 @@ To build the packaged app (`Toolbox.app` with yt-dlp and ffmpeg inside), run `sc
 
 macOS asks for permission the first time a tool needs it. Today that means **Screen Recording** for Record Screen, **Microphone** only if you turn on the microphone there, **Accessibility** for Clean Keyboard and Mouse Fixes, and **Touch ID** if you let Download Video open the Vault. Later tools will ask for more, such as Microphone (Record Audio). When you run with `swift run`, macOS lists your terminal app in these prompts rather than Toolbox. You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
 
-## Feedback
+## Feedback and contributing
 
-Spotted something that doesn't match what you expected? Note the tool name and what you did, and pass it along.
+Spotted something that doesn't match what you expected? [Open an issue](https://github.com/stozo04/Mac-Toolbox/issues/new/choose) with the tool's name and what you did. Want a tool that isn't here? Ask in [Discussions](https://github.com/stozo04/Mac-Toolbox/discussions).
 
----
+The tools under [Coming soon](#coming-soon) each have a written brief and are open for anyone to build. [CONTRIBUTING.md](CONTRIBUTING.md) explains how, and [AGENTS.md](AGENTS.md) has the code map and the rules.
 
-Building or contributing? Start with [AGENTS.md](AGENTS.md).
+## License
+
+[MIT](LICENSE.md)
