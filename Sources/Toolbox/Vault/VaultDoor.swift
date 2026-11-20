@@ -336,10 +336,17 @@ final class VaultDoor: @unchecked Sendable {
     private func ejectThenForce() async -> String? {
         guard disk.isOpen else { return nil }
         let path = disk.location.mountPoint.path
+        let ejectStarted = Date()
         let eject = await lockStep(VaultDisk.diskutil, ["eject", path])
+        let ejectSeconds = Date().timeIntervalSince(ejectStarted)
         guard disk.isOpen else { return nil }
         let forced = await lockStep(VaultDisk.hdiutil, ["detach", "-force", path])
-        guard disk.isOpen else { return nil }
+        guard disk.isOpen else {
+            Log.warning("Vault closed by a forced eject", category: VaultLog.category,
+                        ["eject": VaultDisk.reason(eject), "eject_seconds": String(format: "%.1f", ejectSeconds),
+                         "eject_limit_seconds": String(format: "%.1f", bounds.lockStep)])
+            return nil
+        }
         Log.error("Vault eject failed", category: VaultLog.category, ["eject": VaultDisk.reason(eject), "forced_detach": VaultDisk.reason(forced)])
         return VaultDisk.reason(forced)
     }

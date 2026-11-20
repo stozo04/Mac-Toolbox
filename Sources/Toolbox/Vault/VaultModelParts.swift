@@ -45,7 +45,7 @@ extension VaultModel {
             MainActor.assumeIsolated { self?.lockBeforeSleep() }
         })
         observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { _ = self?.lockImmediately() }
+            MainActor.assumeIsolated { self?.lockBecauseTheScreenLocked() }
         })
         quitGuard.prepare(in: .shared)
         observers.append(workspace.addObserver(forName: NSWorkspace.didUnmountNotification, object: nil, queue: .main) { [weak self] note in

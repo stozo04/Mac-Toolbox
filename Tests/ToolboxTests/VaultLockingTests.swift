@@ -195,6 +195,30 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertEqual(model.phase, .locked)
     }
 
+    func testSleepAndTheScreenLockSayTheyAskedForTheLockOnlyWhenTheVaultIsOpen() async throws {
+        let sink = MemorySink(minimumLevel: .info)
+        Log.configure(sinks: [sink])
+        defer { Log.configure(sinks: []) }
+        let asked = { sink.events.map(\.message).filter { $0.hasPrefix("Vault locking") } }
+        let model = try await makeOpenVault("lock-triggers", stand: DoorStandIn())
+
+        model.lockBeforeSleep()
+        try await waitUntil("the lock has settled") { !model.isLocking }
+        XCTAssertEqual(asked(), ["Vault locking before sleep"])
+
+        model.lockBeforeSleep()
+        model.lockBecauseTheScreenLocked()
+        try await waitUntil("the lock has settled") { !model.isLocking }
+        XCTAssertEqual(asked(), ["Vault locking before sleep"], "a lock of a closed vault was recorded")
+
+        await model.unlock(password: Self.vaultPassword)
+        model.finishOpening()
+        XCTAssertEqual(model.phase, .open, model.message ?? "")
+        model.lockBecauseTheScreenLocked()
+        try await waitUntil("the lock has settled") { !model.isLocking }
+        XCTAssertEqual(asked(), ["Vault locking before sleep", "Vault locking because the screen locked"])
+    }
+
     func testSleepDuringAnUnlockStopsTheMountAndEjectsWhatLandedBeforeItReturns() async throws {
         let stand = DoorStandIn()
         stand.play("attach", as: .mountsThenHangs)
