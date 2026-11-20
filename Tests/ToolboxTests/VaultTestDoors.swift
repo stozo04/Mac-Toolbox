@@ -12,6 +12,8 @@ final class DoorStandIn: @unchecked Sendable {
         case mountsThenHangs
         /// Mounts the vault, then reports a failure, as an attach that went wrong late would.
         case mountsThenFails(String)
+        /// Ejects the vault, then reports a failure, as an eject that unmounted and then went wrong would.
+        case ejectsThenFails(String)
         /// Runs on whatever the door's time limit says, as a wedged eject would. Ended by `killProgramsLeftRunning`.
         case ignoresItsTimeLimit
         /// The real tool on a bound a busy Mac can meet, whatever the door's bounds: for closing up after a test that gave it short ones.
@@ -54,7 +56,7 @@ final class DoorStandIn: @unchecked Sendable {
             case .mountsThenHangs:
                 _ = try await VaultTool.system.run(path, arguments, input, timeout)
                 return try await hang(verb, timeout)
-            case .mountsThenFails(let message):
+            case .mountsThenFails(let message), .ejectsThenFails(let message):
                 _ = try await VaultTool.system.run(path, arguments, input, timeout)
                 return Shell.Result(status: 1, out: "", err: message)
             case .ignoresItsTimeLimit:

@@ -596,6 +596,7 @@ final class VaultModel {
 extension VaultModel {
     /// Sleep cannot wait on the main actor, so it blocks on the door's own answer for at most the door's lock bound.
     func lockBeforeSleep() {
+        noteLockTrigger("Vault locking before sleep")
         if lockInFlight == nil { beginLocking() } else { door.interruptUnlock() }
         let pending = door.startLock()
         if pending.wait(upTo: door.bounds.lock) == nil {
@@ -603,6 +604,17 @@ extension VaultModel {
                       ["reason": VaultNotices.whyNotLocked(during: door.unfinishedWrite, failure: lastLockFailure)])
         }
         if lockInFlight == nil { lockInFlight = Task { settle(await pending.value()) } }
+    }
+
+    func lockBecauseTheScreenLocked() {
+        noteLockTrigger("Vault locking because the screen locked")
+        lockImmediately()
+    }
+
+    /// Sleep and the screen lock leave no other event, so a failed eject's `recent` could not say what asked for it.
+    private func noteLockTrigger(_ message: String) {
+        guard door.state == .open || door.state == .mounting else { return }
+        Log.info(message, category: VaultLog.category)
     }
 
     @discardableResult
