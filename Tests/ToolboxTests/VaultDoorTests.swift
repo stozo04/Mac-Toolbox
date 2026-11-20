@@ -220,13 +220,31 @@ final class VaultDoorTests: XCTestCase {
 
         XCTAssertEqual(locked, .locked)
         XCTAssertEqual(stand.steps.value, ["attach", "eject", "detach"])
-        let forced = try XCTUnwrap(sink.events.first { $0.message == "Vault closed by a forced eject" })
+        let forced = try XCTUnwrap(sink.events.first { $0.message == "Vault closed although its eject failed" })
         XCTAssertEqual(forced.level, .warning)
         XCTAssertEqual(forced.category, VaultLog.category)
+        XCTAssertEqual(forced.metadata["closed_by"], "forced detach")
         XCTAssertEqual(forced.metadata["eject"], "Volume Vault on disk9 failed to unmount")
         XCTAssertEqual(forced.metadata["eject_limit_seconds"], "30.0")
         let seconds = try XCTUnwrap(forced.metadata["eject_seconds"].flatMap(Double.init))
         XCTAssertLessThan(seconds, Self.roomForARealDetach)
+    }
+
+    func testAnEjectThatClosesTheVaultButFailsIsLoggedToo() async throws {
+        let sink = MemorySink(minimumLevel: .warning)
+        Log.configure(sinks: [sink])
+        defer { Log.configure(sinks: []) }
+        let stand = DoorStandIn()
+        let door = try await makeOpenDoor(in: folder("closed-late"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: Self.roomForARealDetach))
+        stand.play("eject", as: .ejectsThenFails("diskutil did not finish within 6 seconds, so it was stopped."))
+
+        let locked = await door.lock()
+
+        XCTAssertEqual(locked, .locked)
+        XCTAssertEqual(stand.steps.value, ["attach", "eject"], "a vault the eject had closed was detached again")
+        let noted = try XCTUnwrap(sink.events.first { $0.message == "Vault closed although its eject failed" })
+        XCTAssertEqual(noted.metadata["closed_by"], "eject")
+        XCTAssertEqual(noted.metadata["eject"], "diskutil did not finish within 6 seconds, so it was stopped.")
     }
 
     func testAnEjectThatWorksLogsNothing() async throws {

@@ -339,16 +339,23 @@ final class VaultDoor: @unchecked Sendable {
         let ejectStarted = Date()
         let eject = await lockStep(VaultDisk.diskutil, ["eject", path])
         let ejectSeconds = Date().timeIntervalSince(ejectStarted)
-        guard disk.isOpen else { return nil }
+        guard disk.isOpen else {
+            if !eject.succeeded { noteFailedEject(eject, seconds: ejectSeconds, closedBy: "eject") }
+            return nil
+        }
         let forced = await lockStep(VaultDisk.hdiutil, ["detach", "-force", path])
         guard disk.isOpen else {
-            Log.warning("Vault closed by a forced eject", category: VaultLog.category,
-                        ["eject": VaultDisk.reason(eject), "eject_seconds": String(format: "%.1f", ejectSeconds),
-                         "eject_limit_seconds": String(format: "%.1f", bounds.lockStep)])
+            noteFailedEject(eject, seconds: ejectSeconds, closedBy: "forced detach")
             return nil
         }
         Log.error("Vault eject failed", category: VaultLog.category, ["eject": VaultDisk.reason(eject), "forced_detach": VaultDisk.reason(forced)])
         return VaultDisk.reason(forced)
+    }
+
+    private func noteFailedEject(_ eject: Shell.Result, seconds: TimeInterval, closedBy: String) {
+        Log.warning("Vault closed although its eject failed", category: VaultLog.category,
+                    ["eject": VaultDisk.reason(eject), "eject_seconds": String(format: "%.1f", seconds),
+                     "eject_limit_seconds": String(format: "%.1f", bounds.lockStep), "closed_by": closedBy])
     }
 
     private func lockStep(_ path: String, _ arguments: [String]) async -> Shell.Result {
