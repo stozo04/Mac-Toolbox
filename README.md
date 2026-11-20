@@ -4,7 +4,7 @@
 
 Toolbox puts the small utilities you reach for every day into one app: convert a video, trim a recording, compress photos, sign a PDF, rename a pile of files, keep your Mac awake. Everything runs on your Mac, and your original files are never changed.
 
-> **Status: early preview.** The app's layout, navigation and look are in place, and thirty-seven tools are fully working: ten **Video** tools, all eleven **Images** tools, two **Docs** tools (**Scan Document** and **Redact PDF**) and all fourteen **Mac** tools. The rest can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
+> **Status: early preview (version 0.12.2).** Thirty-nine tools are fully working: ten **Video**, two **Audio** (**Trim Audio** and **Extract Audio**), all eleven **Images**, two **Docs** (**Scan Document** and **Redact PDF**) and all fourteen **Mac** tools. Two pages sit beside the tools: **AI Models**, which finds the AI models on your Mac, and the **Vault**, a password-protected place for private photos and videos. The other tools can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
 
 ## What's inside
 
@@ -20,9 +20,10 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 
 ## Privacy
 
-- Tools are designed to work on your Mac, with nothing uploaded.
-- Originals stay untouched. Results are saved as new files.
-- The only tools that need the internet are the ones that are about it by nature, such as Download Video and Network Speed Test.
+- Tools work on your Mac, with nothing uploaded.
+- Originals stay untouched. Results are saved as new files. The exceptions say so up front: the Mac tools change Mac settings (anything they remove goes to the Trash), and the Vault moves files into itself.
+- Only a few things use the internet: Download Video (the downloads, and updating yt-dlp), Network Speed Test, and the Vault's one-time download of its search model.
+- The installed app reports its own warnings and errors (never file contents, passwords or link details) so problems can be fixed. Runs from the project folder never send anything.
 
 ## Using the app
 
@@ -30,6 +31,8 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 - **Open a tool:** click its card. Most tools ask you to **drop a file** onto the window or click **Choose File...**. Some, like Download Video, take a pasted link. Others, like Keep Awake, are switches you flip.
 - **Favorites:** click the star next to a tool's name. Favorites appear on the home screen.
 - **Recent:** the tools you used last show up as quick buttons on the home and category pages.
+- **AI Models and Vault:** the two pills at the top next to the categories.
+- **What's new:** click the version number in the bottom-right corner to see the release history.
 - **Light or dark:** click the sun/moon button at the top right. It switches the whole app. (It opens in dark mode each time for now.)
 - **Go back:** use the arrow at the top left of a tool page.
 
@@ -51,6 +54,15 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 | **Media Info** | See the codec, resolution, frame rate, bitrate and metadata of videos and audio. |
 | **Mute Video** | Remove the soundtrack from videos without re-encoding. |
 | **Burn In Subtitles** | Add captions to a video from an SRT file or automatic transcription. |
+
+Download Video can also copy finished downloads to a Google Drive folder, and with **Add to Vault** ticked it first moves them into the Vault with Touch ID, makes them searchable, and locks the Vault again.
+
+#### Audio
+
+| Tool | What it does |
+|---|---|
+| **Trim Audio** | Drag handles on a waveform to keep the part you want, add a fade in or out and hear it before saving. Save in the same format (copied as is, or rewritten losslessly) or as MP3, M4A, WAV, FLAC or AIFF. |
+| **Extract Audio** | Save the soundtrack of one or more videos as M4A, MP3, WAV or AIFF. AAC sound is copied without losing quality. |
 
 #### Images
 
@@ -94,12 +106,28 @@ Toolbox puts the small utilities you reach for every day into one app: convert a
 | **Display Control** | Change an external monitor's brightness, contrast and volume over DDC/CI. Apple silicon only; some adapters and docks block it. |
 | **Mouse Fixes** | Reverse, speed up or smooth out the mouse wheel without touching the trackpad. Needs Accessibility access and works while Toolbox is open. |
 
+### AI Models
+
+Lists the AI models on your Mac in plain words: what each one does, where it is, how big it is and which apps use it. The list stays current while the page is open. It can gather movable models into one folder (`~/Library/Application Support/Toolbox/AI Models`) and leave a link behind so their apps keep working; models that belong to other apps, the Hugging Face cache and Ollama are never moved.
+
+### Vault
+
+A hidden, password-protected library for photos and videos. They are stored in an AES-256 encrypted disk image, so even Finder only opens it with the password. Toolbox shows a vault door you unlock; inside you can:
+
+- **Move files in** by dropping them or clicking Add. Each copy is checked against the original before the original is deleted.
+- **Browse** all items, only images or only videos (sorted by length), and step through them in a viewer with the arrow keys.
+- **Search by what they show or say**, on your Mac, with EmbeddingGemma. The search model (865 MB) is downloaded once.
+- **Find duplicates**, exact or likely, and send the extras to the Vault's own Trash, where you can put them back.
+- **See details and rename** files with ⌘I.
+
+The Vault locks when you leave the page, lock the screen, sleep or quit. Ticking **Use Touch ID to add downloads** when you unlock lets Download Video open it with your fingerprint.
+
 ### Coming soon
 
-These 31 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
+These 29 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
 
 - **Video:** Change Speed, Convert Video, Crop & Rotate Video, Merge Videos
-- **Audio:** Clean Up Audio, Record Audio, Trim Audio, Extract Audio, Convert Audio
+- **Audio:** Clean Up Audio, Record Audio, Convert Audio
 - **Docs:** Fill & Flatten Forms, Make PDF Searchable, PDF to Word, Sign PDF, Merge PDFs, Split PDF, Organize PDF, Delete Pages, Extract Pages, Images to PDF, Compress PDF
 - **Text & Speech:** Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document
 - **Files:** QR Code, Batch Rename, Find Duplicates, Zip & Unzip
@@ -108,32 +136,35 @@ These 31 tools can be browsed and opened, but show a "Feature not implemented" b
 
 | Works now | Not built yet |
 |---|---|
-| Browsing all categories and tools | The 31 tools listed under [Coming soon](#coming-soon) |
+| Browsing all categories and tools | The 29 tools listed under [Coming soon](#coming-soon) |
 | Search, favorites, recent tools | Saving your favorites and settings between launches |
 | Light / dark mode switch | The remaining Docs tools |
-| 37 working tools: ten Video, eleven Images, two Docs and all fourteen Mac | A global hotkey for Record Screen |
+| 39 working tools: ten Video, two Audio, eleven Images, two Docs and all fourteen Mac | A global hotkey for Record Screen |
+| The AI Models page and the Vault | |
+| Release history (click the version number) | |
 
 ## Requirements
 
 - A Mac running **macOS 14 (Sonoma) or later**.
-- To run the preview, you need Apple's developer tools (Xcode or the Command Line Tools).
+- An Apple silicon Mac (M1 or later).
+- To run the preview, you need Apple's developer tools (Xcode or the Command Line Tools) and CMake.
 
 ## Running the preview
 
-Toolbox runs on Apple silicon Macs. Open Terminal in the project folder and run:
+Open Terminal in the project folder and run:
 
 ```
 scripts/build-llama.sh
 swift run Toolbox
 ```
 
-`scripts/build-llama.sh` builds llama.cpp, which the Vault's smart search runs on (it needs CMake, from Homebrew or `uv`, and takes a few minutes once). The first run takes a minute to build. To quit, press **⌘Q**. To open a tool straight away, add `--page`, for example `swift run Toolbox --page "Video/Trim Video"`.
+`scripts/build-llama.sh` builds llama.cpp, which the Vault's smart search runs on (it needs CMake, from Homebrew or `uv`, and takes a few minutes once). The first run takes a minute to build. To quit, press **⌘Q**. To open a page straight away, add `--page`, for example `swift run Toolbox --page "Video/Trim Video"` or `--page Vault`. A run from the project folder keeps its own test vault and never opens the one the installed app uses.
 
-To build the packaged app (an Apple silicon `Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`.
+To build the packaged app (`Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`.
 
 ## Permissions you may be asked for
 
-macOS asks for permission the first time a tool needs it. Today that means **Screen Recording** for Record Screen, **Microphone** only if you turn on the microphone there, and **Accessibility** for Clean Keyboard and Mouse Fixes. Later tools will ask for more, such as Microphone (Record Audio). When you run with `swift run`, macOS lists your terminal app in these prompts rather than Toolbox. You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
+macOS asks for permission the first time a tool needs it. Today that means **Screen Recording** for Record Screen, **Microphone** only if you turn on the microphone there, **Accessibility** for Clean Keyboard and Mouse Fixes, and **Touch ID** if you let Download Video open the Vault. Later tools will ask for more, such as Microphone (Record Audio). When you run with `swift run`, macOS lists your terminal app in these prompts rather than Toolbox. You can change these any time in System Settings > Privacy & Security, or use **Reset Permissions** inside Toolbox.
 
 ## Feedback
 
