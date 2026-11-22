@@ -3,6 +3,7 @@ import SwiftUI
 struct DownloadVideoView: View {
     @State private var model = DownloadVideoModel.shared
     @Environment(VaultModel.self) private var vault
+    @State private var driveFolder = DriveSender.chosenFolder()
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -136,12 +137,12 @@ struct DownloadVideoView: View {
     }
 
     private var driveFolderHelp: String {
-        guard let folder = DriveSender.chosenFolder() else { return "Asks which Google Drive folder to copy the downloads to" }
+        guard let folder = driveFolder else { return "Asks which Google Drive folder to copy the downloads to" }
         return "Copies the downloads to \(folder.lastPathComponent) in Google Drive. Right-click to change the folder."
     }
 
     private func sendToGoogle() {
-        guard DriveSender.chosenFolder() != nil || chooseDriveFolder() else { return }
+        guard driveFolder != nil || chooseDriveFolder() else { return }
         model.sendToGoogle(vault: vault)
     }
 
@@ -150,11 +151,12 @@ struct DownloadVideoView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.directoryURL = DriveSender.chosenFolder() ?? DriveSender.cloudStorage
+        panel.directoryURL = driveFolder ?? DriveSender.cloudStorage
         panel.message = "Choose the Google Drive folder to copy downloads to"
         panel.prompt = "Use This Folder"
         guard panel.runModal() == .OK, let folder = panel.url else { return false }
         DriveSender.choose(folder)
+        driveFolder = DriveSender.chosenFolder()
         return true
     }
 
