@@ -137,7 +137,7 @@ jobs:
         with:
           name: Toolbox-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || format('run{0}', github.run_number) }}
           path: dist/Toolbox.zip
-          retention-days: 14
+          retention-days: 3
           if-no-files-found: error
       - name: How to open it
         env:
