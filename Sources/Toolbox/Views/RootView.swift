@@ -16,6 +16,7 @@ struct RootView: View {
                     case .category(let c): CategoryView(category: c)
                     case .models: ModelsView()
                     case .vault: VaultView()
+                    case .logs: LogsView()
                     case .tool(let t): ToolView(tool: t).id(t.id)
                     }
                 }

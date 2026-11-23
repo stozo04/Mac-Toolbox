@@ -39,56 +39,46 @@ enum VaultIndexError: LocalizedError {
 
 final class VaultIndex {
     static let fileName = "index.sqlite"
-    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    private var db: OpaquePointer?
+    private let db: SQLiteDatabase
 
     init(at url: URL, vectorSource: String = LlamaEmbedder.vectorSource) throws {
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
-            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "can't open"
-            sqlite3_close(db)
-            throw VaultIndexError.sqlite(message)
-        }
-        try execute("""
+        db = try SQLiteDatabase(at: url) { VaultIndexError.sqlite($0) }
+        try db.execute("""
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, bytes INTEGER, modified REAL);
             CREATE TABLE IF NOT EXISTS segments(id INTEGER PRIMARY KEY, path TEXT, modality TEXT, start REAL, finish REAL, vector BLOB);
             CREATE INDEX IF NOT EXISTS segments_path ON segments(path);
             """)
         if meta("vector_source") != vectorSource {
-            try execute("DELETE FROM segments; DELETE FROM files;")
+            try db.execute("DELETE FROM segments; DELETE FROM files;")
             try setMeta("vector_source", vectorSource)
         }
     }
 
-    deinit { close() }
-
-    func close() {
-        if let db { sqlite3_close_v2(db) }
-        db = nil
-    }
+    func close() { db.close() }
 
     func files() throws -> [String: VaultIndexedFile] {
         var out: [String: VaultIndexedFile] = [:]
-        try query("SELECT path, bytes, modified FROM files") { statement in
-            out[Self.text(statement, 0)] = VaultIndexedFile(bytes: sqlite3_column_int64(statement, 1), modified: sqlite3_column_double(statement, 2))
+        try db.query("SELECT path, bytes, modified FROM files") { statement in
+            out[SQLiteDatabase.text(statement, 0)] = VaultIndexedFile(bytes: sqlite3_column_int64(statement, 1), modified: sqlite3_column_double(statement, 2))
         }
         return out
     }
 
     func store(path: String, file: VaultIndexedFile, segments: [VaultSegment]) throws {
-        try inTransaction {
-            try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, path) }
+        try db.inTransaction {
+            try db.run("DELETE FROM segments WHERE path = ?") { SQLiteDatabase.bind($0, 1, path) }
             for segment in segments {
-                try run("INSERT INTO segments(path, modality, start, finish, vector) VALUES(?, ?, ?, ?, ?)") { statement in
-                    Self.bind(statement, 1, path)
-                    Self.bind(statement, 2, segment.modality.rawValue)
+                try db.run("INSERT INTO segments(path, modality, start, finish, vector) VALUES(?, ?, ?, ?, ?)") { statement in
+                    SQLiteDatabase.bind(statement, 1, path)
+                    SQLiteDatabase.bind(statement, 2, segment.modality.rawValue)
                     sqlite3_bind_double(statement, 3, segment.start)
                     sqlite3_bind_double(statement, 4, segment.end)
-                    segment.vector.withUnsafeBytes { _ = sqlite3_bind_blob(statement, 5, $0.baseAddress, Int32($0.count), Self.transient) }
+                    segment.vector.withUnsafeBytes { SQLiteDatabase.bind(statement, 5, bytes: $0) }
                 }
             }
-            try run("INSERT OR REPLACE INTO files(path, bytes, modified) VALUES(?, ?, ?)") { statement in
-                Self.bind(statement, 1, path)
+            try db.run("INSERT OR REPLACE INTO files(path, bytes, modified) VALUES(?, ?, ?)") { statement in
+                SQLiteDatabase.bind(statement, 1, path)
                 sqlite3_bind_int64(statement, 2, file.bytes)
                 sqlite3_bind_double(statement, 3, file.modified)
             }
@@ -97,22 +87,22 @@ final class VaultIndex {
 
     func remove(_ paths: [String]) throws {
         guard !paths.isEmpty else { return }
-        try inTransaction {
+        try db.inTransaction {
             for path in paths {
-                try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, path) }
-                try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, path) }
+                try db.run("DELETE FROM segments WHERE path = ?") { SQLiteDatabase.bind($0, 1, path) }
+                try db.run("DELETE FROM files WHERE path = ?") { SQLiteDatabase.bind($0, 1, path) }
             }
         }
     }
 
     func rename(_ oldPath: String, to newPath: String) throws {
-        try inTransaction {
-            try run("DELETE FROM segments WHERE path = ?") { Self.bind($0, 1, newPath) }
-            try run("DELETE FROM files WHERE path = ?") { Self.bind($0, 1, newPath) }
+        try db.inTransaction {
+            try db.run("DELETE FROM segments WHERE path = ?") { SQLiteDatabase.bind($0, 1, newPath) }
+            try db.run("DELETE FROM files WHERE path = ?") { SQLiteDatabase.bind($0, 1, newPath) }
             for table in ["segments", "files"] {
-                try run("UPDATE \(table) SET path = ? WHERE path = ?") { statement in
-                    Self.bind(statement, 1, newPath)
-                    Self.bind(statement, 2, oldPath)
+                try db.run("UPDATE \(table) SET path = ? WHERE path = ?") { statement in
+                    SQLiteDatabase.bind(statement, 1, newPath)
+                    SQLiteDatabase.bind(statement, 2, oldPath)
                 }
             }
         }
@@ -120,24 +110,24 @@ final class VaultIndex {
 
     func coverage(of path: String) throws -> VaultIndexCoverage? {
         var file: VaultIndexedFile?
-        try query("SELECT bytes, modified FROM files WHERE path = ?", bind: { Self.bind($0, 1, path) }) { statement in
+        try db.query("SELECT bytes, modified FROM files WHERE path = ?", bind: { SQLiteDatabase.bind($0, 1, path) }) { statement in
             file = VaultIndexedFile(bytes: sqlite3_column_int64(statement, 0), modified: sqlite3_column_double(statement, 1))
         }
         guard let file else { return nil }
         var counts: [Modality: Int] = [:]
-        try query("SELECT modality, COUNT(*) FROM segments WHERE path = ? GROUP BY modality", bind: { Self.bind($0, 1, path) }) { statement in
-            if let modality = Modality(rawValue: Self.text(statement, 0)) { counts[modality] = Int(sqlite3_column_int(statement, 1)) }
+        try db.query("SELECT modality, COUNT(*) FROM segments WHERE path = ? GROUP BY modality", bind: { SQLiteDatabase.bind($0, 1, path) }) { statement in
+            if let modality = Modality(rawValue: SQLiteDatabase.text(statement, 0)) { counts[modality] = Int(sqlite3_column_int(statement, 1)) }
         }
         return VaultIndexCoverage(file: file, segments: counts)
     }
 
     func vectors(dimension: Int = LlamaEmbedder.dimension) throws -> VaultVectors {
         var out = VaultVectors()
-        try query("SELECT path, modality, vector FROM segments ORDER BY id") { statement in
+        try db.query("SELECT path, modality, vector FROM segments ORDER BY id") { statement in
             let bytes = Int(sqlite3_column_bytes(statement, 2))
             guard bytes == dimension * MemoryLayout<Float>.size, let blob = sqlite3_column_blob(statement, 2),
-                  let modality = Modality(rawValue: Self.text(statement, 1)) else { return }
-            out.paths.append(Self.text(statement, 0))
+                  let modality = Modality(rawValue: SQLiteDatabase.text(statement, 1)) else { return }
+            out.paths.append(SQLiteDatabase.text(statement, 0))
             out.modalities.append(modality)
             out.matrix.append(contentsOf: UnsafeBufferPointer(start: blob.assumingMemoryBound(to: Float.self), count: dimension))
         }
@@ -146,74 +136,22 @@ final class VaultIndex {
 
     func pathsWithSound() throws -> Set<String> {
         var paths: Set<String> = []
-        try query("SELECT DISTINCT path FROM segments WHERE modality = 'audio'") { statement in
-            paths.insert(Self.text(statement, 0))
+        try db.query("SELECT DISTINCT path FROM segments WHERE modality = 'audio'") { statement in
+            paths.insert(SQLiteDatabase.text(statement, 0))
         }
         return paths
     }
 
     func meta(_ key: String) -> String? {
         var value: String?
-        try? query("SELECT value FROM meta WHERE key = ?", bind: { Self.bind($0, 1, key) }) { value = Self.text($0, 0) }
+        try? db.query("SELECT value FROM meta WHERE key = ?", bind: { SQLiteDatabase.bind($0, 1, key) }) { value = SQLiteDatabase.text($0, 0) }
         return value
     }
 
     func setMeta(_ key: String, _ value: String) throws {
-        try run("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)") { statement in
-            Self.bind(statement, 1, key)
-            Self.bind(statement, 2, value)
+        try db.run("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)") { statement in
+            SQLiteDatabase.bind(statement, 1, key)
+            SQLiteDatabase.bind(statement, 2, value)
         }
-    }
-
-    private func inTransaction(_ changes: () throws -> Void) throws {
-        try execute("BEGIN IMMEDIATE")
-        do {
-            try changes()
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
-        }
-    }
-
-    private func execute(_ sql: String) throws {
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw error() }
-    }
-
-    private func run(_ sql: String, bind: (OpaquePointer) -> Void) throws {
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-        bind(statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw error() }
-    }
-
-    private func query(_ sql: String, bind: (OpaquePointer) -> Void = { _ in }, row: (OpaquePointer) -> Void) throws {
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-        bind(statement)
-        while true {
-            let status = sqlite3_step(statement)
-            if status == SQLITE_DONE { return }
-            guard status == SQLITE_ROW else { throw error() }
-            row(statement)
-        }
-    }
-
-    private func prepare(_ sql: String) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw error() }
-        return statement
-    }
-
-    private func error() -> VaultIndexError {
-        VaultIndexError.sqlite(db.map { String(cString: sqlite3_errmsg($0)) } ?? "the index is closed")
-    }
-
-    private static func bind(_ statement: OpaquePointer, _ index: Int32, _ text: String) {
-        sqlite3_bind_text(statement, index, text, -1, transient)
-    }
-
-    private static func text(_ statement: OpaquePointer, _ column: Int32) -> String {
-        sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
     }
 }

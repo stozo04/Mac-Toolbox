@@ -25,7 +25,7 @@ Sidekit is the project's new name. The app, its window and the commands below st
 - The tools do their work on your Mac. Your files stay there unless you use one of the features listed below.
 - Originals stay untouched. Results are saved as new files. The exceptions say so up front: the Mac tools change Mac settings (anything they remove goes to the Trash), and the Vault moves files into itself.
 - These use the internet: Download Video (the downloads, updating yt-dlp, and Send to Google, which copies finished downloads to your Google Drive folder), Network Speed Test, the Vault's one-time download of its search model, and Media Info's Open in Maps, which hands a video's location to Apple Maps when you click it.
-- The installed app reports its own warnings and errors so problems can be fixed. A report can include file names, the address of a link without its query string, your macOS version and a random install ID. It never includes file contents, passwords, tokens or your account name, and Vault reports leave out file names too. Runs from the project folder never send anything.
+- The app keeps its own log on your Mac (`~/Library/Application Support/Toolbox/logs.sqlite`, 90 days) and shows it on the **Logs** page. Nothing in it is sent anywhere. An entry can include file names, the address of a link without its query string, your macOS version and a random install ID. It never includes file contents, passwords, tokens or your account name, and Vault entries leave out file names too. Runs from the project folder keep a separate log (`logs-dev.sqlite`).
 
 ## Using the app
 
@@ -33,7 +33,7 @@ Sidekit is the project's new name. The app, its window and the commands below st
 - **Open a tool:** click its card. Most tools ask you to **drop a file** onto the window or click **Choose File...**. Some, like Download Video, take a pasted link. Others, like Keep Awake, are switches you flip.
 - **Favorites:** click the star next to a tool's name. Favorites appear on the home screen.
 - **Recent:** the tools you used last show up as quick buttons on the home and category pages.
-- **AI Models and Vault:** the two pills at the top next to the categories.
+- **AI Models, Vault and Logs:** the pills at the top next to the categories. Logs lists everything the app recorded, filtered by time and severity, with a count of each severity for the chosen time.
 - **What's new:** click the version number in the bottom-right corner to see the release history.
 - **Light or dark:** click the sun/moon button at the top right. It switches the whole app. (It opens in dark mode each time for now.)
 - **Go back:** use the arrow at the top left of a tool page.

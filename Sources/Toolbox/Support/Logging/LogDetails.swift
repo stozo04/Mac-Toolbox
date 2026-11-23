@@ -63,8 +63,8 @@ extension Log {
 }
 
 extension LogEvent {
-    /// Fits the event inside the limits of the `mactoolkit_app_logs` table. A row that breaks a limit is
-    /// rejected, and the sink would drop the whole batch with it, so trim here instead.
+    /// Keeps one event small (category 64, message 500, metadata about 3.5 KB), so a runaway error text cannot
+    /// bloat the log store and every event still reads on one screen of the Logs page.
     func fitted(metadataBudget: Int = 3500) -> LogEvent {
         var e = self
         e.category = LogText.clean(category, limit: 64)
