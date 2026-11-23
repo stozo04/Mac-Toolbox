@@ -165,6 +165,20 @@ final class LogStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testAStatusFindsOlderProblemsBehindMoreThanTheRowLimit() throws {
+        let store = try makeStore()
+        try store.append(event(.error, "old and open", hoursAgo: 10, metadata: [:]))
+        for index in 0...LogsModel.rowLimit { try store.append(event(.info, "page \(index)", hoursAgo: 1, metadata: [:])) }
+        let model = LogsModel(store: store, now: { self.now })
+        model.reload()
+        XCTAssertTrue(model.reachedLimit)
+        XCTAssertFalse(model.rows.contains { $0.event.message == "old and open" })
+        model.status = .open
+        XCTAssertEqual(model.rows.map(\.event.message), ["old and open"])
+        XCTAssertFalse(model.reachedLimit)
+    }
+
+    @MainActor
     func testCopyAsMarkdownCarriesTheEvidenceAndTheFix() throws {
         let store = try makeStore()
         try store.append(event(.error))

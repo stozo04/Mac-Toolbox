@@ -107,8 +107,8 @@ final class LogStore: @unchecked Sendable {
         try db.run("DELETE FROM logs WHERE timestamp < ?") { sqlite3_bind_double($0, 1, date.timeIntervalSince1970) }
     }
 
-    /// Newest first. `since` nil means every event kept.
-    func events(since: Date?, levels: Set<LogLevel>, limit: Int) throws -> [StoredLog] {
+    /// Newest first. `since` nil means every event kept; `limit` nil means no limit.
+    func events(since: Date?, levels: Set<LogLevel>, limit: Int?) throws -> [StoredLog] {
         guard !levels.isEmpty else { return [] }
         let chosen = LogLevel.allCases.filter(levels.contains)
         let placeholders = Array(repeating: "?", count: chosen.count).joined(separator: ", ")
@@ -119,7 +119,7 @@ final class LogStore: @unchecked Sendable {
             """, bind: { statement in
             sqlite3_bind_double(statement, 1, since?.timeIntervalSince1970 ?? 0)
             for (offset, level) in chosen.enumerated() { SQLiteDatabase.bind(statement, Int32(offset + 2), level.rawValue) }
-            sqlite3_bind_int64(statement, Int32(chosen.count + 2), Int64(limit))
+            sqlite3_bind_int64(statement, Int32(chosen.count + 2), limit.map(Int64.init) ?? -1)
         }) { statement in
             if let log = Self.storedLog(statement) { out.append(log) }
         }

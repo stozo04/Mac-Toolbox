@@ -20,10 +20,11 @@ final class LogsModel {
     var range: LogRange = .all { didSet { reload() } }
     private(set) var levels: Set<LogLevel> = Set(LogLevel.allCases)
     /// nil shows every status; a status hides info events, which have none.
-    var status: LogStatus?
+    var status: LogStatus? { didSet { reload() } }
     var selectedID: Int64?
 
-    private(set) var allRows: [LogRow] = []
+    /// The rows the filters select, newest first, at most `rowLimit`.
+    private(set) var rows: [LogRow] = []
     private(set) var counts: [LogLevel: Int] = [:]
     private(set) var reachedLimit = false
     private(set) var problem: String?
@@ -45,12 +46,7 @@ final class LogsModel {
         }
     }
 
-    var rows: [LogRow] {
-        guard let status else { return allRows }
-        return allRows.filter { $0.status == status }
-    }
-
-    var selected: LogRow? { allRows.first { $0.id == selectedID } }
+    var selected: LogRow? { rows.first { $0.id == selectedID } }
     var showsEveryLevel: Bool { levels.count == LogLevel.allCases.count }
     var totalInRange: Int { counts.values.reduce(0, +) }
 
@@ -78,13 +74,20 @@ final class LogsModel {
         do {
             let start = range.start(now: now())
             let resolutions = try store.latestResolutions()
-            let logs = try store.events(since: start, levels: levels, limit: Self.rowLimit)
-            allRows = logs.map { log in
+            // A status is worked out per event (it compares versions), so with one chosen every problem in the range
+            // is read and filtered before the limit; otherwise an older match would hide behind newer events.
+            let problemLevels = levels.filter { $0 >= .warning }
+            let logs = try status == nil
+                ? store.events(since: start, levels: levels, limit: Self.rowLimit + 1)
+                : store.events(since: start, levels: problemLevels, limit: nil)
+            let matching = logs.lazy.map { log in
                 let resolution = resolutions[log.signature]
                 return LogRow(log: log, status: LogStatus.of(log, resolution: resolution), resolution: resolution)
-            }
+            }.filter { self.status == nil || $0.status == self.status }
+            let all = Array(matching.prefix(Self.rowLimit + 1))
+            rows = Array(all.prefix(Self.rowLimit))
+            reachedLimit = all.count > Self.rowLimit
             counts = try store.counts(since: start)
-            reachedLimit = logs.count == Self.rowLimit
             problem = nil
         } catch {
             problem = error.localizedDescription
