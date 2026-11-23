@@ -70,7 +70,7 @@ more of this run's rows match:
   at the top of the comment and in your final report ("watch #N: act-when met"). Do not change code for it; the owner
   decides.
 - Matching rows are still grouped above. A signature that only exists because of a watch issue is not fixed or recorded
-  as "needs a human"; its outcome is `watch #N`.
+  as `needs_human`; its outcome is `watching`, with the watch issues as its links.
 
 Each row's `metadata` is the evidence. Useful keys: `error_description`, `error_domain`, `error_code`, `underlying`,
 `file_name`, `file_ext`, `file_bytes`, `page` (where the user was), `recent` (the last events before the failure,
@@ -86,7 +86,7 @@ Do all edits, builds and tests inside that worktree. For each signature:
 - Find the root cause from the evidence and the code. Prefer the smallest change that fixes it.
 - Add or extend a test in `Tests/ToolboxTests/` that fails before the fix and passes after.
 - Run `swift build` and `swift test` in the worktree. If either fails and you cannot fix that in two tries, undo that
-  fix and record the signature as "needs a human" with what you learned.
+  fix and record the signature as `needs_human` with what you learned.
 - One commit per signature, message starting with the tool name. Never modify a user's original files, never use
   `sudo`, follow every rule in `AGENTS.md`.
 - If the evidence is too thin to know the cause, do NOT guess a fix. Instead make the logging better: add the missing
@@ -95,7 +95,7 @@ Do all edits, builds and tests inside that worktree. For each signature:
 
 ## 4. Open the draft PR
 Push the branch and run `gh pr create --draft --base main` with a body that has: a table of signatures (level, count,
-sessions, first/last seen, outcome: fixed / logging improved / needs a human), the evidence you used for each (quote
+sessions, first/last seen, outcome: `fix_proposed` / `logging_improved` / `needs_human`), the evidence you used for each (quote
 `error_description`, `page`, `recent`; no personal paths), and what you changed. End the body with
 `🤖 Generated with [Claude Code](https://claude.com/claude-code)` and end commits with
 `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. If nothing could be fixed or improved, skip the PR and
