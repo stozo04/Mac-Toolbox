@@ -28,6 +28,7 @@ enum LogRange: String, CaseIterable, Identifiable, Sendable {
 /// Where a warning, error or critical stands, from the log fixer's newest decision about its signature.
 enum LogStatus: String, CaseIterable, Identifiable, Sendable {
     case open = "Open"
+    case issueOpen = "Issue open"
     case fixProposed = "Fix proposed"
     case fixed = "Fixed"
     case cameBack = "Came back"
@@ -37,12 +38,16 @@ enum LogStatus: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// An issue, pull request or watch issue already follows this problem, so starting another issue would duplicate it.
+    var alreadyTracked: Bool { self == .issueOpen || self == .fixProposed || self == .watching }
+
     /// Info events are a trail, not problems, so they have no status. A fix counts from the version it shipped in:
     /// the same problem from that version or a later one means the fix did not hold.
     static func of(_ log: StoredLog, resolution: LogResolution?) -> LogStatus? {
         guard log.event.level >= .warning else { return nil }
         guard let resolution else { return .open }
         switch resolution.outcome {
+        case .issueOpen: return .issueOpen
         case .fixProposed: return .fixProposed
         case .watching: return .watching
         case .needsHuman: return .needsHuman

@@ -174,6 +174,7 @@ extension LogStatus {
     var color: Color {
         switch self {
         case .open: .orange
+        case .issueOpen: .indigo
         case .fixProposed: .blue
         case .fixed: .green
         case .cameBack: Theme.warning

@@ -119,6 +119,15 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(latest.links.map(\.absoluteString), ["https://github.com/stozo04/Mac-Toolbox/pull/57"])
     }
 
+    func testThePageLinksTheIssueUntilThereIsAPullRequest() {
+        let issue = "https://github.com/stozo04/Mac-Toolbox/issues/58"
+        let pullRequest = "https://github.com/stozo04/Mac-Toolbox/pull/60"
+        XCTAssertEqual(resolution(.issueOpen, for: "s", links: [issue]).shownLinks.map(\.absoluteString), [issue])
+        XCTAssertEqual(resolution(.fixProposed, for: "s", links: [pullRequest, issue]).shownLinks.map(\.absoluteString), [pullRequest])
+        let watched = ["https://github.com/stozo04/Mac-Toolbox/issues/55", "https://github.com/stozo04/Mac-Toolbox/issues/56"]
+        XCTAssertEqual(resolution(.watching, for: "s", links: watched).shownLinks.map(\.absoluteString), watched)
+    }
+
     func testStatusFollowsTheFixAndTheVersionItShippedIn() {
         let before = StoredLog(id: 1, event: event(.error, version: "0.12.4"), signature: event(.error).signature)
         let after = StoredLog(id: 2, event: event(.error, version: "0.12.10"), signature: event(.error).signature)
@@ -133,6 +142,8 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.loggingImproved, for: before.signature, version: "0.12.9")), .loggingImproved)
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.watching, for: before.signature)), .watching)
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.fixProposed, for: before.signature)), .fixProposed)
+        XCTAssertEqual(LogStatus.of(before, resolution: resolution(.issueOpen, for: before.signature)), .issueOpen)
+        XCTAssertEqual(LogStatus.allCases.filter(\.alreadyTracked), [.issueOpen, .fixProposed, .watching])
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.needsHuman, for: before.signature)), .needsHuman)
     }
 

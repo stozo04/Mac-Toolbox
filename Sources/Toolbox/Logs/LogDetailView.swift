@@ -55,7 +55,7 @@ struct LogDetailView: View {
                 } label: {
                     Label(copiedID == row.id ? "Copied" : "Copy as Markdown", systemImage: copiedID == row.id ? "checkmark" : "doc.on.doc")
                 }
-                if let issue = LogsModel.newIssueURL(for: row) {
+                if row.status?.alreadyTracked != true, let issue = LogsModel.newIssueURL(for: row) {
                     Link(destination: issue) { Label("Create GitHub Issue", systemImage: "exclamationmark.bubble") }
                         .buttonStyle(.bordered)
                         .help("Opens a new issue on GitHub filled in with this event. You can edit it before you submit.")
@@ -75,7 +75,7 @@ struct LogDetailView: View {
             if let note = resolution?.note, !note.isEmpty {
                 Text(note).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
-            ForEach(resolution?.links ?? [], id: \.self) { url in
+            ForEach(resolution?.shownLinks ?? [], id: \.self) { url in
                 Link(destination: url) { Label(Self.linkTitle(url), systemImage: "arrow.up.right.square") }
             }
         }
@@ -107,7 +107,8 @@ extension LogStatus {
     var explanation: String {
         switch self {
         case .open: "The log fixer has not looked at this problem yet."
-        case .fixProposed: "The log fixer opened a pull request with a fix. It is not in the app until that is merged and installed."
+        case .issueOpen: "You opened a GitHub issue for it. The log fixer works on it next and links its pull request to the issue."
+        case .fixProposed: "A pull request with a fix is open. It is not in the app until that is merged and installed."
         case .fixed: "Fixed, and this event came from a version before the fix."
         case .cameBack: "This happened again in a version that has the fix, so the fix did not hold."
         case .loggingImproved: "The cause was unclear, so the log fixer made this event record more. The next one will say more."

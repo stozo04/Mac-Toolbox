@@ -21,6 +21,8 @@ struct StoredLog: Identifiable, Equatable, Sendable {
 /// What the log fixer did about one signature. Kept as a history: a later decision is a new row, and the newest wins.
 struct LogResolution: Equatable, Sendable {
     enum Outcome: String, CaseIterable, Sendable {
+        /// The owner opened a GitHub issue for it from the Logs page; no pull request yet.
+        case issueOpen = "issue_open"
         case fixProposed = "fix_proposed"
         case fixed
         case loggingImproved = "logging_improved"
@@ -30,12 +32,18 @@ struct LogResolution: Equatable, Sendable {
 
     var signature: String
     var outcome: Outcome
-    /// GitHub pull requests or issues, in the order the log fixer wrote them.
+    /// GitHub pull requests or issues, pull request first when there are both.
     var links: [URL]
     var note: String
     var decidedAt: Date
     /// The app version the fix (or the better logging) first shipped in; set once its pull request is merged.
     var fixedInVersion: String?
+
+    /// What the Logs page links to: the pull request once there is one (it links the issue it fixes), else the issues.
+    var shownLinks: [URL] {
+        let pullRequests = links.filter { $0.path.contains("/pull/") }
+        return pullRequests.isEmpty ? links : pullRequests
+    }
 }
 
 /// The app's own log: every event, in `logs.sqlite` on this Mac. The installed app writes it, the Logs page reads it,
