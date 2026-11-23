@@ -28,7 +28,7 @@ enum ToolCategory: String, CaseIterable, Identifiable, Hashable {
         case .video: "Record, trim, convert and shrink video"
         case .audio: "Record, clean up and convert audio"
         case .images: "Edit, convert and protect photos"
-        case .docs: "Scan, sign, convert and protect docs"
+        case .docs: "Read, sign and edit PDFs in Folio"
         case .textAndSpeech: "Transcribe, translate and summarize, privately"
         case .files: "Rename in bulk and make QR codes"
         case .mac: "Free up space and fix what's stuck"

@@ -18,6 +18,9 @@ enum ToolCatalog {
     // MARK: Video
 
     static let video: [Tool] = [
+        Tool(name: "Scarlet", category: .video, symbol: "wand.and.stars",
+             tagline: "Edit video by talking to Claude Code or Codex. Opens Scarlet, a free AI video editor.",
+             input: .companionApp(.scarlet)),
         Tool(name: "Download Video", category: .video, symbol: "arrow.down.to.line",
              tagline: "Save videos from YouTube, X, TikTok and more.", input: .link),
         Tool(name: "Burn In Subtitles", category: .video, symbol: "captions.bubble",
@@ -119,48 +122,12 @@ enum ToolCatalog {
              input: .annotateScreenshot),
     ]
 
-    // MARK: Docs (13 of 22 tools are visible in the design so far)
+    // MARK: Docs
 
     static let docs: [Tool] = [
-        Tool(name: "Scan Document", category: .docs, symbol: "doc.viewfinder",
-             tagline: "Scan paper with your iPhone or from photos. Pages are found, straightened and cleaned up.",
-             input: .scanDocument),
-        Tool(name: "Redact PDF", category: .docs, symbol: "eye.slash",
-             tagline: "Black out names, numbers or whole areas so they're removed for good, not just covered up.",
-             input: .redactPDF),
-        Tool(name: "Fill & Flatten Forms", category: .docs, symbol: "square.and.pencil",
-             tagline: "Fill in PDF forms, add text where there are no fields, and flatten the answers so they print as-is.",
-             input: drop("a PDF", "Drop a PDF form to fill in.", "doc.richtext")),
-        Tool(name: "Make PDF Searchable", category: .docs, symbol: "text.magnifyingglass",
-             tagline: "Add an invisible text layer to scanned PDFs so you can search, select and copy their text.",
-             input: drop("PDFs", "Drop scanned PDFs to make searchable.", "doc.richtext")),
-        Tool(name: "PDF to Word", category: .docs, symbol: "doc.text",
-             tagline: "Turn PDFs into Word documents you can edit, with headings, lists and paragraphs.",
-             input: drop("PDFs", "Drop PDFs to convert to Word.", "doc.richtext")),
-        Tool(name: "Sign PDF", category: .docs, symbol: "signature",
-             tagline: "Draw or type your signature and place it on a document.",
-             input: drop("a PDF", "Drop a PDF to sign.", "doc.richtext")),
-        Tool(name: "Merge PDFs", category: .docs, symbol: "doc.on.doc",
-             tagline: "Combine several PDFs and images into one document.",
-             input: drop("PDFs", "Drop PDFs and images to combine.", "doc.richtext")),
-        Tool(name: "Split PDF", category: .docs, symbol: "scissors",
-             tagline: "Break a PDF into single pages or page ranges.",
-             input: drop("a PDF", "Drop a PDF to split.", "doc.richtext")),
-        Tool(name: "Organize PDF", category: .docs, symbol: "square.grid.3x3",
-             tagline: "Reorder, rotate and remove pages in a PDF.",
-             input: drop("a PDF", "Drop a PDF to organize.", "doc.richtext")),
-        Tool(name: "Delete Pages", category: .docs, symbol: "minus.square",
-             tagline: "Remove the pages you don't need from a PDF.",
-             input: drop("a PDF", "Drop a PDF to remove pages from.", "doc.richtext")),
-        Tool(name: "Extract Pages", category: .docs, symbol: "square.and.arrow.up.on.square",
-             tagline: "Save selected pages as a new PDF.",
-             input: drop("a PDF", "Drop a PDF to extract pages from.", "doc.richtext")),
-        Tool(name: "Images to PDF", category: .docs, symbol: "photo.on.rectangle.angled",
-             tagline: "Turn photos and scans into a single PDF document.",
-             input: drop("Images", "Drop photos or scans to combine.", "photo")),
-        Tool(name: "Compress PDF", category: .docs, symbol: "arrow.down.right.and.arrow.up.left",
-             tagline: "Make PDFs smaller by recompressing their images.",
-             input: drop("PDFs", "Drop PDFs to shrink.", "doc.richtext")),
+        Tool(name: "Folio", category: .docs, symbol: "doc.richtext",
+             tagline: "Read, annotate, sign and edit PDFs. Opens Folio, a free PDF app.",
+             input: .companionApp(.folio)),
     ]
 
     // MARK: Text & Speech

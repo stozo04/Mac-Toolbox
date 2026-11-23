@@ -3,6 +3,7 @@
 Record, trim, convert and shrink video
 
 ## Tools
+- [Scarlet](./Scarlet/README.md) - Edit video by talking to Claude Code or Codex. Opens Scarlet, a free AI video editor.
 - [Download Video](./Download Video/README.md) - Save videos from YouTube, X, TikTok and more.
 - [Burn In Subtitles](./Burn In Subtitles/README.md) - Add captions to a video from an SRT file or automatic transcription.
 - [Change Speed](./Change Speed/README.md) - Speed up or slow down videos without chipmunk voices.

@@ -6,16 +6,16 @@ Sidekit puts the small utilities you reach for every day into one free, open-sou
 
 Sidekit is the project's new name. The app, its window and the commands below still say **Toolbox** until the app itself is renamed.
 
-> **Status: early preview (version 0.12.2).** Thirty-nine tools are fully working: ten **Video**, two **Audio** (**Trim Audio** and **Extract Audio**), all eleven **Images**, two **Docs** (**Scan Document** and **Redact PDF**) and all fourteen **Mac** tools. Two pages sit beside the tools: **AI Models**, which finds the AI models on your Mac, and the **Vault**, a password-protected place for private photos and videos. The other tools can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
+> **Status: early preview (version 0.15.0).** Thirty-seven tools are fully working: ten **Video**, two **Audio** (**Trim Audio** and **Extract Audio**), all eleven **Images** and all fourteen **Mac** tools. For PDFs, the **Docs** category opens [Folio](https://github.com/Forward-Future/folio), a free PDF app, and **Video** also offers [Scarlet](https://github.com/Forward-Future/scarlet), a free AI video editor. Two pages sit beside the tools: **AI Models**, which finds the AI models on your Mac, and the **Vault**, a password-protected place for private photos and videos. The other tools can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
 
 ## What's inside
 
 | Category | What it's for | Tools |
 |---|---|---|
-| **Video** | Record, trim, convert and shrink video | Download Video, Burn In Subtitles, Change Speed, Extract Frames, Convert Video, Record Screen, Compress Video, Resize Video, Crop & Rotate Video, Media Info, Trim Video, Merge Videos, Mute Video, Video to GIF |
+| **Video** | Record, trim, convert and shrink video | Scarlet (opens the Scarlet app), Download Video, Burn In Subtitles, Change Speed, Extract Frames, Convert Video, Record Screen, Compress Video, Resize Video, Crop & Rotate Video, Media Info, Trim Video, Merge Videos, Mute Video, Video to GIF |
 | **Audio** | Record, clean up and convert audio | Clean Up Audio, Record Audio, Trim Audio, Extract Audio, Convert Audio |
 | **Images** | Edit, convert and protect photos | Blur Faces, Beautify Screenshot, Remove Background, Convert Images, Compress Images, Resize Images, Rotate Images, Remove Metadata, Color Picker, Redact Image, Annotate Screenshot |
-| **Docs** | Scan, sign, convert and protect documents | Scan Document, Redact PDF, Fill & Flatten Forms, Make PDF Searchable, PDF to Word, Sign PDF, Merge PDFs, Split PDF, Organize PDF, Delete Pages, Extract Pages, Images to PDF, Compress PDF, and more on the way |
+| **Docs** | Read, sign and edit PDFs | Folio (opens the Folio app) |
 | **Text & Speech** | Transcribe, translate and summarize, privately | Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document |
 | **Files** | Rename in bulk and make QR codes | QR Code, Batch Rename, Find Duplicates, Zip & Unzip |
 | **Mac** | Free up space and fix what's stuck | Network Speed Test, Storage Explorer, Wi-Fi Password & QR, Keep Awake, Uninstall App, Presentation Mode, Clean Keyboard, Eject All Disks, Login & Background Items, Fix "App Is Damaged", Reset Permissions, Hidden Settings, Display Control, Mouse Fixes |
@@ -82,12 +82,12 @@ Download Video can also copy finished downloads to a Google Drive folder, and wi
 | **Beautify Screenshot** | Put screenshots on a soft background with padding, rounded corners and a shadow. |
 | **Color Picker** | Pick any color on screen and copy it as HEX, rgb(), hsl(), OKLCH, SwiftUI, NSColor, UIColor or the nearest Tailwind color. Keeps your last 20 colors, finds the main colors of an image and checks text against its background for WCAG contrast. |
 
-#### Docs
+#### Folio and Scarlet
 
-| Tool | What it does |
+| Card | What it does |
 |---|---|
-| **Scan Document** | Scan paper with your iPhone or from photos. Pages are found, straightened and cleaned up as Color, Grayscale or Black & White, then reordered, rotated or removed and saved as one PDF, with optional searchable text. |
-| **Redact PDF** | Drag boxes or search for a word on every page to black it out. The text under each box is removed for good, not just covered up, and the saved copy is checked before it is kept. |
+| **Folio** (Docs) | Opens [Folio](https://github.com/Forward-Future/folio), a free, open-source PDF reader and editor. If it isn't installed, the card's page links to its download. |
+| **Scarlet** (Video) | Opens [Scarlet](https://github.com/Forward-Future/scarlet), a free, open-source AI video editor driven by Claude Code or Codex. If it isn't installed, the card's page links to its download. |
 
 #### Mac
 
@@ -126,11 +126,10 @@ The Vault locks when you leave the page, lock the screen, sleep or quit. Ticking
 
 ### Coming soon
 
-These 29 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
+These 18 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
 
 - **Video:** Change Speed, Convert Video, Crop & Rotate Video, Merge Videos
 - **Audio:** Clean Up Audio, Record Audio, Convert Audio
-- **Docs:** Fill & Flatten Forms, Make PDF Searchable, PDF to Word, Sign PDF, Merge PDFs, Split PDF, Organize PDF, Delete Pages, Extract Pages, Images to PDF, Compress PDF
 - **Text & Speech:** Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document
 - **Files:** QR Code, Batch Rename, Find Duplicates, Zip & Unzip
 
@@ -138,10 +137,10 @@ These 29 tools can be browsed and opened, but show a "Feature not implemented" b
 
 | Works now | Not built yet |
 |---|---|
-| Browsing all categories and tools | The 29 tools listed under [Coming soon](#coming-soon) |
+| Browsing all categories and tools | The 18 tools listed under [Coming soon](#coming-soon) |
 | Search, favorites, recent tools | Saving your favorites and settings between launches |
-| Light / dark mode switch | The remaining Docs tools |
-| 39 working tools: ten Video, two Audio, eleven Images, two Docs and all fourteen Mac | A global hotkey for Record Screen |
+| Light / dark mode switch | A global hotkey for Record Screen |
+| 37 working tools: ten Video, two Audio, eleven Images and all fourteen Mac | |
 | The AI Models page and the Vault | |
 | Release history (click the version number) | |
 

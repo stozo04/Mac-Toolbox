@@ -41,7 +41,7 @@ private struct CategoryCard: View {
                 HStack {
                     Image(systemName: category.symbol).foregroundStyle(Theme.accent)
                     Text(category.rawValue).font(.title3.bold())
-                    Text("\(tools.count) tools").font(.caption).foregroundStyle(.secondary)
+                    Text("\(tools.count) \(tools.count == 1 ? "tool" : "tools")").font(.caption).foregroundStyle(.secondary)
                 }
                 Text(category.summary).font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
