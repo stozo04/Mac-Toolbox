@@ -47,7 +47,7 @@ jobs:
           if ! first="$(scripts/app-untouched.sh <<< "$changed")"; then
             decide true "Changed a path that can affect the app ($first): every job runs."
           fi
-          decide false "Only docs, designs, Dependabot config or Supabase files changed: the macOS jobs are skipped."
+          decide false "Only docs, designs or Dependabot config changed: the macOS jobs are skipped."
 
   version:
     name: Version bumped
