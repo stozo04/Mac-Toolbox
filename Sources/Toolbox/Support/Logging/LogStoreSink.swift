@@ -24,7 +24,8 @@ enum LogStoreLocation {
     }
 }
 
-/// Saves every event to the log store, off the caller's thread and in order. Old events are trimmed once at launch.
+/// Saves every event to the log store, off the caller's thread and in order. Events older than `LogStore.keepFor` are
+/// trimmed at launch and again once a day while the app stays open.
 final class LogStoreSink: LogSink, @unchecked Sendable {
     let minimumLevel: LogLevel = .info
     private let store: LogStore
@@ -32,14 +33,12 @@ final class LogStoreSink: LogSink, @unchecked Sendable {
     // A failed save must not go through `Log`, which would try to save it again.
     private let failures = os.Logger(subsystem: "com.toolbox.app", category: "log-store")
     private var quitObserver: NSObjectProtocol?
+    private static let trimEvery: TimeInterval = 24 * 3600
+    /// Touched only on `queue`.
+    private var lastTrim: Date?
 
-    init(store: LogStore, now: Date = Date()) {
+    init(store: LogStore) {
         self.store = store
-        queue.async { [store, failures] in
-            do { try store.deleteEvents(olderThan: now.addingTimeInterval(-LogStore.keepFor)) } catch {
-                failures.error("Trimming the log store failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
         quitObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                               queue: nil) { [weak self] _ in self?.drain() }
     }
@@ -49,10 +48,19 @@ final class LogStoreSink: LogSink, @unchecked Sendable {
     }
 
     func write(_ event: LogEvent) {
-        queue.async { [store, failures] in
+        queue.async { [self] in
+            trimIfDue(now: event.timestamp)
             do { try store.append(event) } catch {
                 failures.error("Saving a log event failed: \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+
+    private func trimIfDue(now: Date) {
+        if let lastTrim, now.timeIntervalSince(lastTrim) < Self.trimEvery { return }
+        lastTrim = now
+        do { try store.deleteEvents(olderThan: now.addingTimeInterval(-LogStore.keepFor)) } catch {
+            failures.error("Trimming the log store failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

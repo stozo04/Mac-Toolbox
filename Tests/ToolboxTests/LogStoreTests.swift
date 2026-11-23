@@ -74,9 +74,20 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(try store.events(since: nil, levels: Set(LogLevel.allCases), limit: 10).map(\.event.message), ["recent"])
     }
 
+    func testTheSinkTrimsOldEventsWhileTheAppStaysOpen() throws {
+        let store = try makeStore()
+        let sink = LogStoreSink(store: store)
+        sink.write(event(.info, "day one", hoursAgo: 24 * 100))
+        sink.write(event(.info, "a day later", hoursAgo: 24 * 99))
+        sink.write(event(.info, "today", hoursAgo: 0))
+        sink.drain()
+        XCTAssertEqual(try store.events(since: nil, levels: Set(LogLevel.allCases), limit: nil).map(\.event.message), ["today"],
+                       "the first write trims, and a write a day or more later trims again")
+    }
+
     func testTheSinkSavesEveryEventInOrder() throws {
         let store = try makeStore()
-        let sink = LogStoreSink(store: store, now: now)
+        let sink = LogStoreSink(store: store)
         for index in 0..<20 { sink.write(event(.info, "event \(index)", hoursAgo: Double(20 - index) / 100)) }
         sink.drain()
         let messages = try store.events(since: nil, levels: Set(LogLevel.allCases), limit: 100).map(\.event.message)
