@@ -134,7 +134,7 @@ For every signature you looked at, record one row (double every `'` inside a val
   matched watch issues), or `needs_human` (say why in the note).
 - `links`: the full `https://github.com/stozo04/Mac-Toolbox/...` URLs separated by spaces: first this decision's PR or
   watch issues, then every `/issues/` URL from the signature's earlier rows whose issue is still open
-  (`gh issue view <url> --json state`). Carrying them forward is what lets a later fix find the issue to close.
+  (`gh issue view <url> --json state`), each URL once. Carrying them forward is what lets a later fix find the issue to close.
 - `note`: one plain sentence on the cause or why it waits. No file names or paths: the owner may paste it into a public issue.
 A signature recorded as `watching` is still matched against its watch issues on later runs while they are open.
 Then set `lastLogID` in the state file to `highWater`, unless the 5-signature limit left signatures for a later run:

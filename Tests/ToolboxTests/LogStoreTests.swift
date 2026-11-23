@@ -112,6 +112,7 @@ final class LogStoreTests: XCTestCase {
         try store.record(resolution(.fixProposed, for: signature))
         try store.record(resolution(.fixed, for: signature, version: "0.12.5",
                                     links: ["https://github.com/stozo04/Mac-Toolbox/pull/57", "https://evil.example/pull/1",
+                                            "https://github.com/stozo04/Mac-Toolbox/pull/57",
                                             "http://github.com/stozo04/Mac-Toolbox/pull/2"], at: 60))
         let latest = try XCTUnwrap(try store.latestResolutions()[signature])
         XCTAssertEqual(latest.outcome, .fixed)

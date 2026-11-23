@@ -190,9 +190,11 @@ final class LogStore: @unchecked Sendable {
         return out
     }
 
-    /// Only https links to github.com are kept: the page opens them in the browser, and the table is written by a tool.
+    /// Only https links to github.com are kept, each once: the page opens them in the browser, and the table is
+    /// written by a tool.
     static func gitHubLinks(_ text: String) -> [URL] {
-        text.split(whereSeparator: \.isWhitespace).compactMap { URL(string: String($0)) }
-            .filter { $0.scheme == "https" && $0.host == "github.com" }
+        var seen: Set<URL> = []
+        return text.split(whereSeparator: \.isWhitespace).compactMap { URL(string: String($0)) }
+            .filter { $0.scheme == "https" && $0.host == "github.com" && seen.insert($0).inserted }
     }
 }
