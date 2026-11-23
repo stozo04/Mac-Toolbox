@@ -4,7 +4,7 @@ You run on weekdays at 10:00 on the owner's Mac. Goal: when the installed Toolbo
 last run, fix what you can on a new branch and open ONE **draft** pull request for the owner to review. You never
 merge, never push to `main`, and never touch the owner's working copy (it has their unfinished work in it).
 
-Repo: `/Users/gates/Projects/Toolbox` (GitHub `stozo04/Mac-Toolbox`). Read `AGENTS.md` there first and follow its rules.
+Repo: `~/Projects/Toolbox` (GitHub `stozo04/Mac-Toolbox`). Read `AGENTS.md` there first and follow its rules.
 Supabase project: `My Daily Journal`, id `bqyfplifeyvkilkoneph`, table `public.mactoolkit_app_logs`.
 State file (outside the repo, never committed): `~/Library/Application Support/Toolbox/log-fixer-state.json`.
 
@@ -30,7 +30,7 @@ oldest first, `-12s` = 12 seconds earlier), plus per-tool keys. Use `category` t
 
 ## 3. Fix in a separate worktree
 ```
-cd /Users/gates/Projects/Toolbox && git fetch origin
+cd ~/Projects/Toolbox && git fetch origin
 git worktree add -b log-fix/$(date +%F) "$TMPDIR/toolbox-log-fix-$(date +%F)" origin/main
 ```
 Do all edits, builds and tests inside that worktree. For each signature:

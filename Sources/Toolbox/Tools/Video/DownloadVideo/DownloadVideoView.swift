@@ -3,6 +3,7 @@ import SwiftUI
 struct DownloadVideoView: View {
     @State private var model = DownloadVideoModel.shared
     @Environment(VaultModel.self) private var vault
+    @State private var driveFolder = DriveSender.chosenFolder()
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -120,8 +121,10 @@ struct DownloadVideoView: View {
                     .toggleStyle(.checkbox)
                     .disabled(model.sendState.isBusy)
                     .help("With Touch ID, moves the videos into the Vault and makes them searchable before sending them to Google, then locks the Vault")
-                Button { model.sendToGoogle(vault: vault) } label: { Label("Send to Google", systemImage: "icloud.and.arrow.up") }
+                Button { sendToGoogle() } label: { Label("Send to Google", systemImage: "icloud.and.arrow.up") }
                     .disabled(!model.canSend)
+                    .help(driveFolderHelp)
+                    .contextMenu { Button("Change Google Drive Folder...") { _ = chooseDriveFolder() } }
                 if model.folder != nil { Button("Open Folder") { model.openFolder() } }
             }
             if model.isRunning {
@@ -131,6 +134,30 @@ struct DownloadVideoView: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    private var driveFolderHelp: String {
+        guard let folder = driveFolder else { return "Asks which Google Drive folder to copy the downloads to" }
+        return "Copies the downloads to \(folder.lastPathComponent) in Google Drive. Right-click to change the folder."
+    }
+
+    private func sendToGoogle() {
+        guard driveFolder != nil || chooseDriveFolder() else { return }
+        model.sendToGoogle(vault: vault)
+    }
+
+    private func chooseDriveFolder() -> Bool {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = driveFolder ?? DriveSender.cloudStorage
+        panel.message = "Choose the Google Drive folder to copy downloads to"
+        panel.prompt = "Use This Folder"
+        guard panel.runModal() == .OK, let folder = panel.url else { return false }
+        DriveSender.choose(folder)
+        driveFolder = DriveSender.chosenFolder()
+        return true
     }
 
     private var footerText: String {
