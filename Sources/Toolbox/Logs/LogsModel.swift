@@ -21,6 +21,8 @@ final class LogsModel {
     private(set) var levels: Set<LogLevel> = Set(LogLevel.allCases)
     /// nil shows every status; a status hides info events, which have none.
     var status: LogStatus? { didSet { reload() } }
+    /// Archived events are kept but left out of the list and the counts unless this is on.
+    var showArchived = false { didSet { reload() } }
     var selectedID: Int64?
 
     /// The rows the filters select, newest first, at most `rowLimit`.
@@ -78,8 +80,8 @@ final class LogsModel {
             // is read and filtered before the limit; otherwise an older match would hide behind newer events.
             let problemLevels = levels.filter { $0 >= .warning }
             let logs = try status == nil
-                ? store.events(since: start, levels: levels, limit: Self.rowLimit + 1)
-                : store.events(since: start, levels: problemLevels, limit: nil)
+                ? store.events(since: start, levels: levels, limit: Self.rowLimit + 1, includeArchived: showArchived)
+                : store.events(since: start, levels: problemLevels, limit: nil, includeArchived: showArchived)
             let matching = logs.lazy.map { log in
                 let resolution = resolutions[log.signature]
                 return LogRow(log: log, status: LogStatus.of(log, resolution: resolution), resolution: resolution)
@@ -87,8 +89,18 @@ final class LogsModel {
             let all = Array(matching.prefix(Self.rowLimit + 1))
             rows = Array(all.prefix(Self.rowLimit))
             reachedLimit = all.count > Self.rowLimit
-            counts = try store.counts(since: start)
+            counts = try store.counts(since: start, includeArchived: showArchived)
             problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    func toggleArchived(_ row: LogRow) {
+        guard let store else { return }
+        do {
+            try store.setArchived(row.log.archivedAt == nil, eventID: row.id, at: now())
+            reload()
         } catch {
             problem = error.localizedDescription
         }

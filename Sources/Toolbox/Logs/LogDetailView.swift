@@ -4,6 +4,7 @@ import SwiftUI
 struct LogDetailView: View {
     let row: LogRow?
     let copy: (LogRow) -> Void
+    let toggleArchived: (LogRow) -> Void
     @State private var copiedID: Int64?
 
     var body: some View {
@@ -61,6 +62,13 @@ struct LogDetailView: View {
                         .help("Opens a new issue on GitHub filled in with this event. You can edit it before you submit.")
                 }
             }
+            Button { toggleArchived(row) } label: {
+                Label(row.log.archivedAt == nil ? "Archive" : "Unarchive",
+                      systemImage: row.log.archivedAt == nil ? "archivebox" : "tray.and.arrow.up")
+            }
+            .help(row.log.archivedAt == nil
+                  ? "Keeps this log but hides it from the list and the counts. Turn on Show archived to see it again."
+                  : "Shows this log in the list and the counts again.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

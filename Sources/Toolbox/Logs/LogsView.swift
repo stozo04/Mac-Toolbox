@@ -22,6 +22,9 @@ struct LogsView: View {
                     ForEach(LogStatus.allCases) { Text($0.rawValue).tag(LogStatus?.some($0)) }
                 }
                 .frame(width: 200)
+                Toggle("Show archived", isOn: $model.showArchived)
+                    .toggleStyle(.checkbox)
+                    .help("Archived logs are kept but hidden from the list and the counts.")
             }
             tiles
             if let problem = model.problem {
@@ -29,7 +32,8 @@ struct LogsView: View {
             }
             HStack(alignment: .top, spacing: 16) {
                 list
-                LogDetailView(row: model.selected) { row in model.copyMarkdown(of: row, to: .general) }
+                LogDetailView(row: model.selected, copy: { row in model.copyMarkdown(of: row, to: .general) },
+                              toggleArchived: { row in model.toggleArchived(row) })
                     .frame(width: 400)
             }
         }
@@ -124,13 +128,16 @@ private struct LogRowView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: row.event.level.symbol).foregroundStyle(row.event.level.color).frame(width: 18)
             VStack(alignment: .leading, spacing: 3) {
-                Text(row.event.message).font(.callout).lineLimit(2)
+                (Text(row.event.message) + Text(row.event.summary.isEmpty ? "" : "  \(row.event.summary)").foregroundStyle(.secondary))
+                    .font(.callout).lineLimit(2)
                 Text("\(row.event.category) · \(row.event.timestamp.formatted(LogDisplay.time)) · \(row.event.versionLabel)")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
+            if row.log.archivedAt != nil { Pill(text: "Archived") }
             if let status = row.status { Pill(text: status.rawValue, color: status.color) }
         }
+        .opacity(row.log.archivedAt == nil ? 1 : 0.55)
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(selected ? Theme.tint.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(Rectangle())
