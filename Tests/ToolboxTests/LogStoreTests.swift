@@ -150,6 +150,7 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(LogStoreLocation.launch(arguments: ["Toolbox", "--log-store", "/tmp/x.sqlite"], isDevelopmentRun: true),
                        URL(fileURLWithPath: "/tmp/x.sqlite"))
         XCTAssertNotEqual(LogStoreLocation.standard, LogStoreLocation.development)
+        XCTAssertTrue(AppInfo.isDevelopmentRun, "tests run as a debug build, so they must never count as the installed app")
     }
 
     // MARK: The page
