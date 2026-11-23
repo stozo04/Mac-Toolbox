@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       version: ${{ steps.check.outputs.version }}
+      latest: ${{ steps.check.outputs.latest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,28 +50,38 @@ jobs:
           app_version="$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' "$NOTES_SWIFT" | head -1)"
           [ "$app_version" = "$version" ] || { echo "::error::$TAG points at a commit whose AppVersion.current is $app_version."; exit 1; }
           git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main."; exit 1; }
-          if gh release view "$TAG" > /dev/null 2>&1; then
+          released="$(gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')"
+          if grep -qxF "$TAG" <<< "$released"; then
             echo "::error::A release for $TAG already exists; it is never replaced."
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          highest="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<< "$released" | sort -V | tail -1)"
+          if [ -z "$highest" ] || [ "$(printf '%s\n%s\n' "$highest" "$TAG" | sort -V | tail -1)" = "$TAG" ]; then
+            latest=true
+          else
+            latest=false
+          fi
+          echo "Highest published release: ${highest:-none}. $TAG becomes Latest: $latest."
+          {
+            echo "version=$version"
+            echo "previous=${highest#v}"
+            echo "latest=$latest"
+          } >> "$GITHUB_OUTPUT"
       - name: Build Toolbox.app
         uses: ./release-tools/.github/actions/build-app
         with:
           build-number: ${{ github.run_number }}
       - name: Name the download and write the release notes
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           VERSION: ${{ steps.check.outputs.version }}
+          PREVIOUS: ${{ steps.check.outputs.previous }}
           RUN_ID: ${{ github.run_id }}
         run: |
           codesign -dv dist/Toolbox.app 2>&1 | grep -qx 'Signature=adhoc' || { echo "::error::Toolbox.app is not ad-hoc signed."; exit 1; }
           mkdir release
           mv dist/Toolbox.zip "release/Toolbox-$VERSION-arm64.zip"
-          previous="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
           {
-            release-tools/.github/scripts/release-notes.sh "$NOTES_SWIFT" "$VERSION" "${previous#v}"
+            release-tools/.github/scripts/release-notes.sh "$NOTES_SWIFT" "$VERSION" "$PREVIOUS"
             echo
             echo "The full history is inside the app: click the version number in the bottom-right corner."
             echo
@@ -107,9 +118,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
+          LATEST: ${{ needs.build.outputs.latest }}
         run: |
           gh release create "$TAG" "release/Toolbox-$VERSION-arm64.zip" \
-            --verify-tag --title "Toolbox $VERSION" --notes-file release/notes.md
+            --verify-tag --latest="$LATEST" --title "Toolbox $VERSION" --notes-file release/notes.md
       - name: The published download matches the build
         env:
           GH_TOKEN: ${{ github.token }}
