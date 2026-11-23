@@ -9,7 +9,7 @@ struct CategoryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(tools.count) tools · \(category.summary)").font(.caption).foregroundStyle(.secondary)
+                    Text("\(tools.count) \(tools.count == 1 ? "tool" : "tools") · \(category.summary)").font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Text(category.rawValue).font(.system(size: 34, weight: .bold))
                         Spacer()
@@ -28,17 +28,26 @@ struct CategoryView: View {
 struct ToolCard: View {
     @Environment(AppState.self) private var state
     let tool: Tool
+    @State private var companionURL: URL?
 
     var body: some View {
         Button { state.open(tool) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.inset)
-                    Image(systemName: tool.symbol).font(.system(size: 34)).foregroundStyle(Theme.accent)
+                    if case .companionApp = tool.input {
+                        CompanionAppIcon(installedURL: companionURL, size: 64)
+                    } else {
+                        Image(systemName: tool.symbol).font(.system(size: 34)).foregroundStyle(Theme.accent)
+                    }
                 }
                 .frame(height: 110)
                 .overlay(alignment: .topTrailing) {
-                    if !tool.isImplemented {
+                    if case .companionApp(let app) = tool.input {
+                        Image(systemName: "arrow.up.forward.app").font(.caption)
+                            .foregroundStyle(.secondary).padding(8)
+                            .help("Opens \(app.name)")
+                    } else if !tool.isImplemented {
                         Image(systemName: "exclamationmark.triangle.fill").font(.caption)
                             .foregroundStyle(Theme.warning).padding(8)
                             .help("Feature not implemented")
@@ -54,6 +63,12 @@ struct ToolCard: View {
             .cardBackground()
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(state.favorites.contains(tool.id) ? "Remove from Favorites" : "Add to Favorites") { state.toggleFavorite(tool) }
+        }
+        .task(id: tool.id) {
+            if case .companionApp(let app) = tool.input { companionURL = state.companionApps.installedURL(of: app) }
+        }
     }
 }
 

@@ -40,10 +40,6 @@ enum ToolInput: Hashable {
     case annotateScreenshot
     /// Queue of photos with the subject cut out onto a transparent or solid background (Remove Background).
     case removeBackground
-    /// Pages found, straightened and cleaned up from photos or an iPhone, saved as one PDF (Scan Document).
-    case scanDocument
-    /// One PDF with boxes dragged or found by text, whose pages are flattened so the text under them is gone (Redact PDF).
-    case redactPDF
     /// Queue of videos that get captions drawn in (Burn In Subtitles).
     case burnInSubtitles
     /// Queue of videos whose soundtrack is removed (Mute Video).
@@ -54,6 +50,8 @@ enum ToolInput: Hashable {
     case extractAudio
     /// One audio file cut to the part you keep, with optional fades, saved as the same format, MP3, M4A, WAV, FLAC or AIFF (Trim Audio).
     case trimAudio
+    /// A separate app that does this work (Folio, Scarlet): the card opens it, or shows where to get it.
+    case companionApp(CompanionApp)
     /// One of the Mac category's native tools (Keep Awake, Hidden Settings...).
     case mac(MacTool)
     /// No input file; the tool acts live (Keep Awake...).
@@ -69,7 +67,7 @@ enum ToolInput: Hashable {
             false
         case .link, .recordScreen, .trimVideo, .videoToGif, .extractFrames, .resizeVideo, .compressVideo, .convertImages, .compressImages,
              .resizeImages, .rotateImages, .removeMetadata, .colorPicker, .blurFaces, .redactImage, .beautifyScreenshot, .annotateScreenshot,
-             .removeBackground, .scanDocument, .redactPDF, .burnInSubtitles, .muteVideo, .mediaInfo, .extractAudio, .trimAudio, .mac:
+             .removeBackground, .burnInSubtitles, .muteVideo, .mediaInfo, .extractAudio, .trimAudio, .companionApp, .mac:
             true
         }
     }

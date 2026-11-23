@@ -90,10 +90,6 @@ struct ToolWorkspace: View {
             BeautifyScreenshotView()
         case .removeBackground:
             RemoveBackgroundView()
-        case .scanDocument:
-            ScanDocumentView()
-        case .redactPDF:
-            RedactPDFView()
         case .burnInSubtitles:
             BurnInSubtitlesView()
         case .muteVideo:
@@ -104,6 +100,8 @@ struct ToolWorkspace: View {
             ExtractAudioView()
         case .trimAudio:
             TrimAudioView()
+        case .companionApp(let app):
+            CompanionAppView(app: app)
         case .mac(let tool):
             MacToolView(tool: tool)
         case .videoToGif:

@@ -33,9 +33,11 @@ final class AppState {
     var isDark = true
     var favorites: Set<String> = []
     var recents: [String] = []
+    let companionApps: CompanionApps
 
     /// Debug aid: `--page home | <Category> | <Category>/<Tool>` opens that page at launch.
-    init(arguments: [String] = CommandLine.arguments) {
+    init(arguments: [String] = CommandLine.arguments, companionApps: CompanionApps = .system) {
+        self.companionApps = companionApps
         guard let i = arguments.firstIndex(of: "--page"), i + 1 < arguments.count else { return }
         let target = arguments[i + 1]
         if let tool = ToolCatalog.tool(id: target) {
@@ -62,11 +64,13 @@ final class AppState {
     var recentTools: [Tool] { recents.compactMap(ToolCatalog.tool(id:)) }
     var favoriteTools: [Tool] { ToolCatalog.all.filter { favorites.contains($0.id) } }
 
+    /// An installed companion app is opened instead of showing its page.
     func open(_ tool: Tool) {
         recents.removeAll { $0 == tool.id }
         recents.insert(tool.id, at: 0)
         recents = Array(recents.prefix(4))
         search = ""
+        if case .companionApp(let app) = tool.input, companionApps.open(app) { return }
         page = .tool(tool)
     }
 
