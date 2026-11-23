@@ -29,7 +29,7 @@ enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
         Release(version: "0.13.0", date: "2026-11-23", changes: [
-            .init(kind: .new, text: "Logs: a new page that lists everything the app recorded, newest first. Filter by time (1 hour to a week, or all) and by severity, see how many critical, error, warning and info events happened in that time, and open any event to see its details or copy them for an issue."),
+            .init(kind: .new, text: "Logs: a new page that lists everything the app recorded, newest first. Filter by time (1 hour to a week, or all) and by severity, see how many critical, error, warning and info events happened in that time, and open any event to see its details, copy them, or start a GitHub issue filled in with them."),
             .init(kind: .new, text: "Logs: each problem shows what the weekday log check did about it, Open, Fix proposed, Fixed, Came back or Watching, with a link to the pull request or issue."),
             .init(kind: .improved, text: "The app's log now stays on your Mac, in its own file kept for 90 days. Warnings and errors are no longer sent to an online database."),
         ]),

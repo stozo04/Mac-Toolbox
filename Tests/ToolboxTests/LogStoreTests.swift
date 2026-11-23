@@ -201,6 +201,28 @@ final class LogStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testANewIssueIsFilledInWithTheEventAndCutToFit() throws {
+        let log = StoredLog(id: 1, event: event(.error), signature: event(.error).signature)
+        let url = try XCTUnwrap(LogsModel.newIssueURL(for: LogRow(log: log, status: .open, resolution: nil)))
+        XCTAssertEqual(url.host, "github.com")
+        XCTAssertEqual(url.path, "/stozo04/Mac-Toolbox/issues/new")
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(items.first { $0.name == "title" }?.value, "download: Download failed")
+        let body = try XCTUnwrap(items.first { $0.name == "body" }?.value)
+        XCTAssertTrue(body.contains("Signature: `download | Download failed | NSURLErrorDomain | -1009`"))
+        XCTAssertTrue(body.contains("Status: Open"))
+        XCTAssertTrue(body.contains("check file names before submitting"))
+
+        let huge = event(.error, metadata: ["error_debug": String(repeating: "x", count: 20_000)])
+        let hugeRow = LogRow(log: StoredLog(id: 2, event: huge, signature: huge.signature), status: .open, resolution: nil)
+        let hugeURL = try XCTUnwrap(LogsModel.newIssueURL(for: hugeRow))
+        let hugeBody = try XCTUnwrap(URLComponents(url: hugeURL, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value)
+        let limit = LogsModel.issueBodyLimit
+        XCTAssertLessThan(hugeBody.count, limit + 200)
+        XCTAssertTrue(hugeBody.contains("cut to fit"))
+    }
+
+    @MainActor
     func testCopyAsMarkdownCarriesTheEvidenceAndTheFix() throws {
         let store = try makeStore()
         try store.append(event(.error))

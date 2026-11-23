@@ -48,11 +48,18 @@ struct LogDetailView: View {
                     }
                 }
             }
-            Button {
-                copy(row)
-                copiedID = row.id
-            } label: {
-                Label(copiedID == row.id ? "Copied" : "Copy as Markdown", systemImage: copiedID == row.id ? "checkmark" : "doc.on.doc")
+            HStack(spacing: 10) {
+                Button {
+                    copy(row)
+                    copiedID = row.id
+                } label: {
+                    Label(copiedID == row.id ? "Copied" : "Copy as Markdown", systemImage: copiedID == row.id ? "checkmark" : "doc.on.doc")
+                }
+                if let issue = LogsModel.newIssueURL(for: row) {
+                    Link(destination: issue) { Label("Create GitHub Issue", systemImage: "exclamationmark.bubble") }
+                        .buttonStyle(.bordered)
+                        .help("Opens a new issue on GitHub filled in with this event. You can edit it before you submit.")
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

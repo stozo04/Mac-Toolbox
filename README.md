@@ -24,7 +24,7 @@ Sidekit is the project's new name. The app, its window and the commands below st
 
 - The tools do their work on your Mac. Your files stay there unless you use one of the features listed below.
 - Originals stay untouched. Results are saved as new files. The exceptions say so up front: the Mac tools change Mac settings (anything they remove goes to the Trash), and the Vault moves files into itself.
-- These use the internet: Download Video (the downloads, updating yt-dlp, and Send to Google, which copies finished downloads to your Google Drive folder), Network Speed Test, the Vault's one-time download of its search model, and Media Info's Open in Maps, which hands a video's location to Apple Maps when you click it.
+- These use the internet: Download Video (the downloads, updating yt-dlp, and Send to Google, which copies finished downloads to your Google Drive folder), Network Speed Test, the Vault's one-time download of its search model, Media Info's Open in Maps, which hands a video's location to Apple Maps when you click it, and the Logs page's Create GitHub Issue, which opens a filled-in issue in your browser for you to check and submit.
 - The app keeps its own log on your Mac (`~/Library/Application Support/Toolbox/logs.sqlite`, 90 days) and shows it on the **Logs** page. Nothing in it is sent anywhere. An entry can include file names, the address of a link without its query string, your macOS version and a random install ID. It never includes file contents, passwords, tokens or your account name, and Vault entries leave out file names too. Runs from the project folder keep a separate log (`logs-dev.sqlite`).
 
 ## Using the app

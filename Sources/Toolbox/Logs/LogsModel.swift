@@ -116,6 +116,24 @@ final class LogsModel {
         return lines.joined(separator: "\n")
     }
 
+    static let newIssuePage = URL(string: "https://github.com/stozo04/Mac-Toolbox/issues/new")
+    /// GitHub refuses very long new-issue links, so the details are cut to fit; the browser shows the result to edit.
+    static let issueBodyLimit = 6000
+
+    /// A new issue on the app's GitHub repository, filled in with this event, for the browser to open. Toolbox sends
+    /// nothing itself: the issue exists only once it is submitted there.
+    static func newIssueURL(for row: LogRow) -> URL? {
+        guard let page = newIssuePage, var parts = URLComponents(url: page, resolvingAgainstBaseURL: false) else { return nil }
+        var body = markdown(row)
+        if body.count > issueBodyLimit { body = String(body.prefix(issueBodyLimit)) + "\n…(cut to fit; the rest is in the Logs page)" }
+        body += "\n\n_From the Toolbox Logs page. The repository is public: check file names before submitting._"
+        parts.queryItems = [
+            URLQueryItem(name: "title", value: "\(row.event.category): \(row.event.message)"),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return parts.url
+    }
+
     static func statusLine(_ status: LogStatus, _ resolution: LogResolution?) -> String {
         var parts = [status.rawValue]
         if let version = resolution?.fixedInVersion, status == .fixed || status == .cameBack || status == .loggingImproved {
