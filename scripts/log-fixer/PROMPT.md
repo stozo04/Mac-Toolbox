@@ -9,7 +9,8 @@ Log store (on this Mac, written by the installed app): `~/Library/Application Su
 tables `logs` (the events) and `log_resolutions` (what you decided about each problem; the app's Logs page shows it next
 to every event). Use it only through `sqlite3 -cmd '.timeout 5000' "$HOME/Library/Application Support/Toolbox/logs.sqlite"`
 (the app may be writing at the same time). The app owns the schema: if either table is missing, stop and report that;
-never create, alter or drop a table, and never change or delete a row of `logs`.
+never create, alter or drop a table, and never change or delete a row of `logs`. An archived event (`archived_at` set) is only
+hidden on the Logs page: read and handle it like any other.
 State file (outside the repo, never committed): `~/Library/Application Support/Toolbox/log-fixer-state.json`, which holds
 only `lastLogID`: the `id` of the newest `logs` row you have read. Row ids only grow, so it never skips or
 repeats an event, even one logged while you run.

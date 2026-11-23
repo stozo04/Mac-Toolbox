@@ -148,6 +148,71 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.needsHuman, for: before.signature)), .needsHuman)
     }
 
+    func testALogFromBeforeArchivingGetsTheColumnAndKeepsItsEvents() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("toolbox.oldlog.\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent(LogStore.fileName)
+        let old = try SQLiteDatabase(at: file) { LogStoreError.sqlite($0) }
+        try old.execute("""
+            CREATE TABLE logs(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL NOT NULL, level TEXT NOT NULL, category TEXT NOT NULL,
+                message TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', app_version TEXT NOT NULL, os_version TEXT NOT NULL,
+                install_id TEXT NOT NULL, session_id TEXT NOT NULL, signature TEXT NOT NULL);
+            INSERT INTO logs(timestamp, level, category, message, app_version, os_version, install_id, session_id, signature)
+                VALUES(1800000000, 'error', 'c', 'kept', '0.13.0', 'os', 'i', 's', 'c | kept |  | ');
+            """)
+        old.close()
+        let store = try LogStore(at: file)
+        let kept = try XCTUnwrap(try store.events(since: nil, levels: [.error], limit: nil).first)
+        XCTAssertEqual(kept.event.message, "kept")
+        XCTAssertNil(kept.archivedAt)
+        try store.setArchived(true, eventID: kept.id, at: now)
+        XCTAssertEqual(try store.events(since: nil, levels: [.error], limit: nil).first?.archivedAt, now)
+    }
+
+    @MainActor
+    func testArchivedLogsAreKeptButLeftOutUntilShown() throws {
+        let store = try makeStore()
+        try store.append(event(.error, "noisy", hoursAgo: 1))
+        try store.append(event(.warning, "kept in view", hoursAgo: 2))
+        let model = LogsModel(store: store, now: { self.now })
+        model.reload()
+        let noisy = try XCTUnwrap(model.rows.first { $0.event.message == "noisy" })
+
+        model.toggleArchived(noisy)
+        XCTAssertEqual(model.rows.map(\.event.message), ["kept in view"], "archived logs are hidden by default")
+        XCTAssertEqual(model.counts, [.warning: 1], "and left out of the counts")
+        XCTAssertEqual(try store.events(since: nil, levels: Set(LogLevel.allCases), limit: nil).count, 2, "but still kept")
+
+        model.showArchived = true
+        XCTAssertEqual(model.rows.map(\.event.message), ["noisy", "kept in view"])
+        XCTAssertEqual(model.counts, [.error: 1, .warning: 1])
+        let archived = try XCTUnwrap(model.rows.first)
+        XCTAssertEqual(archived.log.archivedAt, now)
+
+        model.toggleArchived(archived)
+        model.showArchived = false
+        XCTAssertEqual(model.rows.map(\.event.message), ["noisy", "kept in view"], "unarchiving brings it back")
+    }
+
+    func testEachRowSaysWhatHappenedWithoutOpeningIt() {
+        func summary(_ level: LogLevel, _ metadata: [String: String]) -> String {
+            LogEvent(timestamp: now, level: level, category: "c", message: "m", metadata: metadata, appVersion: "1",
+                     osVersion: "os", installID: "i", sessionID: "s").summary
+        }
+        XCTAssertEqual(summary(.info, ["page": "Images/Convert Images"]), "Images/Convert Images")
+        XCTAssertEqual(summary(.info, ["count": "2"]), "count: 2")
+        XCTAssertEqual(summary(.info, ["from": "WebP", "to": "jpg"]), "from: WebP · to: jpg")
+        XCTAssertEqual(summary(.info, ["count": "2", "failed": "0", "file_name": "a.mov", "to": "jpg"]), "count: 2 · failed: 0 · file name: a.mov")
+        XCTAssertEqual(summary(.error, ["error_description": "diskutil did not finish within 6 seconds, so it was stopped.",
+                                        "error_code": "1", "page": "Vault", "recent": "-3s [vault] x"]),
+                       "diskutil did not finish within 6 seconds, so it was stopped.")
+        XCTAssertEqual(summary(.warning, ["page": "Vault", "recent": "-3s [vault] x", "program": "diskutil"]), "program: diskutil",
+                       "a problem's page is in every failure, so the row shows what is specific to it")
+        XCTAssertEqual(summary(.info, [:]), "")
+        XCTAssertEqual(summary(.info, ["detail": String(repeating: "x", count: 100)]).count, "detail: ".count + 60)
+    }
+
     func testVersionsCompareNumberByNumber() throws {
         XCTAssertLessThan(try XCTUnwrap(VersionNumber("0.12.9")), try XCTUnwrap(VersionNumber("0.12.10")))
         XCTAssertEqual(try XCTUnwrap(VersionNumber("1.2")), try XCTUnwrap(VersionNumber("1.2.0")))

@@ -64,6 +64,35 @@ enum LogStatus: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+extension LogEvent {
+    /// The trail, the error's internals and repeats of the description are for the details panel, not the row.
+    private static let detailOnlyKeys: Set<String> = [
+        "recent", "error_type", "error_domain", "error_code", "error_debug", "error_reason", "underlying",
+    ]
+    private static let summaryFactLimit = 3
+    private static let summaryValueLimit = 60
+
+    /// A short line of the facts that say what happened, shown after the message in the Logs list: the error for a
+    /// problem, the page for a page change, otherwise up to three short facts, e.g. "count: 2" or "from: WebP · to: jpg".
+    var summary: String {
+        if let description = metadata["error_description"] { return Self.shortened(description) }
+        let facts = metadata.filter { !Self.detailOnlyKeys.contains($0.key) && !$0.value.isEmpty }
+        if level < .warning, let page = facts["page"] {
+            let others = facts.filter { $0.key != "page" }
+            return ([Self.shortened(page)] + Self.pairs(others)).prefix(Self.summaryFactLimit).joined(separator: " · ")
+        }
+        return Self.pairs(facts.filter { $0.key != "page" }).prefix(Self.summaryFactLimit).joined(separator: " · ")
+    }
+
+    private static func pairs(_ facts: [String: String]) -> [String] {
+        facts.sorted { $0.key < $1.key }.map { "\($0.key.replacingOccurrences(of: "_", with: " ")): \(shortened($0.value))" }
+    }
+
+    private static func shortened(_ text: String) -> String {
+        text.count > summaryValueLimit ? String(text.prefix(summaryValueLimit - 1)) + "…" : text
+    }
+}
+
 /// A dotted version such as "0.12.10", compared number by number, so 0.12.10 is newer than 0.12.9.
 struct VersionNumber: Comparable {
     let parts: [Int]
