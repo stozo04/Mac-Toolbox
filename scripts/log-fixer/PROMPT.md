@@ -117,7 +117,7 @@ Do all edits, builds and tests inside that worktree. For each signature:
 
 ## 4. Open the draft PR
 Push the branch and run `gh pr create --draft --base main` with a body that starts with one line per
-signature whose decisions link an open GitHub issue: `Fixes #<n>` when this PR fixes it (GitHub links the issue and closes
+open GitHub issue linked by any of the signature's `log_resolutions` rows (not only the newest): `Fixes #<n>` when this PR fixes it (GitHub links the issue and closes
 it on merge), `Refs #<n>` when it only improves the logging (the problem is not fixed, so the issue must stay open). Then: a table of signatures (level, count,
 sessions, first/last seen, outcome: `fix_proposed` / `logging_improved` / `needs_human`), the evidence you used for each (quote
 `error_description`, `page`, `recent`; no personal paths), and what you changed. End the body with
@@ -130,9 +130,11 @@ Then remove the worktree (`git worktree remove`).
 For every signature you looked at, record one row (double every `'` inside a value):
 `insert into log_resolutions(signature, outcome, links, note, decided_at) values('<signature>', '<outcome>', '<links>',
 '<note>', unixepoch());`
-- `outcome`: `fix_proposed` (the PR fixes it; for an `issue_open` signature `links` is the PR URL then the issue URL), `logging_improved` (the PR only makes it record more), `watching` (it
+- `outcome`: `fix_proposed` (the PR fixes it), `logging_improved` (the PR only makes it record more), `watching` (it
   matched watch issues), or `needs_human` (say why in the note).
-- `links`: the full `https://github.com/stozo04/Mac-Toolbox/...` URLs of the PR or watch issues, separated by spaces.
+- `links`: the full `https://github.com/stozo04/Mac-Toolbox/...` URLs separated by spaces: first this decision's PR or
+  watch issues, then every `/issues/` URL from the signature's earlier rows whose issue is still open
+  (`gh issue view <url> --json state`). Carrying them forward is what lets a later fix find the issue to close.
 - `note`: one plain sentence on the cause or why it waits. No file names or paths: the owner may paste it into a public issue.
 A signature recorded as `watching` is still matched against its watch issues on later runs while they are open.
 Then set `lastLogID` in the state file to `highWater`, unless the 5-signature limit left signatures for a later run:
