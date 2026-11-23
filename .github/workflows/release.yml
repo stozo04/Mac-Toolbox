@@ -78,21 +78,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           codesign -dv dist/Toolbox.app 2>&1 | grep -qx 'Signature=adhoc' || { echo "::error::Toolbox.app is not ad-hoc signed."; exit 1; }
+          [ -f dist/Toolbox.dmg ] || { echo "::error::$TAG's scripts/make-app.sh makes no Toolbox.dmg; only v0.15.1 and later can be released."; exit 1; }
           mkdir release
-          mv dist/Toolbox.zip "release/Toolbox-$VERSION-arm64.zip"
-          {
-            release-tools/.github/scripts/release-notes.sh "$NOTES_SWIFT" "$VERSION" "$PREVIOUS"
-            echo
-            echo "The full history is inside the app: click the version number in the bottom-right corner."
-            echo
-            echo "**Needs** macOS 14 or later on an Apple silicon Mac."
-            echo
-            echo "**Opening it the first time**"
-            echo "This build is ad-hoc signed, not notarized by Apple, so macOS blocks it once. Unzip it, drag Toolbox.app to Applications and open it. When macOS refuses, open System Settings > Privacy & Security and click **Open Anyway** ([Apple's steps](https://support.apple.com/guide/mac-help/mh40616/mac)). Or run:"
-            echo "\`xattr -dr com.apple.quarantine /Applications/Toolbox.app\`"
-            echo
-            echo "Built by this repo's CI from the tagged commit (run $RUN_ID). Includes yt-dlp (Unlicense) and an LGPL build of FFmpeg; see \`Contents/Resources/Licenses/THIRD_PARTY_NOTICES.md\`. Only download videos you own or have permission to save."
-          } > release/notes.md
+          mv dist/Toolbox.dmg "release/Toolbox-$VERSION-macOS-Apple-Silicon.dmg"
+          release-tools/.github/scripts/release-body.sh "$NOTES_SWIFT" "$VERSION" "$PREVIOUS" "$RUN_ID" > release/notes.md
           cat release/notes.md
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -120,7 +109,7 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
           LATEST: ${{ needs.build.outputs.latest }}
         run: |
-          gh release create "$TAG" "release/Toolbox-$VERSION-arm64.zip" \
+          gh release create "$TAG" "release/Toolbox-$VERSION-macOS-Apple-Silicon.dmg" \
             --verify-tag --latest="$LATEST" --title "Toolbox $VERSION" --notes-file release/notes.md
       - name: The published download matches the build
         env:
@@ -128,7 +117,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          asset="Toolbox-$VERSION-arm64.zip"
+          asset="Toolbox-$VERSION-macOS-Apple-Silicon.dmg"
           gh release download "$TAG" --pattern "$asset" --dir published
           built="$(sha256sum "release/$asset" | cut -d' ' -f1)"
           published="$(sha256sum "published/$asset" | cut -d' ' -f1)"
