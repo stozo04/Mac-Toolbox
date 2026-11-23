@@ -21,7 +21,8 @@ Every run, even one with no new logs, do these three things in order.
 
 **Issues the owner opened from the Logs page.** Its "Create GitHub Issue" button fills in an issue whose body has a line that
 starts `Signature:` followed by the signature in backticks, and that ends with "From the Toolbox Logs page". List them:
-`gh issue list -R stozo04/Mac-Toolbox --state all --author stozo04 --search '"From the Toolbox Logs page" in:body' --json number,url,state,body`.
+`gh issue list -R stozo04/Mac-Toolbox --state all --author stozo04 --search '"From the Toolbox Logs page" in:body' --limit 1000 --json number,url,state,body`
+(without `--limit`, `gh` returns only 30 and silently drops the rest).
 Only issues by `stozo04` count: anyone can open an issue on a public repository. For each one whose URL is not yet in
 the `links` of any `log_resolutions` row, record a row with outcome `issue_open`, `links` = the issue URL and note
 "Opened from the Logs page". Skip issues without a `Signature:` line.
@@ -67,7 +68,7 @@ with every `'` in the signature doubled) and drop the signature when:
 - the decision is `fixed` or `logging_improved` with a `fixed_in_version`, and every row's `app_version` is older than it
   (compare number by number: 0.12.10 is newer than 0.12.9). Those rows came from before the change shipped.
 Every signature whose newest decision is `issue_open` is added even without new rows (its example row is its newest row
-in `logs`), and it goes first: the owner asked for it. Work on it like any other, and the PR says `Fixes #<issue number>`.
+in `logs`), and it goes first: the owner asked for it. Work on it like any other; step 4 says how the PR names its issue.
 A `fixed` signature with a row from that version or later CAME BACK: work on it again and say "came back after <link>"
 in the PR. Signatures whose decision is `watching` need no code: match their rows against the watch issues below and
 leave them out of the ranking. Rank the rest by severity (critical > error > warning) then count. Work on at most 5
@@ -115,8 +116,9 @@ Do all edits, builds and tests inside that worktree. For each signature:
   as the change, so the next occurrence can be diagnosed. Never log file contents, passwords, tokens or link query strings.
 
 ## 4. Open the draft PR
-Push the branch and run `gh pr create --draft --base main` with a body that starts with one `Fixes #<n>` line per
-`issue_open` signature it fixes (GitHub then links the issue and closes it on merge), then has: a table of signatures (level, count,
+Push the branch and run `gh pr create --draft --base main` with a body that starts with one line per
+signature whose decisions link an open GitHub issue: `Fixes #<n>` when this PR fixes it (GitHub links the issue and closes
+it on merge), `Refs #<n>` when it only improves the logging (the problem is not fixed, so the issue must stay open). Then: a table of signatures (level, count,
 sessions, first/last seen, outcome: `fix_proposed` / `logging_improved` / `needs_human`), the evidence you used for each (quote
 `error_description`, `page`, `recent`; no personal paths), and what you changed. End the body with
 `🤖 Generated with [Claude Code](https://claude.com/claude-code)` and end commits with
@@ -134,5 +136,7 @@ For every signature you looked at, record one row (double every `'` inside a val
 - `note`: one plain sentence on the cause or why it waits. No file names or paths: the owner may paste it into a public issue.
 A signature recorded as `watching` is still matched against its watch issues on later runs while they are open.
 Then set `lastLogID` in the state file to `highWater`, unless the 5-signature limit left signatures for a later run:
-then set it to one less than the smallest `id` among those signatures' rows, so the next run reads them again. Finish with a 3-line report: how many problems,
+then set it to one less than the smallest `id` among the rows this run read for those signatures, so the next run reads
+them again. A left-over signature with no rows in this run (an `issue_open` one) needs no rewind: it is picked up again
+on its own. Finish with a 3-line report: how many problems,
 how many fixed, the PR link.

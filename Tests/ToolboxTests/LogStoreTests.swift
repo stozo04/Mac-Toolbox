@@ -143,7 +143,7 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.watching, for: before.signature)), .watching)
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.fixProposed, for: before.signature)), .fixProposed)
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.issueOpen, for: before.signature)), .issueOpen)
-        XCTAssertEqual(LogStatus.allCases.filter(\.alreadyTracked), [.issueOpen, .fixProposed, .watching])
+        XCTAssertEqual(LogStatus.allCases.filter(\.alreadyTracked), [.issueOpen, .fixProposed, .loggingImproved, .watching])
         XCTAssertEqual(LogStatus.of(before, resolution: resolution(.needsHuman, for: before.signature)), .needsHuman)
     }
 

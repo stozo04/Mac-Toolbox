@@ -39,7 +39,7 @@ enum LogStatus: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 
     /// An issue, pull request or watch issue already follows this problem, so starting another issue would duplicate it.
-    var alreadyTracked: Bool { self == .issueOpen || self == .fixProposed || self == .watching }
+    var alreadyTracked: Bool { [.issueOpen, .fixProposed, .loggingImproved, .watching].contains(self) }
 
     /// Info events are a trail, not problems, so they have no status. A fix counts from the version it shipped in:
     /// the same problem from that version or a later one means the fix did not hold.
