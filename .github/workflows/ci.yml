@@ -62,6 +62,10 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: scripts/check-version-bump.sh "origin/$BASE_REF"
+      - name: Release notes for this version read cleanly (used by release.yml)
+        run: |
+          version="$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' Sources/Toolbox/Support/ReleaseNotes.swift | head -1)"
+          .github/scripts/release-notes.sh Sources/Toolbox/Support/ReleaseNotes.swift "$version"
 
   build-and-test:
     name: Build & test (macOS)
@@ -110,28 +114,12 @@ jobs:
     if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 60
-    env:
-      ARCHS: arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Cache yt-dlp + ffmpeg (built by scripts/fetch-tools.sh)
-        id: tools-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Build Toolbox.app (the same build a release publishes)
+        uses: ./.github/actions/build-app
         with:
-          path: build/tools
-          key: tools-${{ runner.os }}-${{ env.ARCHS }}-${{ hashFiles('scripts/fetch-tools.sh') }}
-      - name: Fetch and build helper tools
-        if: steps.tools-cache.outputs.cache-hit != 'true'
-        run: scripts/fetch-tools.sh
-      - name: Cache llama.cpp (built by scripts/build-llama.sh)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: Vendor/llama
-          key: llama-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama.cpp-no-logits.patch') }}
-      - name: Build the app (release, ad-hoc signed; version from ReleaseNotes.swift, run number as build)
-        env:
-          BUILD: ${{ github.run_number }}
-        run: scripts/make-app.sh
+          build-number: ${{ github.run_number }}
       - name: Upload Toolbox.zip
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -147,7 +135,7 @@ jobs:
           {
             echo "### Toolbox.app for this run"
             echo "Download the **Toolbox-…** artifact below (or \`gh run download $RUN_ID -R $REPOSITORY\`), unzip it, then unzip Toolbox.zip."
-            echo "It is ad-hoc signed, so the first time: right-click Toolbox.app → Open, or run \`xattr -dr com.apple.quarantine Toolbox.app\`."
+            echo "It is ad-hoc signed, so macOS blocks it once: open it, then click **Open Anyway** in System Settings > Privacy & Security, or run \`xattr -dr com.apple.quarantine Toolbox.app\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
