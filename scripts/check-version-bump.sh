@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fails unless this branch bumps the app version and adds release notes for it. Branches that change only files under
-# .github/ or files scripts/app-untouched.sh lists (docs, designs, Supabase files) don't touch the app and pass without a bump.
+# .github/ or files scripts/app-untouched.sh lists (docs, designs) don't touch the app and pass without a bump.
 # Run by the "Version bumped" job in .github/workflows/ci.yml on every PR; run it yourself before opening one:
 #
 #   scripts/check-version-bump.sh            # compares with origin/main
@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 git merge-base "$BASE" HEAD > /dev/null 2>&1 || { echo "::error::No merge base with $BASE; fetch full history (fetch-depth: 0)."; exit 1; }
 CHANGED="$(git diff --no-renames --name-only -z "$BASE"...HEAD | tr '\0' '\n')"
 if [ -n "$CHANGED" ] && { grep -v '^\.github/' <<< "$CHANGED" || true; } | scripts/app-untouched.sh > /dev/null; then
-  echo "Only CI files, docs, designs or Supabase files changed ($(wc -l <<< "$CHANGED" | tr -d ' ') file(s)); the app is untouched, so no version bump is needed. OK"
+  echo "Only CI files, docs or designs changed ($(wc -l <<< "$CHANGED" | tr -d ' ') file(s)); the app is untouched, so no version bump is needed. OK"
   exit 0
 fi
 

@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.13.0"
+    static let current = "0.13.1"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,9 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.13.1", date: "2026-11-23", changes: [
+            .init(kind: .removed, text: "Behind the scenes: the old online storage for the app's warnings and errors is gone, now that the log lives on your Mac. Nothing looks or works differently."),
+        ]),
         Release(version: "0.13.0", date: "2026-11-23", changes: [
             .init(kind: .new, text: "Logs: a new page that lists everything the app recorded, newest first. Filter by time (1 hour to a week, or all) and by severity, see how many critical, error, warning and info events happened in that time, and open any event to see its details, copy them, or start a GitHub issue filled in with them."),
             .init(kind: .new, text: "Logs: each problem shows what the weekday log check did about it, Open, Issue open, Fix proposed, Fixed, Came back or Watching, with links to the issue and the pull request. An issue you start from a log is picked up by the next check and followed to the pull request that fixes it."),
