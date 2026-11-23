@@ -7,7 +7,7 @@ enum LogLevel: String, Codable, CaseIterable, Comparable, Sendable {
     static func < (a: LogLevel, b: LogLevel) -> Bool { a.rank < b.rank }
 }
 
-struct LogEvent: Codable, Equatable, Sendable {
+struct LogEvent: Equatable, Sendable {
     var timestamp: Date
     var level: LogLevel
     /// Area of the app, e.g. "download" or "app".
@@ -22,11 +22,18 @@ struct LogEvent: Codable, Equatable, Sendable {
     var installID: String
     /// Random per launch.
     var sessionID: String
+}
 
-    // Column names in the Supabase `mactoolkit_app_logs` table.
-    enum CodingKeys: String, CodingKey {
-        case timestamp, level, category, message, metadata
-        case appVersion = "app_version", osVersion = "os_version"
-        case installID = "install_id", sessionID = "session_id"
+extension LogEvent {
+    /// What makes two events the same problem: `category | message | error_domain | error_code`, plus
+    /// ` | program=<name>` when a program failed, so a `diskutil` timeout and an `ffmpeg` one stay apart.
+    /// The log store saves it with every event, and the log fixer records its fixes against it.
+    var signature: String {
+        var parts = [category, message, metadata["error_domain"] ?? "", metadata["error_code"] ?? ""]
+        if let program = metadata["program"] { parts.append("program=\(program)") }
+        return parts.joined(separator: " | ")
     }
+
+    /// "v0.12.4" for a released version, "dev" for a run from the project.
+    var versionLabel: String { VersionNumber(appVersion) == nil ? appVersion : "v\(appVersion)" }
 }

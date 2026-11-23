@@ -29,32 +29,6 @@ final class LoggingTests: XCTestCase {
         XCTAssertNotNil(try XCTUnwrap(serious.events.first).metadata["page"], "failures always say where the user was")
     }
 
-    func testSupabaseRequestShape() throws {
-        let config = SupabaseLogConfig(url: URL(string: "https://abc.supabase.co")!, key: "pub")
-        let sink = SupabaseLogSink(config: config, flushInterval: 3600)
-        let event = LogEvent(timestamp: Date(timeIntervalSince1970: 0), level: .error, category: "download",
-                             message: "m", metadata: ["host": "youtu.be"], appVersion: "1", osVersion: "os",
-                             installID: "i", sessionID: "s")
-        let req = try sink.request(for: [event])
-        XCTAssertEqual(req.url?.absoluteString, "https://abc.supabase.co/rest/v1/mactoolkit_app_logs")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "apikey"), "pub")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer pub")
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(req.httpBody)) as? [[String: Any]])
-        XCTAssertEqual(try XCTUnwrap(json.first)["level"] as? String, "error")
-        XCTAssertEqual(try XCTUnwrap(json.first)["install_id"] as? String, "i")
-        XCTAssertEqual(try XCTUnwrap(json.first)["timestamp"] as? String, "1970-01-01T00:00:00Z")
-        XCTAssertEqual((try XCTUnwrap(json.first)["metadata"] as? [String: String])?["host"], "youtu.be")
-    }
-
-    // MARK: Dev runs stay out of Supabase
-
-    func testDevelopmentRunsDoNotSendRemoteLogs() {
-        XCTAssertFalse(AppInfo.sendsRemoteLogs(environment: [:], isDevelopmentRun: true))
-        XCTAssertTrue(AppInfo.sendsRemoteLogs(environment: [:], isDevelopmentRun: false))
-        XCTAssertTrue(AppInfo.sendsRemoteLogs(environment: ["TOOLBOX_LOG_REMOTE": "1"], isDevelopmentRun: true))
-        XCTAssertTrue(AppInfo.isDevelopmentRun, "tests run as a debug build, so they must never count as the installed app")
-    }
-
     // MARK: Failures carry enough to understand them
 
     func testDetailsDescribeTheErrorAndTheFile() throws {
@@ -143,7 +117,7 @@ final class LoggingTests: XCTestCase {
         XCTAssertNil(sink.events.first { $0.level == .info }?.metadata["recent"], "info events stay small")
     }
 
-    func testOversizedEventsAreTrimmedToTheTableLimits() {
+    func testOversizedEventsAreTrimmedToTheirLimits() {
         let huge = String(repeating: "x", count: 5000)
         let event = LogEvent(timestamp: Date(), level: .error, category: String(repeating: "c", count: 200), message: huge,
                              metadata: Dictionary(uniqueKeysWithValues: (0..<30).map { ("k\($0)", huge) }) .merging(["recent": huge]) { a, _ in a },
@@ -152,121 +126,5 @@ final class LoggingTests: XCTestCase {
         XCTAssertLessThanOrEqual(event.message.count, 500)
         let bytes = event.metadata.reduce(0) { $0 + $1.key.utf8.count + $1.value.utf8.count }
         XCTAssertLessThan(bytes, 4096)
-    }
-}
-
-/// Hits the real table using ~/Library/Application Support/Toolbox/logging.json.
-/// Run with: TOOLBOX_LOG_LIVE=1 swift test --filter LoggingLiveTests
-final class LoggingLiveTests: XCTestCase {
-    func testErrorReachesSupabase() async throws {
-        guard ProcessInfo.processInfo.environment["TOOLBOX_LOG_LIVE"] != nil,
-              let config = SupabaseLogConfig.load() else { throw XCTSkip("Set TOOLBOX_LOG_LIVE=1") }
-        Log.configure(sinks: [SupabaseLogSink(config: config, minimumLevel: .warning)])
-        defer { Log.configure(sinks: []) }
-        Log.error("live sink test", category: "live-test", ["host": "example.com"])
-        try await pause(for: .seconds(3), because: "the sink sends in the background and exposes nothing to wait on")
-    }
-}
-
-private final class HeldRequest: URLProtocol, @unchecked Sendable {
-    static let held = Locked<[HeldRequest]>([])
-
-    private(set) var messages: [String] = []
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
-
-    override func startLoading() {
-        let body = request.httpBody ?? Self.read(request.httpBodyStream)
-        let rows = (try? JSONSerialization.jsonObject(with: body)) as? [[String: Any]] ?? []
-        messages = rows.compactMap { $0["message"] as? String }
-        Self.held.update { $0.append(self) }
-    }
-
-    func respond(status: Int) {
-        guard let url = request.url,
-              let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil) else { return }
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data())
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    private static func read(_ stream: InputStream?) -> Data {
-        guard let stream else { return Data() }
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 65_536)
-        while stream.hasBytesAvailable {
-            let count = stream.read(&buffer, maxLength: buffer.count)
-            if count <= 0 { break }
-            data.append(contentsOf: buffer.prefix(count))
-        }
-        return data
-    }
-}
-
-final class SupabaseLogSinkQueueTests: XCTestCase {
-    override func setUp() { HeldRequest.held.set([]) }
-
-    override func tearDown() {
-        HeldRequest.held.value.forEach { $0.respond(status: 201) }
-        HeldRequest.held.set([])
-    }
-
-    private func makeSink() throws -> SupabaseLogSink {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [HeldRequest.self]
-        let url = try XCTUnwrap(URL(string: "https://logs.invalid"))
-        return SupabaseLogSink(config: SupabaseLogConfig(url: url, key: "test"), flushInterval: 3600,
-                               session: URLSession(configuration: configuration))
-    }
-
-    private func write(_ range: Range<Int>, to sink: SupabaseLogSink) {
-        for index in range {
-            sink.write(LogEvent(timestamp: Date(timeIntervalSince1970: 0), level: .warning, category: "test", message: String(index),
-                                metadata: [:], appVersion: "1", osVersion: "os", installID: "i", sessionID: "s"))
-        }
-    }
-
-    private func secondRequestMessages(queuedFirst: Int, writtenDuringSend: Int) async throws -> [String] {
-        let sink = try makeSink()
-        write(0..<queuedFirst, to: sink)
-        sink.flush()
-        try await waitUntil("the first batch reaches the transport") { HeldRequest.held.value.count == 1 }
-        let first = try XCTUnwrap(HeldRequest.held.value.first)
-        XCTAssertEqual(first.messages.count, queuedFirst)
-        write(queuedFirst..<queuedFirst + writtenDuringSend, to: sink)
-        first.respond(status: 201)
-        try await waitUntil("the events written during the send go out") {
-            sink.flush()
-            return HeldRequest.held.value.count >= 2
-        }
-        return try XCTUnwrap(HeldRequest.held.value.last).messages
-    }
-
-    func testEventsWrittenDuringASendGoOutInTheNextBatch() async throws {
-        let messages = try await secondRequestMessages(queuedFirst: 10, writtenDuringSend: 5)
-        XCTAssertEqual(messages, (10..<15).map(String.init))
-    }
-
-    func testEventsWrittenWhileAFullQueueIsBeingSentAreNotDropped() async throws {
-        let messages = try await secondRequestMessages(queuedFirst: 500, writtenDuringSend: 100)
-        XCTAssertEqual(messages, (500..<600).map(String.init))
-    }
-
-    func testAFailedSendKeepsTheNewestEventsForTheNextTry() async throws {
-        let sink = try makeSink()
-        write(0..<500, to: sink)
-        sink.flush()
-        try await waitUntil("the first batch reaches the transport") { HeldRequest.held.value.count == 1 }
-        write(500..<600, to: sink)
-        try XCTUnwrap(HeldRequest.held.value.first).respond(status: 500)
-        try await waitUntil("the queue is sent again") {
-            sink.flush()
-            return HeldRequest.held.value.count >= 2
-        }
-        XCTAssertEqual(try XCTUnwrap(HeldRequest.held.value.last).messages, (100..<600).map(String.init))
     }
 }

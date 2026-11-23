@@ -8,9 +8,15 @@ struct ToolboxApp: App {
 
     init() {
         var sinks: [LogSink] = [ConsoleLogSink()]
-        if AppInfo.sendsRemoteLogs(), let config = SupabaseLogConfig.load() { sinks.append(SupabaseLogSink(config: config)) }
+        var storeProblem: Error?
+        do {
+            sinks.append(LogStoreSink(store: try LogStore(at: LogStoreLocation.launch())))
+        } catch {
+            storeProblem = error
+        }
         Log.configure(sinks: sinks)
         Log.info("App launched", category: "app")
+        if let storeProblem { Log.error("The log store could not be opened", category: "app", Log.details(storeProblem)) }
     }
 
     var body: some Scene {

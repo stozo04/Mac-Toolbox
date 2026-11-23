@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Where log events go. Implement this to add a destination (console, Supabase, a file...).
+/// Where log events go. Implement this to add a destination (the console, the log store...).
 protocol LogSink: Sendable {
     /// Events below this level are not sent to the sink.
     var minimumLevel: LogLevel { get }
@@ -86,7 +86,7 @@ enum AppInfo {
     static let sessionID = UUID().uuidString
 
     /// True for anything built or run from the project (`swift run`, a debug build, `.build/`), as opposed to the
-    /// installed app. Those runs are full of half-finished experiments, so they must not reach the shared log table.
+    /// installed app. Those runs are full of half-finished experiments, so they keep their own log and vault.
     static let isDevelopmentRun: Bool = {
         #if DEBUG
         return true
@@ -94,12 +94,6 @@ enum AppInfo {
         return Bundle.main.bundlePath.contains("/.build/")
         #endif
     }()
-
-    /// Whether this run may send events to Supabase. `TOOLBOX_LOG_REMOTE=1` forces it on, to test the pipeline.
-    static func sendsRemoteLogs(environment: [String: String] = ProcessInfo.processInfo.environment,
-                                isDevelopmentRun: Bool = AppInfo.isDevelopmentRun) -> Bool {
-        environment["TOOLBOX_LOG_REMOTE"] == "1" || !isDevelopmentRun
-    }
 
     static let installID: String = {
         let key = "toolbox.installID"
