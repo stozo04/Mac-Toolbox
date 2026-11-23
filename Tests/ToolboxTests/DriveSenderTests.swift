@@ -77,4 +77,35 @@ final class DriveSenderTests: XCTestCase {
         XCTAssertThrowsError(try DriveSender.send([a], to: root.appendingPathComponent("verified"), root: root))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
+
+    func testNothingIsSentUntilAFolderIsChosen() throws {
+        let a = try makeFile("a.mp4")
+        let defaults = try makeScratchDefaults()
+        XCTAssertNil(DriveSender.chosenFolder(in: defaults, environment: [:]))
+        XCTAssertThrowsError(try DriveSender.send([a], defaults: defaults)) { error in
+            XCTAssertEqual(error as? DriveSender.DriveError, .noFolderChosen)
+        }
+    }
+
+    func testSendsToTheChosenFolderAndRemembersIt() throws {
+        let a = try makeFile("a.mp4")
+        let folder = base.appendingPathComponent("drive/videos")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let defaults = try makeScratchDefaults()
+        DriveSender.choose(folder, in: defaults)
+        XCTAssertEqual(DriveSender.chosenFolder(in: defaults, environment: [:])?.path, folder.path)
+        XCTAssertEqual(try DriveSender.send([a], defaults: defaults), DriveSender.Result(copied: 1))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["a.mp4"])
+    }
+
+    func testAChosenFolderThatIsGoneIsNotRecreated() throws {
+        let a = try makeFile("a.mp4")
+        let folder = base.appendingPathComponent("unmounted/videos")
+        let defaults = try makeScratchDefaults()
+        DriveSender.choose(folder, in: defaults)
+        XCTAssertThrowsError(try DriveSender.send([a], defaults: defaults)) { error in
+            XCTAssertEqual(error as? DriveSender.DriveError, .notMounted)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
 }
