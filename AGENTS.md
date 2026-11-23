@@ -31,6 +31,7 @@ A development run (a debug build, or anything run from `.build/`) keeps its vaul
 - `Sources/Toolbox/Views/` - `RootView`, `TopBar`, `HomeView`, `CategoryView`/`ToolCard`, `ToolView` (shared header + `ToolWorkspace` switch), `Workspaces.swift` (DropZone, Link, Live, Text, OptionsPanel), `FileDrop.swift` (`.fileDrop { urls in … }`: one drop, one call with every file).
 - `Tests/ToolboxTests/TestSupport.swift` - shared test helpers: `waitUntil` and `waitUntilReady` (waits that fail at a deadline), `pause(for:because:)`, `Locked` (a value shared with a callback), `killAfterTest` and `killProgramsLeftRunning` (no child process outlives a test), `makeScratchDefaults`, `makeScratchPasteboard`, `element(at:)`, `RGBAPixels` (bounds-checked pixel reads), `missingTools` (skip locally, fail in CI).
 - `features/<Category>/<Tool>/README.md` - per-tool brief: design screenshot, sub-features, implementation notes.
+- `docs/history/` - dated records (code reviews, plans, handoffs). Each describes the code as it was on its date; check `main` before acting on one. Live plans are GitHub issues.
 
 ## How to build a tool
 1. Read the tool's README below and open the screenshot it names.
