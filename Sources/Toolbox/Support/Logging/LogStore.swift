@@ -40,6 +40,7 @@ struct LogResolution: Equatable, Sendable {
 
 /// The app's own log: every event, in `logs.sqlite` on this Mac. The installed app writes it, the Logs page reads it,
 /// and the log fixer reads the events and writes `log_resolutions` with the `sqlite3` tool. This type owns the schema.
+/// Event ids never go back, even after every event is trimmed: the log fixer remembers the last one it read.
 ///
 /// One connection may be used from several threads: it is opened in SQLite's serialized mode.
 final class LogStore: @unchecked Sendable {
@@ -59,7 +60,7 @@ final class LogStore: @unchecked Sendable {
         try db.shareWithOtherProcesses()
         try db.execute("""
             CREATE TABLE IF NOT EXISTS logs(
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp REAL NOT NULL,
                 level TEXT NOT NULL CHECK(level IN ('info', 'warning', 'error', 'critical')),
                 category TEXT NOT NULL,

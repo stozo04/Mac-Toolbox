@@ -74,6 +74,16 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(try store.events(since: nil, levels: Set(LogLevel.allCases), limit: 10).map(\.event.message), ["recent"])
     }
 
+    func testEventIdsNeverGoBackAfterEverythingIsTrimmed() throws {
+        let store = try makeStore()
+        try store.append(event(.error, "first", hoursAgo: 24 * 100))
+        let firstID = try XCTUnwrap(try store.events(since: nil, levels: [.error], limit: nil).first).id
+        try store.deleteEvents(olderThan: now)
+        try store.append(event(.error, "second"))
+        let secondID = try XCTUnwrap(try store.events(since: nil, levels: [.error], limit: nil).first).id
+        XCTAssertGreaterThan(secondID, firstID, "the log fixer's cursor would skip a reused id")
+    }
+
     func testTheSinkTrimsOldEventsWhileTheAppStaysOpen() throws {
         let store = try makeStore()
         let sink = LogStoreSink(store: store)
