@@ -33,7 +33,7 @@ Sidekit is the project's new name. The app, its window and the commands below st
 - **Open a tool:** click its card. Most tools ask you to **drop a file** onto the window or click **Choose File...**. Some, like Download Video, take a pasted link. Others, like Keep Awake, are switches you flip.
 - **Favorites:** click the star next to a tool's name. Favorites appear on the home screen.
 - **Recent:** the tools you used last show up as quick buttons on the home and category pages.
-- **AI Models, Vault and Logs:** the pills at the top next to the categories. Logs lists everything the app recorded, filtered by time and severity, with a count of each severity for the chosen time.
+- **AI Models, Vault and Logs:** the pills at the top next to the categories. Logs lists everything the app recorded, filtered by time and severity, with a count of each severity for the chosen time. Archive a log to hide it from the list and the counts; it is kept, and **Show archived** brings it back.
 - **What's new:** click the version number in the bottom-right corner to see the release history.
 - **Light or dark:** click the sun/moon button at the top right. It switches the whole app. (It opens in dark mode each time for now.)
 - **Go back:** use the arrow at the top left of a tool page.

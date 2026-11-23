@@ -16,6 +16,8 @@ struct StoredLog: Identifiable, Equatable, Sendable {
     let id: Int64
     let event: LogEvent
     let signature: String
+    /// When the owner archived it on the Logs page; archived events are kept, only hidden there by default.
+    var archivedAt: Date?
 }
 
 /// What the log fixer did about one signature. Kept as a history: a later decision is a new row, and the newest wins.
@@ -78,7 +80,8 @@ final class LogStore: @unchecked Sendable {
                 os_version TEXT NOT NULL,
                 install_id TEXT NOT NULL,
                 session_id TEXT NOT NULL,
-                signature TEXT NOT NULL);
+                signature TEXT NOT NULL,
+                archived_at REAL);
             CREATE INDEX IF NOT EXISTS logs_timestamp ON logs(timestamp);
             CREATE INDEX IF NOT EXISTS logs_signature ON logs(signature);
             CREATE TABLE IF NOT EXISTS log_resolutions(
@@ -91,6 +94,14 @@ final class LogStore: @unchecked Sendable {
                 fixed_in_version TEXT);
             CREATE INDEX IF NOT EXISTS log_resolutions_signature ON log_resolutions(signature);
             """)
+        try addArchivedColumnToAnOlderLog()
+    }
+
+    /// Logs made by 0.13.0 have no `archived_at`; SQLite adds a column in place and the events stay as they are.
+    private func addArchivedColumnToAnOlderLog() throws {
+        var columns: Set<String> = []
+        try db.query("PRAGMA table_info(logs)") { columns.insert(SQLiteDatabase.text($0, 1)) }
+        if !columns.contains("archived_at") { try db.execute("ALTER TABLE logs ADD COLUMN archived_at REAL") }
     }
 
     private static var outcomeList: String {
@@ -117,28 +128,32 @@ final class LogStore: @unchecked Sendable {
     }
 
     /// Newest first. `since` nil means every event kept; `limit` nil means no limit.
-    func events(since: Date?, levels: Set<LogLevel>, limit: Int?) throws -> [StoredLog] {
+    func events(since: Date?, levels: Set<LogLevel>, limit: Int?, includeArchived: Bool = true) throws -> [StoredLog] {
         guard !levels.isEmpty else { return [] }
         let chosen = LogLevel.allCases.filter(levels.contains)
         let placeholders = Array(repeating: "?", count: chosen.count).joined(separator: ", ")
         var out: [StoredLog] = []
         try db.query("""
-            SELECT id, timestamp, level, category, message, metadata, app_version, os_version, install_id, session_id, signature
-            FROM logs WHERE timestamp >= ? AND level IN (\(placeholders)) ORDER BY timestamp DESC, id DESC LIMIT ?
+            SELECT id, timestamp, level, category, message, metadata, app_version, os_version, install_id, session_id, signature,
+                   archived_at
+            FROM logs WHERE timestamp >= ? AND level IN (\(placeholders)) AND (? OR archived_at IS NULL)
+            ORDER BY timestamp DESC, id DESC LIMIT ?
             """, bind: { statement in
             sqlite3_bind_double(statement, 1, since?.timeIntervalSince1970 ?? 0)
             for (offset, level) in chosen.enumerated() { SQLiteDatabase.bind(statement, Int32(offset + 2), level.rawValue) }
-            sqlite3_bind_int64(statement, Int32(chosen.count + 2), limit.map(Int64.init) ?? -1)
+            sqlite3_bind_int(statement, Int32(chosen.count + 2), includeArchived ? 1 : 0)
+            sqlite3_bind_int64(statement, Int32(chosen.count + 3), limit.map(Int64.init) ?? -1)
         }) { statement in
             if let log = Self.storedLog(statement) { out.append(log) }
         }
         return out
     }
 
-    func counts(since: Date?) throws -> [LogLevel: Int] {
+    func counts(since: Date?, includeArchived: Bool = true) throws -> [LogLevel: Int] {
         var out: [LogLevel: Int] = [:]
-        try db.query("SELECT level, COUNT(*) FROM logs WHERE timestamp >= ? GROUP BY level", bind: {
+        try db.query("SELECT level, COUNT(*) FROM logs WHERE timestamp >= ? AND (? OR archived_at IS NULL) GROUP BY level", bind: {
             sqlite3_bind_double($0, 1, since?.timeIntervalSince1970 ?? 0)
+            sqlite3_bind_int($0, 2, includeArchived ? 1 : 0)
         }) { statement in
             if let level = LogLevel(rawValue: SQLiteDatabase.text(statement, 0)) { out[level] = Int(sqlite3_column_int64(statement, 1)) }
         }
@@ -154,7 +169,17 @@ final class LogStore: @unchecked Sendable {
                              metadata: metadata, appVersion: SQLiteDatabase.text(statement, 6),
                              osVersion: SQLiteDatabase.text(statement, 7), installID: SQLiteDatabase.text(statement, 8),
                              sessionID: SQLiteDatabase.text(statement, 9))
-        return StoredLog(id: sqlite3_column_int64(statement, 0), event: event, signature: SQLiteDatabase.text(statement, 10))
+        let archivedAt = sqlite3_column_type(statement, 11) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 11))
+        return StoredLog(id: sqlite3_column_int64(statement, 0), event: event, signature: SQLiteDatabase.text(statement, 10),
+                         archivedAt: archivedAt)
+    }
+
+    /// Archiving only hides an event on the Logs page; it is kept, and the log fixer still reads it.
+    func setArchived(_ archived: Bool, eventID: Int64, at date: Date = Date()) throws {
+        try db.run("UPDATE logs SET archived_at = ? WHERE id = ?") { statement in
+            if archived { sqlite3_bind_double(statement, 1, date.timeIntervalSince1970) } else { sqlite3_bind_null(statement, 1) }
+            sqlite3_bind_int64(statement, 2, eventID)
+        }
     }
 
     // MARK: Resolutions
