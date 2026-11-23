@@ -9,32 +9,48 @@ enum DriveSender {
     }
 
     enum DriveError: LocalizedError {
+        case noFolderChosen
         case notMounted
 
-        var errorDescription: String? { "Google Drive isn't available. Open Google Drive and try again." }
+        var errorDescription: String? {
+            switch self {
+            case .noFolderChosen: "Choose a Google Drive folder first."
+            case .notMounted: "Google Drive isn't available. Open Google Drive and try again."
+            }
+        }
     }
 
     static let partialPrefix = ".toolbox-partial-"
+    static let folderKey = "downloadVideo.driveFolder"
 
-    /// `$TOOLBOX_DRIVE_FOLDER` (debug builds only) stands in for Google Drive, so a test run never uploads anything.
-    static var driveRoot: URL {
+    /// Where the Open panel starts: the folder macOS mounts Google Drive and other cloud drives in.
+    static var cloudStorage: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/CloudStorage", isDirectory: true)
+    }
+
+    /// The folder the person chose. `$TOOLBOX_DRIVE_FOLDER` (debug builds only) stands in for it, so a test run never uploads anything.
+    static func chosenFolder(in defaults: UserDefaults = .standard,
+                             environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         #if DEBUG
-        if let override = ProcessInfo.processInfo.environment["TOOLBOX_DRIVE_FOLDER"] {
+        if let override = environment["TOOLBOX_DRIVE_FOLDER"] {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         #endif
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/CloudStorage/GoogleDrive-gates.steven@gmail.com", isDirectory: true)
+        return defaults.string(forKey: folderKey).map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
-    static var destination: URL {
-        driveRoot.appendingPathComponent("Other computers/My Laptop/My Stuff/Kayley/rosie/Videos/verified",
-                                         isDirectory: true)
+    static func choose(_ folder: URL, in defaults: UserDefaults = .standard) {
+        defaults.set(folder.path, forKey: folderKey)
+    }
+
+    static func send(_ files: [URL], defaults: UserDefaults = .standard) throws -> Result {
+        guard let folder = chosenFolder(in: defaults) else { throw DriveError.noFolderChosen }
+        return try send(files, to: folder, root: folder)
     }
 
     /// Copies (never moves, never overwrites). `root` must exist, so a Drive that isn't mounted
     /// doesn't get a stray folder created in its place.
-    static func send(_ files: [URL], to destination: URL = destination, root: URL = driveRoot) throws -> Result {
+    static func send(_ files: [URL], to destination: URL, root: URL) throws -> Result {
         let fm = FileManager.default
         guard fm.fileExists(atPath: root.path) else { throw DriveError.notMounted }
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
