@@ -9,7 +9,7 @@ struct CompanionAppView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            CompanionAppIcon(app: app, size: 96)
+            CompanionAppIcon(installedURL: installedURL, size: 96)
             Text(app.name).font(.title.bold())
             Text(app.pitch).font(.body).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).frame(maxWidth: 460)
@@ -37,13 +37,12 @@ struct CompanionAppView: View {
 
 /// The app's own icon when it is installed, otherwise a generic app symbol.
 struct CompanionAppIcon: View {
-    @Environment(AppState.self) private var state
-    let app: CompanionApp
+    let installedURL: URL?
     let size: CGFloat
 
     var body: some View {
-        if let url = state.companionApps.installedURL(of: app) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path(percentEncoded: false)))
+        if let installedURL {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: installedURL.path(percentEncoded: false)))
                 .resizable().frame(width: size, height: size)
         } else {
             Image(systemName: "app.dashed").font(.system(size: size * 0.6)).foregroundStyle(.secondary)

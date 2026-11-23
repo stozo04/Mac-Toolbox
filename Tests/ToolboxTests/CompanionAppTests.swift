@@ -58,10 +58,8 @@ final class CompanionAppTests: XCTestCase {
         XCTAssertEqual(Set(ToolCatalog.tools(in: .video).map(\.name)), expected)
     }
 
-    func testDownloadPagesAreTheAppsGitHubReleases() {
-        for app in CompanionApp.allCases {
-            XCTAssertEqual(app.downloadPage.host(), "github.com")
-            XCTAssertTrue(app.downloadPage.path().hasSuffix("/releases/latest"), app.name)
-        }
+    func testDownloadPagesAreWhereEachAppPublishesItsBuilds() {
+        XCTAssertEqual(CompanionApp.folio.downloadPage.absoluteString, "https://github.com/mberman84/folio-releases/releases/latest")
+        XCTAssertEqual(CompanionApp.scarlet.downloadPage.absoluteString, "https://github.com/Forward-Future/scarlet/releases/latest")
     }
 }

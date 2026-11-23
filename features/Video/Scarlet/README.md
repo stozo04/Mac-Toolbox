@@ -9,7 +9,7 @@ A card that opens [Scarlet](https://github.com/Forward-Future/scarlet), Forward 
 ## Behavior
 - Clicking the card opens Scarlet when it is installed (bundle ID `com.forwardfuture.scarlet`, found through Launch Services). Toolbox stays on the page you were on.
 - When Scarlet is not installed, the card opens its page: what Scarlet does, a **Get Scarlet** button that opens Scarlet's GitHub releases in the browser, and **Check Again**.
-- The card shows Scarlet's own icon when it is installed.
+- The card shows Scarlet's own icon when it is installed. Right-click a card to add it to or remove it from Favorites.
 
 ## Implementation
 `ToolInput.companionApp(.scarlet)`; shared with Folio: `Models/CompanionApp.swift`, `Views/CompanionAppView.swift`, `AppState.open(_:)`.

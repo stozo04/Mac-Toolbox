@@ -28,14 +28,15 @@ struct CategoryView: View {
 struct ToolCard: View {
     @Environment(AppState.self) private var state
     let tool: Tool
+    @State private var companionURL: URL?
 
     var body: some View {
         Button { state.open(tool) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.inset)
-                    if case .companionApp(let app) = tool.input {
-                        CompanionAppIcon(app: app, size: 64)
+                    if case .companionApp = tool.input {
+                        CompanionAppIcon(installedURL: companionURL, size: 64)
                     } else {
                         Image(systemName: tool.symbol).font(.system(size: 34)).foregroundStyle(Theme.accent)
                     }
@@ -62,6 +63,12 @@ struct ToolCard: View {
             .cardBackground()
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(state.favorites.contains(tool.id) ? "Remove from Favorites" : "Add to Favorites") { state.toggleFavorite(tool) }
+        }
+        .task(id: tool.id) {
+            if case .companionApp(let app) = tool.input { companionURL = state.companionApps.installedURL(of: app) }
+        }
     }
 }
 

@@ -20,7 +20,6 @@ enum CompanionApp: String, CaseIterable, Hashable {
         }
     }
 
-    /// What the app does, in the words its card and page use.
     var pitch: String {
         switch self {
         case .folio:
@@ -32,13 +31,14 @@ enum CompanionApp: String, CaseIterable, Hashable {
 
     var downloadPage: URL {
         switch self {
-        case .folio: URL(string: "https://github.com/Forward-Future/folio/releases/latest")!
+        // Folio's source repository publishes no releases; its builds live in a separate repository.
+        case .folio: URL(string: "https://github.com/mberman84/folio-releases/releases/latest")!
         case .scarlet: URL(string: "https://github.com/Forward-Future/scarlet/releases/latest")!
         }
     }
 }
 
-/// Finds and opens companion apps through Launch Services. The two closures are replaced in tests.
+/// Finds and opens companion apps through Launch Services.
 struct CompanionApps {
     var locate: (_ bundleIdentifier: String) -> URL?
     var launch: (_ appURL: URL) -> Void
@@ -47,7 +47,11 @@ struct CompanionApps {
         locate: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
         launch: { appURL in
             NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-                if let error { Log.error("Could not open \(appURL.lastPathComponent)", category: "companion", Log.details(error, file: appURL)) }
+                if let error {
+                    let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier ?? "unknown"
+                    Log.error("Could not open \(appURL.lastPathComponent)", category: "companion",
+                              Log.details(error, file: appURL, ["bundle_id": bundleIdentifier]))
+                }
             }
         }
     )

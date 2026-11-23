@@ -31,7 +31,7 @@ enum ReleaseNotes {
         Release(version: "0.15.0", date: "2026-11-23", changes: [
             .init(kind: .new, text: "Video: a Scarlet card opens Scarlet, a free AI video editor you drive by talking to Claude Code or Codex. All the Video tools stay."),
             .init(kind: .new, text: "Docs is now one Folio card that opens Folio, a free PDF reader and editor. If Folio or Scarlet isn't installed, its card shows where to download it."),
-            .init(kind: .removed, text: "Docs: Scan Document, Redact PDF and the eleven PDF tools that were never built. Use Folio for PDFs."),
+            .init(kind: .removed, text: "Docs: Scan Document and Redact PDF, and the eleven PDF tools that were never built. Folio reads, signs and edits PDFs, but it does not scan paper or redact text for good."),
         ]),
         Release(version: "0.14.1", date: "2026-11-23", changes: [
             .init(kind: .removed, text: "Behind the scenes: the old online storage for the app's warnings and errors is gone, now that the log lives on your Mac. Nothing looks or works differently."),

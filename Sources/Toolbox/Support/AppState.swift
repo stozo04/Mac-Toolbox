@@ -64,7 +64,7 @@ final class AppState {
     var recentTools: [Tool] { recents.compactMap(ToolCatalog.tool(id:)) }
     var favoriteTools: [Tool] { ToolCatalog.all.filter { favorites.contains($0.id) } }
 
-    /// Shows the tool's page. A companion app that is installed is opened instead; its page only says where to get it.
+    /// An installed companion app is opened instead of showing its page.
     func open(_ tool: Tool) {
         recents.removeAll { $0 == tool.id }
         recents.insert(tool.id, at: 0)

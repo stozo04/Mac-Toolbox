@@ -86,7 +86,7 @@ Download Video can also copy finished downloads to a Google Drive folder, and wi
 
 | Card | What it does |
 |---|---|
-| **Folio** (Docs) | Opens [Folio](https://github.com/Forward-Future/folio), a free, open-source PDF reader and editor. If it isn't installed, the card's page links to its download. |
+| **Folio** (Docs) | Opens [Folio](https://github.com/Forward-Future/folio), a free, open-source PDF reader and editor. If it isn't installed, the card's page links to its download. Folio does not scan paper or redact PDFs, so Scan Document and Redact PDF are gone. |
 | **Scarlet** (Video) | Opens [Scarlet](https://github.com/Forward-Future/scarlet), a free, open-source AI video editor driven by Claude Code or Codex. If it isn't installed, the card's page links to its download. |
 
 #### Mac
