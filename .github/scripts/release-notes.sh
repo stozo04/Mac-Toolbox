@@ -5,7 +5,7 @@
 #
 #   .github/scripts/release-notes.sh <ReleaseNotes.swift> <version> [<since>]
 #
-# Run by .github/workflows/release.yml (the notes of a release) and ci.yml (proves the file still parses).
+# Run by release-body.sh, which wraps these entries in the whole body of a release.
 set -euo pipefail
 
 NOTES_FILE="$1"

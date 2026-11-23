@@ -1,5 +1,5 @@
 name: Build Toolbox.app
-description: Fetches the helper tools and llama.cpp (both cached) and runs scripts/make-app.sh, which leaves an ad-hoc signed dist/Toolbox.app and dist/Toolbox.zip.
+description: Fetches the helper tools and llama.cpp (both cached) and runs scripts/make-app.sh, which leaves an ad-hoc signed dist/Toolbox.app, dist/Toolbox.dmg and dist/Toolbox.zip.
 
 inputs:
   build-number:

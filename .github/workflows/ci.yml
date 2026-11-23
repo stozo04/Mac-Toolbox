@@ -65,7 +65,7 @@ jobs:
       - name: Release notes for this version read cleanly (used by release.yml)
         run: |
           version="$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' Sources/Toolbox/Support/ReleaseNotes.swift | head -1)"
-          .github/scripts/release-notes.sh Sources/Toolbox/Support/ReleaseNotes.swift "$version"
+          .github/scripts/release-body.sh Sources/Toolbox/Support/ReleaseNotes.swift "$version"
 
   build-and-test:
     name: Build & test (macOS)

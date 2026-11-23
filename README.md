@@ -161,7 +161,7 @@ swift run Toolbox
 
 `scripts/build-llama.sh` builds llama.cpp, which the Vault's smart search runs on (it needs CMake, from Homebrew or `uv`, and takes a few minutes once). The first run takes a minute to build. To quit, press **⌘Q**. To open a page straight away, add `--page`, for example `swift run Toolbox --page "Video/Trim Video"` or `--page Vault`. A run from the project folder keeps its own test vault and never opens the one the installed app uses.
 
-To build the packaged app (`Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`.
+To build the packaged app (`Toolbox.app` with yt-dlp and ffmpeg inside), run `scripts/fetch-tools.sh` then `scripts/make-app.sh`. It also makes `dist/Toolbox.dmg`, the download a GitHub release publishes as `Toolbox-X.Y.Z-macOS-Apple-Silicon.dmg`.
 
 ## Permissions you may be asked for
 

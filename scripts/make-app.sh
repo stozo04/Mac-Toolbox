@@ -1,11 +1,12 @@
 #!/bin/bash
-# Builds dist/Toolbox.app (+ dist/Toolbox.zip) with yt-dlp, ffmpeg and ffprobe inside.
+# Builds dist/Toolbox.app with yt-dlp, ffmpeg and ffprobe inside, plus dist/Toolbox.dmg (the app beside an Applications
+# link, what a release publishes) and dist/Toolbox.zip (CI's Package artifact).
 #
 #   scripts/fetch-tools.sh && scripts/make-app.sh
 #   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" scripts/make-app.sh
 #
 # Without SIGN_IDENTITY the app is ad-hoc signed: fine on this Mac, not for distribution.
-# For distribution also notarize: xcrun notarytool submit dist/Toolbox.zip --wait ... ; xcrun stapler staple dist/Toolbox.app
+# For distribution also notarize: xcrun notarytool submit dist/Toolbox.dmg --wait ... ; xcrun stapler staple dist/Toolbox.dmg
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -70,6 +71,24 @@ sign --entitlements "$ROOT/scripts/app.entitlements" "$APP"
 codesign --verify --deep --strict "$APP"
 
 ( cd "$ROOT/dist" && rm -f Toolbox.zip && ditto -c -k --keepParent Toolbox.app Toolbox.zip )
+
+DMG="$ROOT/dist/Toolbox.dmg"
+DMG_CREATE_ATTEMPTS=3
+echo "==> disk image $DMG"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+ditto "$APP" "$STAGE/Toolbox.app"
+ln -s /Applications "$STAGE/Applications"
+rm -f "$DMG"
+# hdiutil create fails now and then with "Resource busy" on GitHub's macOS runners; a retry gets past it.
+for attempt in $(seq "$DMG_CREATE_ATTEMPTS"); do
+  hdiutil create -quiet -volname Toolbox -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" && break
+  [ "$attempt" -lt "$DMG_CREATE_ATTEMPTS" ] || { echo "hdiutil create failed $DMG_CREATE_ATTEMPTS times"; exit 1; }
+  echo "hdiutil create failed (attempt $attempt), trying again"
+  sleep 5
+done
+hdiutil verify -quiet "$DMG"
+
 echo "==> done"
-du -sh "$APP" "$ROOT/dist/Toolbox.zip"
+du -sh "$APP" "$ROOT/dist/Toolbox.zip" "$DMG"
 echo "Open with: open dist/Toolbox.app"
