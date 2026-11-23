@@ -224,13 +224,28 @@ final class LogStoreTests: XCTestCase {
         XCTAssertTrue(body.contains("Status: Open"))
         XCTAssertTrue(body.contains("check file names before submitting"))
 
-        let huge = event(.error, metadata: ["error_debug": String(repeating: "x", count: 20_000)])
+        let wordy = String(repeating: "a b\nc, ", count: 4000)
+        let huge = event(.error, metadata: ["error_debug": wordy])
         let hugeRow = LogRow(log: StoredLog(id: 2, event: huge, signature: huge.signature), status: .open, resolution: nil)
         let hugeURL = try XCTUnwrap(LogsModel.newIssueURL(for: hugeRow))
+        let limit = LogsModel.issueURLLimit
+        XCTAssertLessThanOrEqual(hugeURL.absoluteString.utf8.count, limit, "spaces and newlines grow when encoded; the whole link must fit")
         let hugeBody = try XCTUnwrap(URLComponents(url: hugeURL, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value)
-        let limit = LogsModel.issueBodyLimit
-        XCTAssertLessThan(hugeBody.count, limit + 200)
         XCTAssertTrue(hugeBody.contains("cut to fit"))
+        XCTAssertTrue(hugeBody.hasSuffix("check file names before submitting._"))
+    }
+
+    @MainActor
+    func testPlusSignsSurviveInTheIssueLink() throws {
+        let plus = event(.error, "C++ build failed", metadata: ["file_name": "a+b.mov"])
+        let url = try XCTUnwrap(LogsModel.newIssueURL(for: LogRow(log: StoredLog(id: 1, event: plus, signature: plus.signature),
+                                                                status: .open, resolution: nil)))
+        let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery)
+        XCTAssertFalse(query.contains("+"), "GitHub reads a bare + as a space")
+        XCTAssertTrue(query.contains("C%2B%2B"))
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(items.first { $0.name == "title" }?.value, "download: C++ build failed")
+        XCTAssertTrue(items.first { $0.name == "body" }?.value?.contains("file_name: a+b.mov") == true)
     }
 
     @MainActor

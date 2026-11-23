@@ -117,20 +117,36 @@ final class LogsModel {
     }
 
     static let newIssuePage = URL(string: "https://github.com/stozo04/Mac-Toolbox/issues/new")
-    /// GitHub refuses very long new-issue links, so the details are cut to fit; the browser shows the result to edit.
-    static let issueBodyLimit = 6000
+    /// GitHub refuses new-issue links much over 8 KB, so the details are cut until the whole encoded link fits.
+    static let issueURLLimit = 7500
+    static let issueFooter = "\n\n_From the Toolbox Logs page. The repository is public: check file names before submitting._"
+    private static let issueCutNote = "\n…(cut to fit; the rest is in the Logs page)"
+    /// Only these stay as they are in the link; everything else is percent-encoded, `+` included, which GitHub would
+    /// otherwise read as a space.
+    private static let plainQueryCharacters = CharacterSet(charactersIn:
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     /// A new issue on the app's GitHub repository, filled in with this event, for the browser to open. Toolbox sends
     /// nothing itself: the issue exists only once it is submitted there.
     static func newIssueURL(for row: LogRow) -> URL? {
-        guard let page = newIssuePage, var parts = URLComponents(url: page, resolvingAgainstBaseURL: false) else { return nil }
-        var body = markdown(row)
-        if body.count > issueBodyLimit { body = String(body.prefix(issueBodyLimit)) + "\n…(cut to fit; the rest is in the Logs page)" }
-        body += "\n\n_From the Toolbox Logs page. The repository is public: check file names before submitting._"
-        parts.queryItems = [
-            URLQueryItem(name: "title", value: "\(row.event.category): \(row.event.message)"),
-            URLQueryItem(name: "body", value: body),
-        ]
+        let title = "\(row.event.category): \(row.event.message)"
+        let details = markdown(row)
+        guard let full = issueURL(title: title, body: details + issueFooter) else { return nil }
+        if full.absoluteString.utf8.count <= issueURLLimit { return full }
+        var shortest = 0, longest = details.count
+        while shortest < longest {
+            let middle = (shortest + longest + 1) / 2
+            let candidate = issueURL(title: title, body: String(details.prefix(middle)) + issueCutNote + issueFooter)
+            if let candidate, candidate.absoluteString.utf8.count <= issueURLLimit { shortest = middle } else { longest = middle - 1 }
+        }
+        return issueURL(title: title, body: String(details.prefix(shortest)) + issueCutNote + issueFooter)
+    }
+
+    private static func issueURL(title: String, body: String) -> URL? {
+        guard let page = newIssuePage, var parts = URLComponents(url: page, resolvingAgainstBaseURL: false),
+              let title = title.addingPercentEncoding(withAllowedCharacters: plainQueryCharacters),
+              let body = body.addingPercentEncoding(withAllowedCharacters: plainQueryCharacters) else { return nil }
+        parts.percentEncodedQuery = "title=\(title)&body=\(body)"
         return parts.url
     }
 
