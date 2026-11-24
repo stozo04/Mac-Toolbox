@@ -1,6 +1,6 @@
 # Mac Toolbox
 
-**One app for the small jobs on your Mac.** [sidekit-mac.vercel.app](https://sidekit-mac.vercel.app)
+**One app for the small jobs on your Mac.** [mac-toolbox.vercel.app](https://mac-toolbox.vercel.app)
 
 Mac Toolbox puts the small utilities you reach for every day into one free, open-source app: trim a video, compress photos, black out part of a PDF, keep your Mac awake. The tools run on your Mac, and your original files are never changed.
 
