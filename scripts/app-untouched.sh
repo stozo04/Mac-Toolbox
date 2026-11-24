@@ -1,7 +1,7 @@
 #!/bin/bash
 # Reads changed paths on stdin, one per line. Exits 0 when none of them can change Toolbox.app: docs, designs
 # and the Dependabot config. Otherwise prints the first path that can and exits 1.
-# Shared by the "Changed paths" job in .github/workflows/ci.yml (which macOS jobs to run) and by
+# Shared by scripts/mac-check.sh (whether there is anything to build and test) and by
 # scripts/check-version-bump.sh (whether a version bump is needed), so the two can never disagree.
 set -euo pipefail
 

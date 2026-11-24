@@ -1,4 +1,4 @@
-# SwiftLint config for Toolbox. CI fails on errors; warnings are reported on the PR but don't block.
+# SwiftLint config for Toolbox. scripts/mac-check.sh fails on errors; warnings are printed but don't block.
 # The size limits are a ratchet: each warning sits just above the largest case in the code today, each error a clear step
 # above that, so new code cannot grow past what exists. Largest today: type body 588, function body 87, cyclomatic
 # complexity 18, and file 728 lines. When the largest case shrinks, lower its limit to match.
