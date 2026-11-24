@@ -51,9 +51,8 @@ struct CompressVideoView: View {
                 case .done(let r):
                     Label(summary(r), systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
                 case .notSmaller(let bytes):
-                    Label("Already well compressed (\(MediaFormat.bytes(bytes))). A new copy would not be smaller, so none was made.",
-                          systemImage: "info.circle.fill")
-                        .font(.caption).foregroundStyle(.secondary)
+                    InfoNote(text: "Already well compressed (\(MediaFormat.bytes(bytes))). A new copy would not be smaller, so none was made.")
+                        .font(.caption)
                 case .failed(let message): Text(message).font(.caption).foregroundStyle(.red)
                 }
             }

@@ -55,8 +55,11 @@ struct LogsView: View {
                 Text("Logs").font(.system(size: 34, weight: .bold))
             }
             Spacer()
-            Label("Updates on its own", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
-            Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
+            Label { Text("Updates on its own").foregroundStyle(.secondary) } icon: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+            .font(.caption)
+            Button { model.reload() } label: { Image(systemName: "arrow.clockwise").foregroundStyle(Theme.accent) }
                 .buttonStyle(.borderless).help("Look again")
         }
     }
@@ -80,7 +83,7 @@ struct LogsView: View {
                 let focused = !model.showsEveryLevel && model.levels.contains(level)
                 Button { model.toggle(level) } label: {
                     StatTile(icon: level.symbol, title: level.title, value: (model.counts[level] ?? 0).formatted(),
-                             caption: model.range == .all ? "All time" : "Last \(model.range.rawValue)")
+                             caption: model.range == .all ? "All time" : "Last \(model.range.rawValue)", iconColor: level.color)
                         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
                             .strokeBorder(focused ? level.color : .clear, lineWidth: 2))
                         .contentShape(Rectangle())
@@ -163,16 +166,16 @@ extension LogLevel {
         case .critical: "xmark.octagon.fill"
         case .error: "exclamationmark.circle.fill"
         case .warning: "exclamationmark.triangle.fill"
-        case .info: "info.circle"
+        case .info: "info.circle.fill"
         }
     }
 
     var color: Color {
         switch self {
-        case .critical: Theme.warning
-        case .error: .orange
-        case .warning: .yellow
-        case .info: .secondary
+        case .critical: .purple
+        case .error: .red
+        case .warning: .orange
+        case .info: Theme.info
         }
     }
 }
