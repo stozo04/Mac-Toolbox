@@ -136,7 +136,7 @@ private struct HogDetail: View {
                 Text(hog.title).font(.title2.weight(.bold))
                 Text(hog.detail).font(.caption).foregroundStyle(.secondary)
                 if case .notHere(let message) = hog.clearing {
-                    Label(message, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
+                    InfoNote(text: message).font(.callout)
                 }
                 content
                 footer

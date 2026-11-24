@@ -20,11 +20,13 @@ struct StatTile: View {
     let value: String
     var unit = ""
     var caption = ""
+    var iconColor = Theme.accent
 
     var body: some View {
         MacCard {
             VStack(alignment: .leading, spacing: 4) {
-                Label(title, systemImage: icon).font(.caption).foregroundStyle(.secondary)
+                Label { Text(title).foregroundStyle(.secondary) } icon: { Image(systemName: icon).foregroundStyle(iconColor) }
+                    .font(.caption)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(value).font(.system(size: 34, weight: value == "–" ? .light : .bold, design: .rounded)).minimumScaleFactor(0.6).lineLimit(1)
                         .foregroundStyle(value == "–" ? Color.secondary : Color.primary)
@@ -34,6 +36,15 @@ struct StatTile: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+}
+
+/// A quiet note in secondary text behind a blue info icon.
+struct InfoNote: View {
+    let text: String
+
+    var body: some View {
+        Label { Text(text).foregroundStyle(.secondary) } icon: { Image(systemName: "info.circle.fill").foregroundStyle(Theme.info) }
     }
 }
 

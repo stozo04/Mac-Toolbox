@@ -11,6 +11,7 @@ enum Theme {
     static let corner: CGFloat = 20
     /// Solid warning red that stays strong on both the dark and the light background; text on it is white.
     static let warning = Color(red: 0.82, green: 0.10, blue: 0.12)
+    static let info = Color.blue
 
     private static func adaptive(light: CGFloat, dark: CGFloat) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
