@@ -43,7 +43,8 @@ got="$(shasum -a 256 "$lame_tarball" | awk '{print $1}')"
 [ "$LAME_SHA256" = "$got" ] || { echo "LAME tarball checksum mismatch ($LAME_SHA256 vs $got)"; exit 1; }
 
 build_lame() {
-  local arch="$1" src="$WORK/lame-$LAME_VERSION-src-$arch" dest="$WORK/lame-$LAME_VERSION-$arch" host="${1/arm64/aarch64}-apple-darwin"
+  local arch="$1"
+  local src="$WORK/lame-$LAME_VERSION-src-$arch" dest="$WORK/lame-$LAME_VERSION-$arch" host="${arch/arm64/aarch64}-apple-darwin"
   local pkg_config_unused_without_frontend=/usr/bin/true
   [ -f "$dest/lib/libmp3lame.a" ] && { echo "    $arch already built"; return; }
   rm -rf "$src" "$dest"; mkdir -p "$src"
@@ -71,7 +72,8 @@ elif [ "$FFMPEG_SHA256" != "$got" ]; then
 fi
 
 build_arch() {
-  local arch="$1" src="$WORK/src-$arch" dest="$WORK/install-$arch" lame="$WORK/lame-$LAME_VERSION-$arch"
+  local arch="$1"
+  local src="$WORK/src-$arch" dest="$WORK/install-$arch" lame="$WORK/lame-$LAME_VERSION-$arch"
   local stamp="$dest/.built-with" recipe="ffmpeg $FFMPEG_VERSION, LAME $LAME_VERSION"
   # Resumable: a finished arch is skipped, an interrupted one continues where make stopped.
   # A build from another ffmpeg or LAME version (or from before LAME was added) is started again.
@@ -105,7 +107,7 @@ for tool in ffmpeg ffprobe; do
   chmod 755 "$OUT/$tool"
   # Must not depend on anything outside macOS itself.
   # Library lines are indented; fat files also print an unindented header per architecture.
-  if otool -L "$OUT/$tool" | grep -E '^[[:space:]]' | grep -vE '^[[:space:]]*(/usr/lib/|/System/)' | grep -q .; then
+  if otool -L "$OUT/$tool" | grep -E '^[[:space:]]' | grep -vE '^[[:space:]]*(/usr/lib/|/System/)' | grep . > /dev/null; then
     echo "$tool links a non-system library:"; otool -L "$OUT/$tool"; exit 1
   fi
 done
@@ -115,10 +117,10 @@ echo "==> smoke test"
 T="$WORK/smoke"; rm -rf "$T"; mkdir -p "$T"
 "$OUT/ffmpeg" -v error -f lavfi -i testsrc=d=1:s=160x120 -f lavfi -i sine=d=1 -c:v mpeg4 -c:a aac "$T/a.mp4"
 "$OUT/ffmpeg" -v error -i "$T/a.mp4" -vn -c:a aac "$T/a.m4a"
-"$OUT/ffprobe" -v error -show_entries stream=codec_name -of csv=p=0 "$T/a.m4a" | grep -q aac
+"$OUT/ffprobe" -v error -show_entries stream=codec_name -of csv=p=0 "$T/a.m4a" | grep aac > /dev/null
 "$OUT/ffmpeg" -v error -i "$T/a.mp4" -vn -c:a libmp3lame -b:a 192k "$T/a.mp3"
-"$OUT/ffprobe" -v error -show_entries stream=codec_name -of csv=p=0 "$T/a.mp3" | grep -q mp3
-"$OUT/ffmpeg" -version | grep -q -- '--disable-gpl'
+"$OUT/ffprobe" -v error -show_entries stream=codec_name -of csv=p=0 "$T/a.mp3" | grep mp3 > /dev/null
+"$OUT/ffmpeg" -version | grep -- '--disable-gpl' > /dev/null
 "$OUT/yt-dlp" --version
 
 echo "==> done: $OUT"

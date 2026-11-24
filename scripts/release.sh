@@ -102,7 +102,8 @@ fi
 
 step "Building Toolbox.app (scripts/make-app.sh, ad-hoc signed)"
 (cd "$WORK/src" && env -u SIGN_IDENTITY -u VERSION -u BUILD ARCHS=arm64 TOOLS_DIR="$TOOLS" scripts/make-app.sh)
-codesign -dv "$WORK/src/dist/Toolbox.app" 2>&1 | grep -qx 'Signature=adhoc' || fail "Toolbox.app is not ad-hoc signed."
+signature="$(codesign -dv "$WORK/src/dist/Toolbox.app" 2>&1)"
+grep -qx 'Signature=adhoc' <<< "$signature" || fail "Toolbox.app is not ad-hoc signed."
 [ -f "$WORK/src/dist/Toolbox.dmg" ] || fail "$TAG's scripts/make-app.sh makes no Toolbox.dmg; only v0.15.1 and later can be released."
 
 step "Naming the download and writing the notes"

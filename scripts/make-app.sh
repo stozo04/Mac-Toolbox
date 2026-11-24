@@ -17,7 +17,10 @@ VERSION="${VERSION:-$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' "$ROOT/
 BUILD="${BUILD:-$VERSION}"   # CFBundleVersion; CI passes its run number
 IDENTITY="${SIGN_IDENTITY:--}"
 ARCH_FLAGS=(--arch arm64)
-[ -n "${ARCHS:-}" ] && ARCH_FLAGS=($(for a in $ARCHS; do echo --arch "$a"; done))
+if [ -n "${ARCHS:-}" ]; then
+  ARCH_FLAGS=()
+  for a in $ARCHS; do ARCH_FLAGS+=(--arch "$a"); done
+fi
 APP="$ROOT/dist/Toolbox.app"
 
 for t in yt-dlp ffmpeg ffprobe; do
