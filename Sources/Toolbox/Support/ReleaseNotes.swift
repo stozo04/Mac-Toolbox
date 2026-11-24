@@ -31,6 +31,9 @@ enum ReleaseNotes {
         Release(version: "0.16.2", date: "2026-11-24", changes: [
             .init(kind: .improved, text: "Icons are in color by what they mean: on the Logs page critical is purple, errors red, warnings orange and info blue, and the count tiles, Network Speed Test tiles and info notes are colored too."),
         ]),
+        Release(version: "0.16.1", date: "2026-11-24", changes: [
+            .init(kind: .fixed, text: "On the home screen, each category's tools are listed right under its description, so the Docs card no longer shows Folio far down at the bottom."),
+        ]),
         Release(version: "0.16.0", date: "2026-11-24", changes: [
             .init(kind: .removed, text: "The Text & Speech and Files categories and their eleven tools, none of which had been built: Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document, QR Code, Batch Rename, Find Duplicates and Zip & Unzip."),
         ]),
