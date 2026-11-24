@@ -65,27 +65,6 @@ struct LiveWorkspace: View {
     }
 }
 
-struct TextWorkspace: View {
-    @State private var input = ""
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            OptionsPanel(note: "The result updates as you type.").frame(width: 240)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Input").font(.headline)
-                TextEditor(text: $input)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Theme.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                Text("Output").font(.headline)
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.inset)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16).cardBackground(corner: 24)
-        }
-    }
-}
-
 struct OptionsPanel: View {
     let note: String
 

@@ -110,8 +110,6 @@ struct ToolWorkspace: View {
             ExtractFramesView()
         case .live(let symbol, let idle, let action):
             LiveWorkspace(symbol: symbol, idle: idle, action: action)
-        case .text:
-            TextWorkspace()
         }
     }
 }

@@ -7,7 +7,7 @@ final class ImplementationStatusTests: XCTestCase {
     }
 
     func testPlaceholderToolsAreNotImplemented() throws {
-        for name in ["Transcribe", "Summarize", "Translate", "Capture Text", "Record Audio"] {
+        for name in ["Record Audio", "Convert Audio", "Merge Videos"] {
             XCTAssertFalse(try tool(name).isImplemented, "\(name) should show the not-implemented banner")
         }
     }
@@ -19,14 +19,7 @@ final class ImplementationStatusTests: XCTestCase {
         }
     }
 
-    func testEveryTextAndSpeechToolIsNotImplemented() {
-        let tools = ToolCatalog.tools(in: .textAndSpeech)
-        XCTAssertFalse(tools.isEmpty)
-        XCTAssertTrue(tools.allSatisfy { !$0.isImplemented })
-    }
-
     func testFlagFollowsTheInputCase() {
-        XCTAssertFalse(ToolInput.text.isImplemented)
         XCTAssertFalse(ToolInput.live(symbol: "mic", idle: "", action: "").isImplemented)
         XCTAssertFalse(ToolInput.dropFiles(title: "", hint: "", symbol: "").isImplemented)
         XCTAssertTrue(ToolInput.convertImages.isImplemented)

@@ -56,14 +56,12 @@ enum ToolInput: Hashable {
     case mac(MacTool)
     /// No input file; the tool acts live (Keep Awake...).
     case live(symbol: String, idle: String, action: String)
-    /// Free text in, result out (Summarize, Translate...).
-    case text
 
     /// Only the generic placeholder workspaces count as not built; a dedicated case means the tool is real.
     /// Every case is listed, so a new one does not compile until its author says which of the two it is.
     var isImplemented: Bool {
         switch self {
-        case .dropFiles, .live, .text:
+        case .dropFiles, .live:
             false
         case .link, .recordScreen, .trimVideo, .videoToGif, .extractFrames, .resizeVideo, .compressVideo, .convertImages, .compressImages,
              .resizeImages, .rotateImages, .removeMetadata, .colorPicker, .blurFaces, .redactImage, .beautifyScreenshot, .annotateScreenshot,
