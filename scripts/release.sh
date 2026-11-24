@@ -92,7 +92,7 @@ run_checks "$WORK/src" "$WORK/tests.log"
 test_result_lines "$WORK/tests.log"
 
 step "Building Toolbox.app (scripts/make-app.sh, ad-hoc signed)"
-(cd "$WORK/src" && env -u SIGN_IDENTITY -u VERSION -u BUILD -u TOOLS_DIR ARCHS=arm64 scripts/make-app.sh)
+build_app "$WORK/src"
 signature="$(codesign -dv "$WORK/src/dist/Toolbox.app" 2>&1)"
 grep -qx 'Signature=adhoc' <<< "$signature" || fail "Toolbox.app is not ad-hoc signed."
 [ -f "$WORK/src/dist/Toolbox.dmg" ] || fail "$TAG's scripts/make-app.sh makes no Toolbox.dmg; only v0.15.1 and later can be released."

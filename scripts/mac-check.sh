@@ -102,7 +102,7 @@ result_lines="$(test_result_lines "$TEST_LOG")"
 [ -n "$counts" ] || ! $REPORT || fail "Could not find the XCTest result line in the swift test output."
 
 step "Toolbox.app and DMG (scripts/make-app.sh)"
-env -u SIGN_IDENTITY ARCHS=arm64 scripts/make-app.sh
+build_app "$ROOT"
 [ -f dist/Toolbox.dmg ] || fail "scripts/make-app.sh made no dist/Toolbox.dmg."
 
 if $REPORT; then

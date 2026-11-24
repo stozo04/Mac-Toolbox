@@ -88,6 +88,10 @@ run_checks() {
   )
 }
 
+build_app() {
+  (cd "$1" && env -u SIGN_IDENTITY -u VERSION -u BUILD -u TOOLS_DIR ARCHS=arm64 scripts/make-app.sh)
+}
+
 test_result_lines() {
   grep -E 'Executed [0-9]+ tests?, with|Test run with [0-9]+ tests?' "$1" | tail -2 || true
 }
