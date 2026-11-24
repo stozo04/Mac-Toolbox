@@ -44,7 +44,7 @@ private struct CategoryCard: View {
                     Text("\(tools.count) \(tools.count == 1 ? "tool" : "tools")").font(.caption).foregroundStyle(.secondary)
                 }
                 Text(category.summary).font(.caption).foregroundStyle(.secondary)
-                Spacer(minLength: 4)
+                    .padding(.bottom, 4)
                 ForEach(tools.prefix(4)) { Text($0.name).font(.callout) }
                 if tools.count > 4 {
                     Text("\(tools.count - 4) more").font(.callout).foregroundStyle(.secondary)
