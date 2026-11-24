@@ -3,14 +3,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=lib/checks.sh
+source "$ROOT/scripts/lib/checks.sh"
 NOTES_SWIFT=Sources/Toolbox/Support/ReleaseNotes.swift
 
 usage() {
   cat <<'USAGE'
 Usage: scripts/release.sh vX.Y.Z [--dry-run] [--yes]
 
-Builds Toolbox.app and its DMG on this Mac from the tag vX.Y.Z on origin and publishes the GitHub release.
+Checks and builds Toolbox.app and its DMG on this Mac from the tag vX.Y.Z on origin and publishes the GitHub release.
 The tag must be on main, match AppVersion.current at its commit and have no release yet: a release is never replaced.
+The tagged commit goes through the same checks as scripts/mac-check.sh (SwiftLint, build, every test) before it is built.
 
   --dry-run  run every check and the build, leave the DMG and notes in dist/release-X.Y.Z and publish nothing.
              A tag that already has a release is reported instead of stopping the run.
@@ -32,16 +35,6 @@ for arg in "$@"; do
 done
 [ -n "$TAG" ] || { usage >&2; exit 2; }
 
-fail() {
-  echo "error: $*" >&2
-  exit 1
-}
-
-step() {
-  echo
-  echo "==> $*"
-}
-
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "$TAG is not a vMAJOR.MINOR.PATCH tag."
 VERSION="${TAG#v}"
 ASSET="Toolbox-$VERSION-macOS-Apple-Silicon.dmg"
@@ -50,7 +43,10 @@ OUT="$ROOT/dist/release-$VERSION"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || fail "Run this on an Apple silicon Mac."
 command -v gh > /dev/null || fail "gh is missing. Install it with: brew install gh"
 gh auth status > /dev/null 2>&1 || fail "gh is not signed in. Run: gh auth login"
-GH_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+origin_repo="$(github_repo origin)" || fail "origin is not a GitHub repository: $(git remote get-url origin)"
+[ -z "${GH_REPO:-}" ] || [ "$GH_REPO" = "$origin_repo" ] ||
+  fail "GH_REPO is $GH_REPO but origin is $origin_repo. Unset GH_REPO or release from a checkout of $GH_REPO."
+GH_REPO="$origin_repo"
 export GH_REPO
 
 step "Checking $TAG on $GH_REPO"
@@ -78,30 +74,25 @@ else
 fi
 echo "$TAG is $COMMIT on main. Highest published release: ${highest:-none}. $TAG becomes Latest: $LATEST."
 
+MAIN="$(git rev-parse origin/main)"
 WORK="$(mktemp -d)"
 cleanup() {
   git -C "$ROOT" worktree remove --force "$WORK/src" > /dev/null 2>&1 || true
+  git -C "$ROOT" worktree remove --force "$WORK/main" > /dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
-step "Checking out $TAG in a temporary worktree"
+step "Checking out $TAG and main in temporary worktrees"
 git worktree add --quiet --detach "$WORK/src" "$COMMIT"
-if [ -f "$ROOT/Vendor/llama/lib/libllamacpp.a" ]; then
-  mkdir -p "$WORK/src/Vendor"
-  cp -R "$ROOT/Vendor/llama" "$WORK/src/Vendor/llama"
-fi
-tools_stamp="$(shasum -a 256 "$WORK/src/scripts/fetch-tools.sh" | cut -c1-64) arm64"
-if [ "$(cat "$ROOT/build/tools/STAMP" 2> /dev/null)" = "$tools_stamp" ]; then
-  TOOLS="$ROOT/build/tools"
-  echo "Using the helper tools in build/tools."
-else
-  (cd "$WORK/src" && ARCHS=arm64 scripts/fetch-tools.sh)
-  TOOLS="$WORK/src/build/tools"
-fi
+git worktree add --quiet --detach "$WORK/main" "$MAIN"
+reuse_prebuilt "$WORK/src"
+
+run_checks "$WORK/src" "$WORK/tests.log"
+test_result_lines "$WORK/tests.log"
 
 step "Building Toolbox.app (scripts/make-app.sh, ad-hoc signed)"
-(cd "$WORK/src" && env -u SIGN_IDENTITY -u VERSION -u BUILD ARCHS=arm64 TOOLS_DIR="$TOOLS" scripts/make-app.sh)
+(cd "$WORK/src" && env -u SIGN_IDENTITY -u VERSION -u BUILD -u TOOLS_DIR ARCHS=arm64 scripts/make-app.sh)
 signature="$(codesign -dv "$WORK/src/dist/Toolbox.app" 2>&1)"
 grep -qx 'Signature=adhoc' <<< "$signature" || fail "Toolbox.app is not ad-hoc signed."
 [ -f "$WORK/src/dist/Toolbox.dmg" ] || fail "$TAG's scripts/make-app.sh makes no Toolbox.dmg; only v0.15.1 and later can be released."
@@ -110,7 +101,7 @@ step "Naming the download and writing the notes"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 mv "$WORK/src/dist/Toolbox.dmg" "$OUT/$ASSET"
-.github/scripts/release-body.sh "$WORK/src/$NOTES_SWIFT" "$VERSION" "${highest#v}" > "$OUT/notes.md"
+"$WORK/main/.github/scripts/release-body.sh" "$WORK/src/$NOTES_SWIFT" "$VERSION" "${highest#v}" > "$OUT/notes.md"
 cat "$OUT/notes.md"
 BUILT="$(shasum -a 256 "$OUT/$ASSET" | cut -d' ' -f1)"
 echo

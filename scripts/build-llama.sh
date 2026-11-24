@@ -2,7 +2,7 @@
 # Builds llama.cpp (MIT), the embedding runtime: the pinned build tag plus scripts/llama.cpp-no-logits.patch, as static
 # libraries combined into Vendor/llama/lib/libllamacpp.a, with the headers in Vendor/llama/include (all out of git).
 # Metal shaders are embedded and compiled on first use, so no Metal toolchain is needed. CMake comes from PATH, or from
-# a venv in Vendor/ (needs uv). Does nothing when that build is already there; CI and scripts/make-app.sh run it every time.
+# a venv in Vendor/ (needs uv). Does nothing when that build is already there; scripts/mac-check.sh and scripts/make-app.sh run it every time.
 # Copied from DigUp (MIT, see Sources/VaultSearch/LICENSE-DigUp) with the same tag and patch, so both apps make the same vectors.
 set -euo pipefail
 cd "$(dirname "$0")/.."
