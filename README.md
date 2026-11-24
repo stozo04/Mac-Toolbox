@@ -1,10 +1,10 @@
-# Sidekit
+# Mac Toolbox
 
-**One app for the small jobs on your Mac.** [sidekit-mac.vercel.app](https://sidekit-mac.vercel.app)
+**One app for the small jobs on your Mac.** [mac-toolbox.vercel.app](https://mac-toolbox.vercel.app)
 
-Sidekit puts the small utilities you reach for every day into one free, open-source app: trim a video, compress photos, black out part of a PDF, keep your Mac awake. The tools run on your Mac, and your original files are never changed.
+Mac Toolbox puts the small utilities you reach for every day into one free, open-source app: trim a video, compress photos, black out part of a PDF, keep your Mac awake. The tools run on your Mac, and your original files are never changed.
 
-Sidekit is the project's new name. The app, its window and the commands below still say **Toolbox** until the app itself is renamed.
+The app itself, its window and the commands below say **Toolbox**.
 
 > **Status: early preview (version 0.15.0).** Thirty-seven tools are fully working: ten **Video**, two **Audio** (**Trim Audio** and **Extract Audio**), all eleven **Images** and all fourteen **Mac** tools. For PDFs, the **Docs** category opens [Folio](https://github.com/Forward-Future/folio), a free PDF app, and **Video** also offers [Scarlet](https://github.com/Forward-Future/scarlet), a free AI video editor. Two pages sit beside the tools: **AI Models**, which finds the AI models on your Mac, and the **Vault**, a password-protected place for private photos and videos. The other tools can be browsed and opened, but don't process anything yet; they are being built one by one. See [What works today](#what-works-today).
 
