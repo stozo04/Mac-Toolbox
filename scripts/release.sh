@@ -66,13 +66,19 @@ if grep -qxF "$TAG" <<< "$released"; then
   $DRY_RUN || fail "A release for $TAG already exists; it is never replaced."
   echo "A release for $TAG already exists, so a real run stops here. The dry run goes on."
 fi
-highest="$({ grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<< "$released" || true; } | { grep -vxF "$TAG" || true; } | sort -V | tail -1)"
+others="$({ grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' <<< "$released" || true; } | { grep -vxF "$TAG" || true; } | sort -V)"
+highest="$(tail -1 <<< "$others")"
+older_than_tag() { [ "$(printf '%s\n%s\n' "$1" "$TAG" | sort -V | head -1)" = "$1" ]; }
+previous=""
+while IFS= read -r version; do
+  if [ -n "$version" ] && older_than_tag "$version"; then previous="$version"; fi
+done <<< "$others"
 if [ -z "$highest" ] || [ "$(printf '%s\n%s\n' "$highest" "$TAG" | sort -V | tail -1)" = "$TAG" ]; then
   LATEST=true
 else
   LATEST=false
 fi
-echo "$TAG is $COMMIT on main. Highest published release: ${highest:-none}. $TAG becomes Latest: $LATEST."
+echo "$TAG is $COMMIT on main. Highest published release: ${highest:-none}; the notes cover every version since ${previous:-the first}. $TAG becomes Latest: $LATEST."
 
 MAIN="$(git rev-parse origin/main)"
 WORK="$(mktemp -d)"
@@ -101,7 +107,7 @@ step "Naming the download and writing the notes"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 mv "$WORK/src/dist/Toolbox.dmg" "$OUT/$ASSET"
-"$WORK/main/.github/scripts/release-body.sh" "$WORK/src/$NOTES_SWIFT" "$VERSION" "${highest#v}" > "$OUT/notes.md"
+"$WORK/main/.github/scripts/release-body.sh" "$WORK/src/$NOTES_SWIFT" "$VERSION" "${previous#v}" > "$OUT/notes.md"
 cat "$OUT/notes.md"
 BUILT="$(shasum -a 256 "$OUT/$ASSET" | cut -d' ' -f1)"
 echo
