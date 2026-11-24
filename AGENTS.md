@@ -4,8 +4,10 @@ Quick orientation for any coding agent working in this repo.
 
 ## Before any work
 1. Start from the latest `main`: `git fetch origin && git switch --detach origin/main`, or a new worktree there: `git worktree add --detach ../<folder> origin/main`. (`git switch main` fails while `main` is checked out in another worktree.)
-2. Check that it builds, compiles and passes every test: `scripts/mac-check.sh` (SwiftLint, `swift build --build-tests`, `swift test` and the Toolbox.app build). In a fresh worktree it copies llama.cpp and `build/tools` from the main worktree when they match, so only the Swift build and the tests take time (about 6 minutes).
+2. Check that it builds, compiles and passes every test: `scripts/mac-check.sh` (SwiftLint, `swift build --build-tests`, `swift test` and the Toolbox.app build). In a fresh worktree it copies llama.cpp and `build/tools` from the main worktree when they match, so only the Swift build and the tests take time (about 5 minutes).
 3. Only after step 2 passes, create the work branch from there: `git switch -c <type>/<task>`.
+
+A change that only touches docs (`.md` files), `features/` or `images/`, or fixes a one-line typo, skips step 2: branch straight from `origin/main`. Its pull request is still checked by `scripts/mac-check.sh --report` before it merges.
 
 If anything fails, stop and report it to the owner. Then fix it on its own `fix/…` branch and pull request, never on `main`, and return to the original task only after that fix is merged, unless the owner says otherwise.
 
