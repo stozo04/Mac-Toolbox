@@ -124,7 +124,7 @@ swift build --build-tests
 
 step "swift test"
 test_log="$(mktemp)"
-swift test --skip-build 2>&1 | tee "$test_log"
+CI=true swift test --skip-build 2>&1 | tee "$test_log"
 test_result="$(grep -E 'Executed [0-9]+ tests?, with|Test run with [0-9]+ tests?' "$test_log" | tail -2 || true)"
 rm -f "$test_log"
 
