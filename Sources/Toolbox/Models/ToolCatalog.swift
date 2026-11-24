@@ -1,7 +1,7 @@
 import Foundation
 
 enum ToolCatalog {
-    static let all: [Tool] = video + audio + images + docs + textAndSpeech + files + mac
+    static let all: [Tool] = video + audio + images + docs + mac
 
     static func tools(in category: ToolCategory) -> [Tool] {
         all.filter { $0.category == category }
@@ -128,49 +128,6 @@ enum ToolCatalog {
         Tool(name: "Folio", category: .docs, symbol: "doc.richtext",
              tagline: "Read, annotate, sign and edit PDFs. Opens Folio, a free PDF app.",
              input: .companionApp(.folio)),
-    ]
-
-    // MARK: Text & Speech
-
-    static let textAndSpeech: [Tool] = [
-        Tool(name: "Transcribe", category: .textAndSpeech, symbol: "text.bubble",
-             tagline: "Turn speech in audio and video into a timestamped transcript.",
-             input: drop("Audio or Video", "Drop a recording to transcribe.", "waveform")),
-        Tool(name: "Summarize", category: .textAndSpeech, symbol: "text.alignleft",
-             tagline: "Summarize text and documents on device with Apple Intelligence.",
-             input: .text),
-        Tool(name: "Extract Text", category: .textAndSpeech, symbol: "text.viewfinder",
-             tagline: "Recognize text in images, screenshots and scanned PDFs.",
-             input: drop("an Image or PDF", "Drop images or scanned PDFs to read.", "photo")),
-        Tool(name: "Capture Text", category: .textAndSpeech, symbol: "viewfinder",
-             tagline: "Select any area of the screen and copy the text in it.",
-             input: .live(symbol: "viewfinder", idle: "Select an area of the screen to copy its text.", action: "Capture Text")),
-        Tool(name: "Translate", category: .textAndSpeech, symbol: "character.bubble",
-             tagline: "Translate text, documents and subtitles on device, keeping their formatting and timing.",
-             input: .text),
-        Tool(name: "Text to Speech", category: .textAndSpeech, symbol: "speaker.wave.2",
-             tagline: "Turn text, documents and PDFs into natural speech, and save it as audio.",
-             input: .text),
-        Tool(name: "Ask a Document", category: .textAndSpeech, symbol: "questionmark.bubble",
-             tagline: "Ask questions about a PDF or document and get answers with page references.",
-             input: drop("a Document", "Drop a PDF or document to ask about.", "doc.text")),
-    ]
-
-    // MARK: Files
-
-    static let files: [Tool] = [
-        Tool(name: "QR Code", category: .files, symbol: "qrcode",
-             tagline: "Make QR codes for links, text and Wi-Fi, or read codes and barcodes from images.",
-             input: .text),
-        Tool(name: "Batch Rename", category: .files, symbol: "textformat.123",
-             tagline: "Rename many files at once with find and replace, numbering, dates or case changes.",
-             input: drop("Files", "Drop files or folders to rename.", "doc.on.doc")),
-        Tool(name: "Find Duplicates", category: .files, symbol: "square.on.square",
-             tagline: "Find identical files across folders and move the extras to the Trash.",
-             input: drop("Folders", "Drop folders to scan for duplicates.", "folder")),
-        Tool(name: "Zip & Unzip", category: .files, symbol: "doc.zipper",
-             tagline: "Open ZIP, RAR, 7z and TAR files, or make a ZIP, with a password if you like.",
-             input: drop("Files", "Drop files to zip, or an archive to open.", "doc.zipper")),
     ]
 
     // MARK: Mac

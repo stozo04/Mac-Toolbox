@@ -75,7 +75,7 @@ A development run (a debug build, or anything run from `.build/`) keeps its vaul
 - Dropped files are taken with `.fileDrop { urls in … }` (`Views/FileDrop.swift`), which waits for every file of the drop and calls once, so a model sees one drop as one `add`. `.onDrop(of:` appears nowhere else; the `hand_written_file_drop` rule in `.swiftlint.yml` enforces it (`Vault/VaultLibraryView.swift` is excluded until it moves over).
 - Icon button that shows a file in Finder: use `RevealButton` (an eye), never a magnifying glass, which reads as search.
 - Match the screenshots: dark cards, rounded corners, options panel ~240pt.
-- Known gaps: the design shows 87 tools; the catalog has 57 (Battery Health and Replace Audio were dropped on purpose, and the Docs tools were replaced by the Folio card). 9 tools lack a screenshot; their README says so.
+- Known gaps: the design shows 87 tools; the catalog has 46 (Battery Health and Replace Audio were dropped on purpose, the Docs tools were replaced by the Folio card, and the Text & Speech and Files categories were removed). 9 tools lack a screenshot; their README says so.
 - Unbuilt tools show a big red "Feature not implemented" banner (`NotImplementedBanner` in `Views/ToolView.swift`) and a red triangle on their card. `Tool.isImplemented` is derived from `ToolInput.isImplemented` in `Models/Tool.swift`: the generic placeholder cases (`.dropFiles`, `.live`, `.text`) are false, every dedicated case is true, so a tool loses the banner as soon as it gets its own `ToolInput` case. The switch there lists every case and has no `default`, so a new case does not compile until it is put with the placeholders or with the built tools.
 - `features/Video/*.md` are the original one-line specs, kept for reference.
 
@@ -125,23 +125,6 @@ A development run (a debug build, or anything run from `.build/`) keeps its vaul
 ### Docs ([overview](features/Docs/README.md))
 
 - [Folio](features/Docs/Folio/README.md) - Read, annotate, sign and edit PDFs. Opens Folio, a free PDF app.
-
-### Text & Speech ([overview](features/Text%20%26%20Speech/README.md))
-
-- [Ask a Document](features/Text%20%26%20Speech/Ask%20a%20Document/README.md) - Ask questions about a PDF or document and get answers with page references.
-- [Capture Text](features/Text%20%26%20Speech/Capture%20Text/README.md) - Select any area of the screen and copy the text in it.
-- [Extract Text](features/Text%20%26%20Speech/Extract%20Text/README.md) - Recognize text in images, screenshots and scanned PDFs.
-- [Summarize](features/Text%20%26%20Speech/Summarize/README.md) - Summarize text and documents on device with Apple Intelligence.
-- [Text to Speech](features/Text%20%26%20Speech/Text%20to%20Speech/README.md) - Turn text, documents and PDFs into natural speech, and save it as audio.
-- [Transcribe](features/Text%20%26%20Speech/Transcribe/README.md) - Turn speech in audio and video into a timestamped transcript.
-- [Translate](features/Text%20%26%20Speech/Translate/README.md) - Translate text, documents and subtitles on device, keeping their formatting and timing.
-
-### Files ([overview](features/Files/README.md))
-
-- [Batch Rename](features/Files/Batch%20Rename/README.md) - Rename many files at once with find and replace, numbering, dates or case changes.
-- [Find Duplicates](features/Files/Find%20Duplicates/README.md) - Find identical files across folders and move the extras to the Trash.
-- [QR Code](features/Files/QR%20Code/README.md) - Make QR codes for links, text and Wi-Fi, or read codes and barcodes from images.
-- [Zip & Unzip](features/Files/Zip%20%26%20Unzip/README.md) - Open ZIP, RAR, 7z and TAR files, or make a ZIP, with a password if you like.
 
 ### Mac ([overview](features/Mac/README.md))
 

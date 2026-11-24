@@ -16,8 +16,6 @@ The app itself, its window and the commands below say **Toolbox**.
 | **Audio** | Record, clean up and convert audio | Clean Up Audio, Record Audio, Trim Audio, Extract Audio, Convert Audio |
 | **Images** | Edit, convert and protect photos | Blur Faces, Beautify Screenshot, Remove Background, Convert Images, Compress Images, Resize Images, Rotate Images, Remove Metadata, Color Picker, Redact Image, Annotate Screenshot |
 | **Docs** | Read, sign and edit PDFs | Folio (opens the Folio app) |
-| **Text & Speech** | Transcribe, translate and summarize, privately | Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document |
-| **Files** | Rename in bulk and make QR codes | QR Code, Batch Rename, Find Duplicates, Zip & Unzip |
 | **Mac** | Free up space and fix what's stuck | Network Speed Test, Storage Explorer, Wi-Fi Password & QR, Keep Awake, Uninstall App, Presentation Mode, Clean Keyboard, Eject All Disks, Login & Background Items, Fix "App Is Damaged", Reset Permissions, Hidden Settings, Display Control, Mouse Fixes |
 
 ## Privacy
@@ -126,18 +124,16 @@ The Vault locks when you leave the page, lock the screen, sleep or quit. Ticking
 
 ### Coming soon
 
-These 18 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
+These 7 tools can be browsed and opened, but show a "Feature not implemented" banner and don't process files yet.
 
 - **Video:** Change Speed, Convert Video, Crop & Rotate Video, Merge Videos
 - **Audio:** Clean Up Audio, Record Audio, Convert Audio
-- **Text & Speech:** Transcribe, Summarize, Extract Text, Capture Text, Translate, Text to Speech, Ask a Document
-- **Files:** QR Code, Batch Rename, Find Duplicates, Zip & Unzip
 
 ### The app itself
 
 | Works now | Not built yet |
 |---|---|
-| Browsing all categories and tools | The 18 tools listed under [Coming soon](#coming-soon) |
+| Browsing all categories and tools | The 7 tools listed under [Coming soon](#coming-soon) |
 | Search, favorites, recent tools | Saving your favorites and settings between launches |
 | Light / dark mode switch | A global hotkey for Record Screen |
 | 37 working tools: ten Video, two Audio, eleven Images and all fourteen Mac | |
