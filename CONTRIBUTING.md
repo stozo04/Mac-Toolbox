@@ -32,8 +32,7 @@ swift run Toolbox
 
 ## Before you open a pull request
 
-- `swift test` passes. New behavior has a test; a bug fix has a test that failed before the fix.
-- SwiftLint passes (`swiftlint`).
+- `scripts/mac-check.sh` passes: it runs SwiftLint, the tests and the app build on your Mac. New behavior has a test; a bug fix has a test that failed before the fix. GitHub doesn't build the app, so the maintainer runs the same script on your branch before merging.
 - Raise `AppVersion.current` in `Sources/Toolbox/Support/ReleaseNotes.swift` and add a `Release` entry at the top of `ReleaseNotes.all`, written for users. `scripts/check-version-bump.sh` checks this, and so does CI. Changes to docs only don't need it.
 - Say in the pull request what you changed, why, and how you checked it. A screenshot helps for anything visible.
 

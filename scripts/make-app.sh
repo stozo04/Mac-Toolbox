@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds dist/Toolbox.app with yt-dlp, ffmpeg and ffprobe inside, plus dist/Toolbox.dmg (the app beside an Applications
-# link, what a release publishes) and dist/Toolbox.zip (CI's Package artifact).
+# link, what scripts/release.sh publishes).
 #
 #   scripts/fetch-tools.sh && scripts/make-app.sh
 #   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" scripts/make-app.sh
@@ -14,10 +14,13 @@ TOOLS="${TOOLS_DIR:-$ROOT/build/tools}"
 # Version comes from AppVersion.current in ReleaseNotes.swift (override with VERSION=... only for experiments).
 VERSION="${VERSION:-$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' "$ROOT/Sources/Toolbox/Support/ReleaseNotes.swift" | head -1)}"
 [ -n "$VERSION" ] || { echo "Could not read the version from ReleaseNotes.swift"; exit 1; }
-BUILD="${BUILD:-$VERSION}"   # CFBundleVersion; CI passes its run number
+BUILD="${BUILD:-$VERSION}"   # CFBundleVersion
 IDENTITY="${SIGN_IDENTITY:--}"
 ARCH_FLAGS=(--arch arm64)
-[ -n "${ARCHS:-}" ] && ARCH_FLAGS=($(for a in $ARCHS; do echo --arch "$a"; done))
+if [ -n "${ARCHS:-}" ]; then
+  ARCH_FLAGS=()
+  for a in $ARCHS; do ARCH_FLAGS+=(--arch "$a"); done
+fi
 APP="$ROOT/dist/Toolbox.app"
 
 for t in yt-dlp ffmpeg ffprobe; do
@@ -70,8 +73,6 @@ sign "$APP/Contents/Resources/ffprobe"
 sign --entitlements "$ROOT/scripts/app.entitlements" "$APP"
 codesign --verify --deep --strict "$APP"
 
-( cd "$ROOT/dist" && rm -f Toolbox.zip && ditto -c -k --keepParent Toolbox.app Toolbox.zip )
-
 DMG="$ROOT/dist/Toolbox.dmg"
 DMG_CREATE_ATTEMPTS=3
 echo "==> disk image $DMG"
@@ -80,7 +81,7 @@ trap 'rm -rf "$STAGE"' EXIT
 ditto "$APP" "$STAGE/Toolbox.app"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
-# hdiutil create fails now and then with "Resource busy" on GitHub's macOS runners; a retry gets past it.
+# hdiutil create fails now and then with "Resource busy" while something still holds the staged files; a retry gets past it.
 for attempt in $(seq "$DMG_CREATE_ATTEMPTS"); do
   hdiutil create -quiet -volname Toolbox -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" && break
   [ "$attempt" -lt "$DMG_CREATE_ATTEMPTS" ] || { echo "hdiutil create failed $DMG_CREATE_ATTEMPTS times"; exit 1; }
@@ -90,5 +91,5 @@ done
 hdiutil verify -quiet "$DMG"
 
 echo "==> done"
-du -sh "$APP" "$ROOT/dist/Toolbox.zip" "$DMG"
+du -sh "$APP" "$DMG"
 echo "Open with: open dist/Toolbox.app"

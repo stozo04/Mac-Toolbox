@@ -5,7 +5,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,40 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  changes:
-    name: Changed paths
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      app: ${{ steps.paths.outputs.app }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Decide whether the change can affect the app
-        id: paths
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          decide() {
-            echo "$2"
-            echo "app=$1" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-          [ "$EVENT_NAME" = "pull_request" ] || decide true "Not a pull request ($EVENT_NAME): every job runs."
-          if ! changed="$(git diff --no-renames --name-only "origin/$BASE_REF"...HEAD)"; then
-            decide true "Could not compare with origin/$BASE_REF: every job runs."
-          fi
-          [ -n "$changed" ] || decide true "No changed files found: every job runs."
-          if grep -q '^\.github/workflows/' <<< "$changed"; then
-            decide true "A workflow changed: every job runs."
-          fi
-          if ! first="$(scripts/app-untouched.sh <<< "$changed")"; then
-            decide true "Changed a path that can affect the app ($first): every job runs."
-          fi
-          decide false "Only docs, designs or Dependabot config changed: the macOS jobs are skipped."
-
   version:
     name: Version bumped
     if: github.event_name == 'pull_request'
@@ -62,150 +27,24 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: scripts/check-version-bump.sh "origin/$BASE_REF"
-      - name: Release notes for this version read cleanly (used by release.yml)
+
+  scripts:
+    name: Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ShellCheck
+        run: |
+          shellcheck --version
+          shellcheck scripts/*.sh scripts/lib/*.sh .github/scripts/*.sh
+      - name: No pipe into grep -q (under pipefail the writer dies of SIGPIPE and the pipeline fails)
+        run: |
+          if grep -nE '(^|[^|])\|[[:space:]]*grep[[:space:]]+(-[[:alnum:]]*q|--quiet)' scripts/*.sh scripts/lib/*.sh .github/scripts/*.sh; then
+            echo "::error::Capture the output first, or send grep's output to /dev/null instead of using -q."
+            exit 1
+          fi
+      - name: Release notes for this version read cleanly (used by scripts/release.sh)
         run: |
           version="$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' Sources/Toolbox/Support/ReleaseNotes.swift | head -1)"
           .github/scripts/release-body.sh Sources/Toolbox/Support/ReleaseNotes.swift "$version"
-
-  build-and-test:
-    name: Build & test (macOS)
-    needs: changes
-    if: needs.changes.outputs.app == 'true'
-    runs-on: macos-26
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain
-        run: |
-          sw_vers
-          xcodebuild -version
-          swift --version
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/CWebP/**') }}
-          restore-keys: spm-${{ runner.os }}-
-      - name: Cache llama.cpp (built by scripts/build-llama.sh)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: Vendor/llama
-          key: llama-${{ runner.os }}-${{ hashFiles('scripts/build-llama.sh', 'scripts/llama.cpp-no-logits.patch') }}
-      - name: Build llama.cpp (Vault search)
-        run: scripts/build-llama.sh
-      - name: Cache yt-dlp + ffmpeg (built by scripts/fetch-tools.sh)
-        id: tools-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build/tools
-          key: tools-${{ runner.os }}-arm64-${{ hashFiles('scripts/fetch-tools.sh') }}
-      - name: Fetch and build helper tools (the Vault tests use ffmpeg)
-        if: steps.tools-cache.outputs.cache-hit != 'true'
-        env:
-          ARCHS: arm64
-        run: scripts/fetch-tools.sh
-      - name: Build
-        run: swift build --build-tests
-      - name: Test
-        run: swift test --skip-build
-
-  package:
-    name: Package Toolbox.app (macOS)
-    needs: changes
-    if: needs.changes.outputs.app == 'true'
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build Toolbox.app (the same build a release publishes)
-        uses: ./.github/actions/build-app
-        with:
-          build-number: ${{ github.run_number }}
-      - name: Upload Toolbox.zip
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: Toolbox-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || format('run{0}', github.run_number) }}
-          path: dist/Toolbox.zip
-          retention-days: 3
-          if-no-files-found: error
-      - name: How to open it
-        env:
-          RUN_ID: ${{ github.run_id }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          {
-            echo "### Toolbox.app for this run"
-            echo "Download the **Toolbox-…** artifact below (or \`gh run download $RUN_ID -R $REPOSITORY\`), unzip it, then unzip Toolbox.zip."
-            echo "It is ad-hoc signed, so macOS blocks it once: open it, then click **Open Anyway** in System Settings > Privacy & Security, or run \`xattr -dr com.apple.quarantine Toolbox.app\`."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  lint:
-    name: Lint & format (macOS)
-    needs: changes
-    if: needs.changes.outputs.app == 'true'
-    runs-on: macos-26
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install SwiftLint
-        run: command -v swiftlint >/dev/null || brew install swiftlint
-      - name: SwiftLint (errors fail the check, warnings are annotated)
-        run: swiftlint lint --reporter github-actions-logging
-      - name: swift-format (report only, see #37)
-        continue-on-error: true
-        run: |
-          xcrun swift-format lint --recursive --parallel Sources/Toolbox Tests 2>&1 | tee swift-format.txt | head -200
-          echo "swift-format findings: $(grep -c ': warning:' swift-format.txt || true)" >> "$GITHUB_STEP_SUMMARY"
-
-  build-and-test-required:
-    name: Build & test
-    needs: [changes, build-and-test]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: .github/scripts
-      - name: Report the result of "Build & test (macOS)"
-        env:
-          JOB_NAME: Build & test (macOS)
-          JOB_RESULT: ${{ needs.build-and-test.result }}
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          APP_AFFECTED: ${{ needs.changes.outputs.app }}
-        run: .github/scripts/required-check.sh
-
-  package-required:
-    name: Package Toolbox.app
-    needs: [changes, package]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: .github/scripts
-      - name: Report the result of "Package Toolbox.app (macOS)"
-        env:
-          JOB_NAME: Package Toolbox.app (macOS)
-          JOB_RESULT: ${{ needs.package.result }}
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          APP_AFFECTED: ${{ needs.changes.outputs.app }}
-        run: .github/scripts/required-check.sh
-
-  lint-required:
-    name: Lint & format
-    needs: [changes, lint]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: .github/scripts
-      - name: Report the result of "Lint & format (macOS)"
-        env:
-          JOB_NAME: Lint & format (macOS)
-          JOB_RESULT: ${{ needs.lint.result }}
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          APP_AFFECTED: ${{ needs.changes.outputs.app }}
-        run: .github/scripts/required-check.sh
