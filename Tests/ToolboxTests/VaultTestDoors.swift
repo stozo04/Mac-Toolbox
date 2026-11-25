@@ -24,6 +24,7 @@ final class DoorStandIn: @unchecked Sendable {
     private static let hangingProgram = "exec /bin/sleep 30"
 
     let steps = Locked<[String]>([])
+    private let realEjects = Locked<Set<Int>>([])
     let timeouts = Locked<[String: Shell.Timeout]>([:])
     let stopped = Locked<[String]>([])
     private let parts = Locked<[String: Part]>([:])
@@ -32,6 +33,13 @@ final class DoorStandIn: @unchecked Sendable {
 
     var mostClosingsAtOnce: Int { closing.value.most }
 
+    /// The steps without a forced detach right after a real eject. On a busy Mac a real `diskutil eject` can be refused
+    /// or run out its time, and the door then rightly forces a detach; that is not what these tests are about.
+    var stepsForgivingABusyEject: [String] {
+        let all = steps.value, real = realEjects.value
+        return all.indices.filter { !(all[$0] == "detach" && real.contains($0 - 1)) }.map { all[$0] }
+    }
+
     func play(_ verb: String, as part: Part) { parts.update { $0[verb] = part } }
 
     func isHanging(_ verb: String) -> Bool { hanging.value.contains(verb) }
@@ -39,12 +47,16 @@ final class DoorStandIn: @unchecked Sendable {
     var tool: VaultTool {
         VaultTool { [self] path, arguments, input, timeout in
             let verb = arguments.first { Self.verbs.contains($0) } ?? path
-            steps.update { $0.append(verb) }
+            let part = parts.value[verb] ?? .real
+            steps.update { steps in
+                steps.append(verb)
+                if verb == "eject", case .real = part { realEjects.update { $0.insert(steps.count - 1) } }
+            }
             timeouts.update { $0[verb] = timeout }
             let closes = verb == "eject" || verb == "detach"
             if closes { closing.update { $0 = ($0.now + 1, max($0.most, $0.now + 1)) } }
             defer { if closes { closing.update { $0.now -= 1 } } }
-            switch parts.value[verb] ?? .real {
+            switch part {
             case .real:
                 return try await VaultTool.system.run(path, arguments, input, timeout)
             case .fails(let message):
@@ -81,6 +93,8 @@ final class DoorStandIn: @unchecked Sendable {
 
 extension XCTestCase {
     static var vaultPassword: String { "door-pass" }
+    /// A disk-tool time limit a busy Mac can meet, for tests about something other than the door's own limits.
+    static var roomForABusyMac: TimeInterval { 30 }
 
     /// One test's folder for throwaway vaults. A test that wedges an eject on purpose can leave its image attached with
     /// nothing mounted, so when the test ends every image under this folder, and nothing else, is force-detached.

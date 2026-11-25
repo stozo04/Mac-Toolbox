@@ -104,6 +104,7 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertFalse(model.isLocking)
 
         stand.play("eject", as: .real)
+        stand.play("detach", as: .real)
         await model.lock()
         XCTAssertEqual(model.phase, .locked)
         XCTAssertFalse(model.disk.isOpen)
@@ -233,7 +234,7 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertFalse(model.disk.isOpen, "sleep returned before the eject")
         XCTAssertEqual(Shell.livePIDs, [], "the mount was still running when the Mac was free to sleep")
         XCTAssertEqual(model.door.state, .closed)
-        XCTAssertEqual(stand.steps.value, ["attach", "eject"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["attach", "eject"])
         await unlocking.value
         try await waitUntil("the lock has settled") { !model.isLocking }
         XCTAssertEqual(model.phase, .locked)
@@ -288,7 +289,7 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertTrue(mayQuit)
         XCTAssertFalse(model.disk.isOpen, "the app was free to quit with the vault mounted")
         XCTAssertEqual(Shell.livePIDs, [])
-        XCTAssertEqual(stand.steps.value, ["attach", "eject"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["attach", "eject"])
         await unlocking.value
         XCTAssertEqual(model.phase, .locked)
     }
@@ -323,6 +324,7 @@ final class VaultLockingTests: XCTestCase {
         XCTAssertFalse(afterDismissing, "the app quit with the vault open although its warning was no longer showing")
 
         stand.play("eject", as: .real)
+        stand.play("detach", as: .real)
         let afterItLocks = try await answerToQuit(preparation)
         XCTAssertTrue(afterItLocks)
         XCTAssertFalse(model.disk.isOpen)

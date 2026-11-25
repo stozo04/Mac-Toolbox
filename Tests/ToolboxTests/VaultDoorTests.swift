@@ -38,10 +38,25 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertFalse(door.disk.isOpen)
         XCTAssertFalse(door.holdsOwnership)
         XCTAssertFalse(FileManager.default.fileExists(atPath: door.disk.location.mountPoint.path))
-        XCTAssertEqual(stand.steps.value, ["attach", "attach", "eject"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["attach", "attach", "eject"])
+        let stepsBeforeSecondLock = stand.steps.value.count
         let lockedAgain = await door.lock()
         XCTAssertEqual(lockedAgain, .locked)
-        XCTAssertEqual(stand.steps.value.count, 3, "locking a closed vault ran a disk tool")
+        XCTAssertEqual(stand.steps.value.count, stepsBeforeSecondLock, "locking a closed vault ran a disk tool")
+    }
+
+    func testOnlyADetachAfterARealEjectIsForgiven() async throws {
+        let missing = dir.appendingPathComponent("not-mounted").path
+        let stand = DoorStandIn()
+        stand.play("detach", as: .fails("busy"))
+        _ = try await stand.tool.run(VaultDisk.diskutil, ["eject", missing], nil, .quick)
+        _ = try await stand.tool.run(VaultDisk.hdiutil, ["detach", "-force", missing], nil, .quick)
+        stand.play("eject", as: .fails("busy"))
+        _ = try await stand.tool.run(VaultDisk.diskutil, ["eject", missing], nil, .quick)
+        _ = try await stand.tool.run(VaultDisk.hdiutil, ["detach", "-force", missing], nil, .quick)
+
+        XCTAssertEqual(stand.steps.value, ["eject", "detach", "eject", "detach"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["eject", "eject", "detach"], "a detach after a faked failing eject is part of the test")
     }
 
     func testAnOpenVaultIsNotAWayAroundThePassword() async throws {
@@ -54,7 +69,7 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertFalse(door.disk.isOpen)
         XCTAssertEqual(door.state, .closed)
         XCTAssertFalse(door.holdsOwnership)
-        XCTAssertEqual(stand.steps.value, ["attach", "eject", "attach"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["attach", "eject", "attach"])
 
         let opened = await door.unlock(password: Self.vaultPassword)
         XCTAssertEqual(opened, .opened)
@@ -143,7 +158,7 @@ final class VaultDoorTests: XCTestCase {
 
         XCTAssertEqual(locked, .locked)
         XCTAssertEqual(unlocked, .lockedMeanwhile)
-        XCTAssertEqual(stand.steps.value, ["attach", "eject"], "the mount that landed was ejected exactly once")
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["attach", "eject"], "the mount that landed was ejected exactly once")
         XCTAssertEqual(Shell.livePIDs, [])
         XCTAssertFalse(door.disk.isOpen, "the lock answered with the vault still mounted")
         XCTAssertEqual(door.state, .closed)
@@ -205,15 +220,12 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertFalse(door.disk.isOpen)
     }
 
-    // The forced detach is the real hdiutil, which has taken longer than the door's 6 seconds while the whole suite runs.
-    private static let roomForARealDetach: TimeInterval = 30
-
     func testAForcedEjectIsLoggedWithWhyAndHowLongTheEjectTook() async throws {
         let sink = MemorySink(minimumLevel: .warning)
         Log.configure(sinks: [sink])
         defer { Log.configure(sinks: []) }
         let stand = DoorStandIn()
-        let door = try await makeOpenDoor(in: folder("forced"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: Self.roomForARealDetach))
+        let door = try await makeOpenDoor(in: folder("forced"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: Self.roomForABusyMac))
         stand.play("eject", as: .fails("Volume Vault on disk9 failed to unmount"))
 
         let locked = await door.lock()
@@ -227,7 +239,7 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertEqual(forced.metadata["eject"], "Volume Vault on disk9 failed to unmount")
         XCTAssertEqual(forced.metadata["eject_limit_seconds"], "30.0")
         let seconds = try XCTUnwrap(forced.metadata["eject_seconds"].flatMap(Double.init))
-        XCTAssertLessThan(seconds, Self.roomForARealDetach)
+        XCTAssertLessThan(seconds, Self.roomForABusyMac)
     }
 
     func testAnEjectThatClosesTheVaultButFailsIsLoggedToo() async throws {
@@ -235,7 +247,7 @@ final class VaultDoorTests: XCTestCase {
         Log.configure(sinks: [sink])
         defer { Log.configure(sinks: []) }
         let stand = DoorStandIn()
-        let door = try await makeOpenDoor(in: folder("closed-late"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: Self.roomForARealDetach))
+        let door = try await makeOpenDoor(in: folder("closed-late"), tool: stand.tool, bounds: VaultDoor.Bounds(lockStep: Self.roomForABusyMac))
         stand.play("eject", as: .ejectsThenFails("diskutil did not finish within 6 seconds, so it was stopped."))
 
         let locked = await door.lock()
@@ -273,6 +285,7 @@ final class VaultDoorTests: XCTestCase {
         XCTAssertTrue(door.disk.isOpen)
 
         stand.play("eject", as: .real)
+        stand.play("detach", as: .real)
         let retried = await door.lock()
         XCTAssertEqual(retried, .locked)
         XCTAssertFalse(door.disk.isOpen)
@@ -289,7 +302,7 @@ final class VaultDoorTests: XCTestCase {
         let outcome = await door.unlock(password: Self.vaultPassword)
 
         XCTAssertEqual(outcome, .refused(.diskTool(action: "open", message: "sh did not finish within 3 seconds, so it was stopped.")))
-        XCTAssertEqual(stand.steps.value, ["attach", "eject"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["attach", "eject"])
         XCTAssertFalse(door.disk.isOpen)
         XCTAssertEqual(door.state, .closed)
         XCTAssertFalse(door.holdsOwnership)
