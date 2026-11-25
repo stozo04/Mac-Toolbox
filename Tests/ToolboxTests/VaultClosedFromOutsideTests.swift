@@ -224,15 +224,6 @@ final class VaultClosedFromOutsideTests: XCTestCase {
     private func makeFile(_ name: String) throws -> URL {
         let folder = dir.appendingPathComponent("source")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(name)
-        let side = 8
-        var pixels = [UInt8](repeating: 160, count: side * side * 4)
-        let context = try XCTUnwrap(CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
-                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        let image = try XCTUnwrap(context.makeImage())
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
-        CGImageDestinationAddImage(destination, image, nil)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        return url
+        return try VaultTestMedia.uniquePhoto(at: folder.appendingPathComponent(name))
     }
 }

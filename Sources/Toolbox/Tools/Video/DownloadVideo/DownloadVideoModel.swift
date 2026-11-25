@@ -63,6 +63,7 @@ final class DownloadVideoModel {
     static let vaultStillOpen = "The Vault didn't lock. Open the Vault page and lock it."
     static let vaultClosedWhileMoving = "the Vault closed before it went in."
     static let vaultBusy = "the Vault was busy adding other files."
+    static let alreadyInVault = "the same file is already in it, so this one stayed in Downloads."
     static let vaultCantPlay = "the Vault only holds videos your Mac can play."
     private static let addToVaultKey = "downloadVideo.addToVault"
 
@@ -245,7 +246,7 @@ final class DownloadVideoModel {
             let others = downloads.filter { download in !videos.contains { $0.id == download.id } }
             var (report, keptOut) = await moveIn(videos, to: vault)
             report.usedVault = true
-            report.keptOut = keptOut.count
+            report.keptOut = keptOut.count - report.alreadyInVault
             let inVault = vault.acceptsFiles ? vaultFiles : []
             if !vault.acceptsFiles { report.lockedBeforeSending = vaultFiles.count }
             let files = others.map(\.file) + keptOut + inVault
@@ -273,10 +274,17 @@ final class DownloadVideoModel {
                 continue
             }
             sendState = .addingToVault(done: done, total: videos.count)
+            if await vault.holdsExactCopy(of: video.file) {
+                keptOut.append(video.file)
+                report.alreadyInVault += 1
+                update(video.id) { $0.vaultProblem = Self.alreadyInVault }
+                continue
+            }
             do {
                 let inVault = try await vault.moveIn(video.file)
                 update(video.id) { $0.state = .inVault(inVault); $0.vaultProblem = nil }
                 moved.append(inVault)
+                await vault.queueDuplicateCheck(of: inVault)
             } catch VaultMoveError.busy {
                 keptOut.append(video.file)
                 update(video.id) { $0.vaultProblem = Self.vaultBusy }
@@ -286,6 +294,7 @@ final class DownloadVideoModel {
             } catch VaultMoveError.originalKept(let reason, let copy) {
                 update(video.id) { $0.state = .inVault(copy); $0.vaultProblem = "The copy in Downloads couldn't be deleted, so Clear leaves it there: \(reason)" }
                 moved.append(copy)
+                await vault.queueDuplicateCheck(of: copy)
                 VaultLog.failure("Download in the vault but its original stayed", VaultMoveError.originalKept(reason, copy: copy), file: video.file)
             } catch {
                 report.failed += 1
@@ -326,7 +335,7 @@ final class DownloadVideoModel {
                      ["copied": String(result.copied), "skipped": String(result.skipped), "missing": String(result.missing),
                       "vault_moved": String(report?.moved ?? 0), "vault_failed": String(report?.failed ?? 0),
                       "not_searchable": String(report?.notSearchable ?? 0), "vault_used": String(report?.usedVault ?? false),
-                      "kept_out": String(report?.keptOut ?? 0),
+                      "kept_out": String(report?.keptOut ?? 0), "already_in_vault": String(report?.alreadyInVault ?? 0),
                       "vault_still_open": String(report?.stillOpen ?? false)])
         case .failure(let error):
             var sentences = [error.localizedDescription]
@@ -364,6 +373,7 @@ final class DownloadVideoModel {
                 parts.append("\(vault.lockedBeforeSending) in the Vault weren't sent because it locked; send again")
             }
             if vault.keptOut > 0 { parts.append("\(vault.keptOut) not added to the Vault, sent from Downloads") }
+            if vault.alreadyInVault > 0 { parts.append("\(vault.alreadyInVault) already in the Vault, left in Downloads and sent from there") }
             if vault.skippedInVault > 0 {
                 parts.append("\(vault.skippedInVault) in the Vault weren't sent; tick Add to Vault to send them")
             }

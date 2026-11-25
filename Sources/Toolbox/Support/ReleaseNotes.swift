@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.16.5"
+    static let current = "0.17.0"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,14 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.17.0", date: "2026-11-25", changes: [
+            .init(kind: .new, text: "Vault checks the files you add for copies it already holds, and shows every copy side by side so you tick the ones to keep. Copies you don't keep go to the Vault's Trash; new files you don't keep stay where they were."),
+            .init(kind: .new, text: "The comparison shows each copy's resolution, codec, bitrate, sound and more, marks what is better and which copy is higher quality, plays videos one at a time or together, and zooms photos together."),
+            .init(kind: .improved, text: "Duplicates opens the same comparison for one set or all of them, and remembers the sets you keep whole."),
+            .init(kind: .improved, text: "Add to Vault in Download Video leaves a video the Vault already holds in Downloads, and the Vault offers to compare new downloads the next time you open it."),
+            .init(kind: .improved, text: "Media Info names the encoder tag instead of showing a code."),
+            .init(kind: .removed, text: "Duplicates' Keep This One and Select Extras: the comparison replaces them."),
+        ]),
         Release(version: "0.16.5", date: "2026-11-25", changes: [
             .init(kind: .improved, text: "When Record Screen can't see your screen, the Logs page now says why, so a permission problem can be tracked down."),
         ]),

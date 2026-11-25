@@ -181,11 +181,11 @@ final class VaultLikelyDuplicatesTests: XCTestCase {
 
     func testTwoEncodesOfOneVideoReadAsTheSameLookAndAnotherVideoDoesNot() async throws {
         let high = try await VaultTestMedia.sceneVideo(at: root.appendingPathComponent("high.mp4"), scene: .stripes, seconds: 5,
-                                                       side: 320, bitrate: 2_000_000)
+                                                       width: 320, height: 320, bitrate: 2_000_000)
         let low = try await VaultTestMedia.sceneVideo(at: root.appendingPathComponent("low.mp4"), scene: .stripes, seconds: 5,
-                                                      side: 192, bitrate: 150_000)
+                                                      width: 192, height: 192, bitrate: 150_000)
         let other = try await VaultTestMedia.sceneVideo(at: root.appendingPathComponent("other.mp4"), scene: .rings, seconds: 5,
-                                                        side: 320, bitrate: 2_000_000)
+                                                        width: 320, height: 320, bitrate: 2_000_000)
         let items = VaultLibrary.items(in: root)
         let durations = await VaultBrowse.durations(of: items)
         let looks = await VaultLookReader.looks(of: items, durations: durations)

@@ -1,0 +1,200 @@
+import XCTest
+@testable import Toolbox
+
+@MainActor
+final class VaultMatchCacheTests: XCTestCase {
+    private var root: URL!
+    private let reads = Locked(0)
+
+    override func setUp() async throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("vault-duplicate-finder-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try write("MOVIE-BYTES", to: "a.mp4")
+        try write("MOVIE-BYTES", to: "b.mp4")
+        try write("OTHER-BYTES", to: "c.mp4")
+    }
+
+    override func tearDown() async throws { try? FileManager.default.removeItem(at: root) }
+
+    private func write(_ text: String, to name: String) throws {
+        try Data(text.utf8).write(to: root.appendingPathComponent(name))
+    }
+
+    private func countingFinder() -> VaultMatchCache {
+        VaultMatchCache { [reads] item in
+            reads.update { $0 += 1 }
+            return try VaultMover.sha256(item.url)
+        }
+    }
+
+    private func names(_ groups: [VaultDuplicates.Group]?) -> [[String]]? {
+        groups?.map { $0.copies.map(\.name).sorted() }
+    }
+
+    func testIdenticalFilesAreFoundAndASecondPassReadsNoFileAgain() async throws {
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+
+        let first = await finder.groups(in: items, lengths: [:])
+
+        XCTAssertEqual(names(first), [["a.mp4", "b.mp4"]])
+        XCTAssertEqual(reads.value, 3)
+
+        let second = await finder.groups(in: items, lengths: [:])
+
+        XCTAssertEqual(names(second), [["a.mp4", "b.mp4"]])
+        XCTAssertEqual(reads.value, 3, "files already read were read again")
+    }
+
+    func testARenamedFileIsNotReadAgain() async throws {
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        _ = await finder.groups(in: items, lengths: [:])
+        let old = try XCTUnwrap(items.first { $0.name == "b.mp4" })
+        let target = root.appendingPathComponent("renamed.mp4")
+        try FileManager.default.moveItem(at: old.url, to: target)
+        let renamed = VaultItem(url: target, kind: old.kind, added: old.added, bytes: old.bytes)
+
+        finder.carry(from: old, to: renamed)
+        let groups = await finder.groups(in: items.map { $0 == old ? renamed : $0 }, lengths: [:])
+
+        XCTAssertEqual(names(groups), [["a.mp4", "renamed.mp4"]])
+        XCTAssertEqual(reads.value, 3, "the renamed file was read again")
+    }
+
+    func testForgettingMeansEveryFileIsReadAfresh() async throws {
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        _ = await finder.groups(in: items, lengths: [:])
+
+        finder.forget()
+        let groups = await finder.groups(in: items, lengths: [:])
+
+        XCTAssertEqual(names(groups), [["a.mp4", "b.mp4"]])
+        XCTAssertEqual(reads.value, 6, "digests from before the vault locked were still used")
+    }
+
+    func testACancelledPassGivesNoAnswer() async throws {
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+
+        let pass = Task { await finder.groups(in: items, lengths: [:]) }
+        pass.cancel()
+        let groups = await pass.value
+
+        XCTAssertNil(groups)
+    }
+
+    func testAPassThatWasReadingWhenTheVaultLockedGivesNoAnswerAndLeavesNothingRemembered() async throws {
+        let reading = Locked(false)
+        let mayFinish = DispatchSemaphore(value: 0)
+        let finder = VaultMatchCache { [reads] item in
+            reads.update { $0 += 1 }
+            if !reading.value {
+                reading.set(true)
+                mayFinish.wait()
+            }
+            return try VaultMover.sha256(item.url)
+        }
+        let items = VaultLibrary.items(in: root)
+        let pass = Task { await finder.groups(in: items, lengths: [:]) }
+        try await waitUntil("the pass is reading a file") { reading.value }
+
+        finder.forget()
+        mayFinish.signal()
+        let groups = await pass.value
+
+        XCTAssertNil(groups, "duplicates found in a vault that has since locked were shown")
+        let readsBefore = reads.value
+        _ = await finder.groups(in: items, lengths: [:])
+        XCTAssertEqual(reads.value - readsBefore, 3, "digests read across a lock were remembered")
+    }
+
+    func testAnAddOnlyReadsTheFilesThatCouldMatchIt() async throws {
+        let finder = countingFinder()
+        let vault = VaultLibrary.items(in: root)
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("MOVIE-BYTES".utf8).write(to: outside.appendingPathComponent("new.mp4"))
+        try Data("short".utf8).write(to: outside.appendingPathComponent("unique.mp4"))
+        let incoming = try [XCTUnwrap(VaultLibrary.item(at: outside.appendingPathComponent("new.mp4"))),
+                            XCTUnwrap(VaultLibrary.item(at: outside.appendingPathComponent("unique.mp4")))]
+
+        let groups = await finder.matches(for: incoming, in: vault, lengths: [:])
+
+        XCTAssertEqual(names(groups), [["a.mp4", "b.mp4", "new.mp4"]])
+        XCTAssertEqual(reads.value, 4, "a file of a size nothing incoming has was read")
+    }
+
+    func testASetKeptWholeIsNeverSuggestedAgainEvenAfterARename() async throws {
+        let store = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
+        defer { store.close() }
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        let found = await finder.groups(in: items, lengths: [:])
+        let pair = try XCTUnwrap(found?.first)
+
+        try store.keepTogether(try await finder.digests(of: pair.copies))
+        let old = try XCTUnwrap(items.first { $0.name == "b.mp4" })
+        let target = root.appendingPathComponent("renamed.mp4")
+        try FileManager.default.moveItem(at: old.url, to: target)
+        let renamed = try XCTUnwrap(VaultLibrary.item(at: target))
+
+        let after = await countingFinder().groups(in: items.map { $0 == old ? renamed : $0 }, lengths: [:], remembered: store)
+
+        XCTAssertEqual(names(after), [])
+        let reopened = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
+        defer { reopened.close() }
+        XCTAssertEqual(reopened.remembered, store.remembered, "the choice was not saved")
+    }
+
+    func testOneMoreIdenticalCopyThanWasKeptIsSuggestedAgain() async throws {
+        let store = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
+        defer { store.close() }
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        try store.keepTogether(try await finder.digests(of: items.filter { $0.name != "c.mp4" }))
+        let before = await finder.groups(in: items, lengths: [:], remembered: store)
+        XCTAssertEqual(names(before), [])
+
+        try write("MOVIE-BYTES", to: "d.mp4")
+        let more = VaultLibrary.items(in: root)
+        let groups = await finder.groups(in: more, lengths: [:], remembered: store)
+
+        XCTAssertEqual(names(groups), [["a.mp4", "b.mp4", "d.mp4"]], "a third identical copy was hidden by a choice about two")
+    }
+
+    func testAFileChangedInPlaceIsReadAgainEvenAtTheSameSize() async throws {
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        _ = await finder.groups(in: items, lengths: [:])
+        let b = root.appendingPathComponent("b.mp4")
+        try Data("MOVIE-BYTEZ".utf8).write(to: b)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: b.path)
+        let readsBefore = reads.value
+
+        let groups = await finder.groups(in: items, lengths: [:])
+
+        XCTAssertEqual(names(groups), [], "a stale digest still called the changed file a copy")
+        XCTAssertGreaterThan(reads.value, readsBefore)
+    }
+
+    func testAnAddFindsAVaultCopyThatMatchesOnlyThroughAnotherVaultCopy() async throws {
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let id = "7468015357786148128"
+        try Data("one".utf8).write(to: root.appendingPathComponent("first [\(id)].mp4"))
+        try Data("three".utf8).write(to: root.appendingPathComponent("third [\(id)].mp4"))
+        try Data("new-one".utf8).write(to: outside.appendingPathComponent("new [\(id)].mp4"))
+        let vault = VaultLibrary.items(in: root).filter { $0.name.contains(id) && !$0.url.path.contains("/outside/") }
+        let incoming = try XCTUnwrap(VaultLibrary.item(at: outside.appendingPathComponent("new [\(id)].mp4")))
+        let first = try XCTUnwrap(vault.first { $0.name.hasPrefix("first") })
+        let third = try XCTUnwrap(vault.first { $0.name.hasPrefix("third") })
+        let lengths = [incoming: 10.0, first: 11.5, third: 13.0]
+
+        let groups = await countingFinder().matches(for: [incoming], in: vault, lengths: lengths)
+
+        XCTAssertEqual(names(groups), [["first [\(id)].mp4", "new [\(id)].mp4", "third [\(id)].mp4"]],
+                       "the vault copy 3 s from the new one is the same set through the copy between them")
+    }
+}

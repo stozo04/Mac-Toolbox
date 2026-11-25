@@ -21,6 +21,8 @@ protocol DownloadVault: AnyObject {
     var acceptsFiles: Bool { get }
     func openWithTouchID() async -> DownloadVaultOpening
     func moveIn(_ file: URL) async throws -> URL
+    func holdsExactCopy(of file: URL) async -> Bool
+    func queueDuplicateCheck(of inVault: URL) async
     func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int
     func lockAndConfirm() async -> VaultLockCheck
 }
@@ -114,6 +116,8 @@ struct VaultSendReport: Equatable {
     var lockedAgain = false
     var heldByAnotherCopy = false
     var keptOut = 0
+    /// Not added because the Vault already holds the same file; sent from Downloads.
+    var alreadyInVault = 0
     var skippedInVault = 0
     var usedVault = false
 }

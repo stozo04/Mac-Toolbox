@@ -35,6 +35,26 @@ extension VaultModel {
         return moved
     }
 
+    /// True when the vault already holds the same bytes. Only sizes and, on a size clash, a hash are read: the vault was
+    /// just opened with Touch ID and has nothing cached.
+    func holdsExactCopy(of file: URL) async -> Bool {
+        guard phase == .open, let incoming = VaultLibrary.item(at: file) else { return false }
+        let sameSize = items.filter { $0.bytes == incoming.bytes }
+        guard !sameSize.isEmpty else { return false }
+        guard let digests = try? await matchCache.digests(of: [incoming] + sameSize), let own = digests.first else { return false }
+        return digests.dropFirst().contains(own)
+    }
+
+    /// The download went in without anyone to ask, so the next time the Vault page opens it is compared with the rest.
+    func queueDuplicateCheck(of inVault: URL) async {
+        guard let store = duplicatesStore, let path = VaultLibrary.relativePath(of: inVault, in: root) else { return }
+        do {
+            try store.queueReview(path: path)
+        } catch {
+            VaultLog.failure("Vault duplicate check could not be queued", error, file: inVault)
+        }
+    }
+
     /// Puts the file first in line for the search index and waits for it, at most `limit` (`searchWaitLimit` when not given).
     /// False when there is no search model, the file could not be read, the vault locked first, or the wait ran out.
     func makeSearchable(_ file: URL, waitingAtMost limit: Duration? = nil) async -> Bool {

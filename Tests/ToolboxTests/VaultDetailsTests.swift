@@ -130,7 +130,7 @@ final class VaultDetailsTests: XCTestCase {
         let values = Dictionary(uniqueKeysWithValues: details.lines.map { ($0.label, $0.value) })
 
         XCTAssertEqual(values["Length"], "0:02")
-        XCTAssertEqual(values["Resolution"], "256 × 256")
+        XCTAssertEqual(values["Resolution"], "256 × 256 · 256p")
         XCTAssertEqual(values["Sound"], "No sound")
         XCTAssertNotNil(values["Video codec"])
         XCTAssertNotNil(values["Added to vault"])
@@ -146,7 +146,7 @@ final class VaultDetailsTests: XCTestCase {
 
         let details = await VaultFileDetails.load(photo, playable: url)
 
-        XCTAssertEqual(details.lines.first { $0.label == "Dimensions" }?.value, "40 × 30")
+        XCTAssertEqual(details.lines.first { $0.label == "Dimensions" }?.value, "40 × 30 · 30p")
     }
 
     private func engineWithoutModel() -> VaultSearchEngine {

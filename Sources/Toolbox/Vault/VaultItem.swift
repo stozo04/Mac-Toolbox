@@ -42,6 +42,13 @@ enum VaultLibrary {
         return VaultItem(url: url, kind: kind, added: added, bytes: Int64(values.fileSize ?? 0))
     }
 
+    /// Where `file` sits inside `root`, the same whichever way either path spells /var or /tmp. Nil when it is outside.
+    static func relativePath(of file: URL, in root: URL) -> String? {
+        let rootPath = root.resolvingSymlinksInPath().path + "/"
+        let filePath = file.resolvingSymlinksInPath().path
+        return filePath.hasPrefix(rootPath) ? String(filePath.dropFirst(rootPath.count)) : nil
+    }
+
     static func item(movedTo url: URL) -> VaultItem? {
         let canonicalPath = (try? url.resourceValues(forKeys: [.canonicalPathKey]))?.canonicalPath
         return item(at: canonicalPath.map { URL(fileURLWithPath: $0) } ?? url)

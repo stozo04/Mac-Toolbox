@@ -1,7 +1,8 @@
 import Foundation
 
 /// The move into the vault that is running: its task, how far it is, and which of its files are not confirmed yet, so a
-/// vault closed from outside can say what happened to each one.
+/// vault closed from outside can say what happened to each one. Files waiting for a choice on the comparison screen
+/// are set aside: nothing has touched them, so a close never reports them as not moved.
 struct VaultMoveTracker {
     struct OutsideClose {
         let failures: [VaultMoveFailure]
@@ -20,6 +21,7 @@ struct VaultMoveTracker {
     var task: Task<Void, Never>?
     private(set) var progress: VaultModel.MoveProgress?
     private(set) var stillToMove: [URL] = []
+    private(set) var awaitingChoice: [URL] = []
     private var current: UUID?
     private var outsideClose: (duringImport: Bool, unconfirmed: Int)?
 
@@ -40,7 +42,20 @@ struct VaultMoveTracker {
 
     mutating func settled(_ file: URL) {
         stillToMove.removeAll { $0 == file }
+        awaitingChoice.removeAll { $0 == file }
         progress?.done += 1
+    }
+
+    mutating func setAside(_ files: [URL]) {
+        stillToMove.removeAll(where: files.contains)
+        awaitingChoice += files.filter { !awaitingChoice.contains($0) }
+    }
+
+    /// The choice was made and the file is about to be moved.
+    mutating func takeUp(_ file: URL) {
+        guard awaitingChoice.contains(file) else { return }
+        awaitingChoice.removeAll { $0 == file }
+        stillToMove.append(file)
     }
 
     /// Ends the move. What was said about the last outside close stays, for a file that finishes after it.
@@ -48,6 +63,7 @@ struct VaultMoveTracker {
         task = nil
         current = nil
         stillToMove = []
+        awaitingChoice = []
         progress = nil
     }
 

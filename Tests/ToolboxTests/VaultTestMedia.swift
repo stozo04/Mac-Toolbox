@@ -1,4 +1,5 @@
 import AVFoundation
+import UniformTypeIdentifiers
 import XCTest
 
 enum VaultTestMedia {
@@ -41,18 +42,37 @@ enum VaultTestMedia {
         return url
     }
 
+    /// A small PNG with random pixels, so no two photos made here are copies of each other or look alike.
+    static func uniquePhoto(at url: URL, red: UInt8 = 200) throws -> URL {
+        let side = 8
+        var pixels = [UInt8](repeating: 255, count: side * side * 4)
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            pixels[i] = red
+            pixels[i + 1] = UInt8.random(in: 0...255)
+            pixels[i + 2] = UInt8.random(in: 0...255)
+        }
+        let context = try XCTUnwrap(CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
     enum Scene { case stripes, rings }
 
-    static func sceneVideo(at url: URL, scene: Scene, seconds: Int, side: Int, bitrate: Int) async throws -> URL {
+    static func sceneVideo(at url: URL, scene: Scene, seconds: Int, width: Int, height: Int, bitrate: Int,
+                           codec: AVVideoCodecType = .h264) async throws -> URL {
         let fps: Int32 = 10
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: side, AVVideoHeightKey: side,
+            AVVideoCodecKey: codec, AVVideoWidthKey: width, AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: bitrate],
         ])
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: side,
-            kCVPixelBufferHeightKey as String: side,
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
         ])
         writer.add(input)
         XCTAssertTrue(writer.startWriting())
@@ -66,9 +86,9 @@ enum VaultTestMedia {
             let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(pixels)).assumingMemoryBound(to: UInt8.self)
             let rowBytes = CVPixelBufferGetBytesPerRow(pixels)
             let time = Double(frame) / Double(fps)
-            for y in 0..<side {
-                for x in 0..<side {
-                    let level = brightness(scene, x: Double(x) / Double(side), y: Double(y) / Double(side), time: time)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let level = brightness(scene, x: Double(x) / Double(width), y: Double(y) / Double(height), time: time)
                     let i = y * rowBytes + x * 4
                     base[i] = level
                     base[i + 1] = level
