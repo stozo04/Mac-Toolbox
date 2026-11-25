@@ -74,6 +74,21 @@ extension VaultModel {
         }
     }
 
+    /// A renamed download keeps its queue entry and its waiting match, so its review still closes once it is done.
+    func carryDownloadReview(from item: VaultItem, to renamed: VaultItem, queuedPath: String?) {
+        guard let from = queuedPath, let to = VaultLibrary.relativePath(of: renamed.url, in: root) else { return }
+        do {
+            try duplicatesStore?.movePendingReview(from: from, to: to)
+        } catch {
+            VaultLog.failure("Vault duplicates memory failed", error)
+        }
+        downloadMatches = downloadMatches.map { match in
+            let copies = match.group.copies.map { $0.item == item ? VaultComparison.Copy(item: renamed, place: $0.place) : $0 }
+            return VaultDownloadMatch(group: VaultComparison.Group(copies: copies, match: match.group.match),
+                                      queuedPaths: match.queuedPaths.map { $0 == from ? to : $0 })
+        }
+    }
+
     private func finishReviews(_ paths: [String]) {
         guard !paths.isEmpty else { return }
         do {

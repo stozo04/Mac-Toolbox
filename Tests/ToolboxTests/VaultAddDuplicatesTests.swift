@@ -319,6 +319,31 @@ final class VaultAddDuplicatesTests: XCTestCase {
         XCTAssertEqual(model.downloadMatches.first?.queuedPaths, ["second download.png"])
     }
 
+    func testADownloadRenamedAfterTheCheckIsStillClosedByItsReview() async throws {
+        let model = try await openVault()
+        try await addAndSettle(model, [VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("a.png"))])
+        let downloaded = model.root.appendingPathComponent("downloaded.png")
+        try FileManager.default.copyItem(at: model.root.appendingPathComponent("a.png"), to: downloaded)
+        model.reload()
+        await model.queueDuplicateCheck(of: downloaded)
+        await model.lock()
+        await model.unlock(password: "dupes-pass")
+        model.finishOpening()
+        try await waitUntil(timeout: .seconds(30), "the download was checked") { model.downloadMatches.count == 1 }
+        let item = try XCTUnwrap(model.items.first { $0.name == "downloaded.png" })
+        _ = try await model.rename(item, to: "beach")
+
+        XCTAssertEqual(model.downloadMatches.first?.queuedPaths, ["beach.png"])
+        model.reviewDownloads()
+        try await waitUntil(timeout: .seconds(30), "the download is shown") { model.comparison?.group?.copies.count == 2 }
+        let review = try XCTUnwrap(model.comparison)
+        review.keepAll()
+        review.confirm()
+        try await waitUntil(timeout: .seconds(30), "the review is done") { model.comparison == nil }
+
+        XCTAssertEqual(try XCTUnwrap(model.duplicatesStore).pendingReviews(), [], "the renamed download stayed queued")
+    }
+
     private func openVault(lockedByTest: Bool = false) async throws -> VaultModel {
         let model = VaultModel(location: VaultLocation(folder: dir.appendingPathComponent("vault")), watchesSystem: false)
         await model.create(password: "dupes-pass", confirmation: "dupes-pass")

@@ -662,13 +662,7 @@ extension VaultModel {
         VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
         if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
         matchCache.carry(from: item, to: renamed)
-        if let from = queuedPath, let to = VaultLibrary.relativePath(of: target, in: root) {
-            do {
-                try duplicatesStore?.movePendingReview(from: from, to: to)
-            } catch {
-                VaultLog.failure("Vault duplicates memory failed", error)
-            }
-        }
+        carryDownloadReview(from: item, to: renamed, queuedPath: queuedPath)
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
         indexQueue.carry(from: item.id, to: renamed.id)
         searchWaiters.carry(from: item.id, to: renamed.id)
