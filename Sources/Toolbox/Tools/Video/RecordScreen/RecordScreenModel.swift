@@ -33,6 +33,7 @@ final class RecordScreenModel {
     private(set) var isLoading = false
     var notice: Notice?
 
+    private let screenAccess: ScreenCaptureAccess
     private let recorder = ScreenRecorder()
     private let panel = RecordingControlPanel()
     private var runTask: Task<Void, Never>?
@@ -66,7 +67,8 @@ final class RecordScreenModel {
         }
     }
 
-    init() {
+    init(screenAccess: ScreenCaptureAccess = .live) {
+        self.screenAccess = screenAccess
         recorder.onInterrupted = { [weak self] error in
             Log.warning("Recording interrupted", category: "record", Log.details(error))
             Task { @MainActor in self?.stop() }
@@ -79,9 +81,10 @@ final class RecordScreenModel {
         guard !isBusy else { return }
         isLoading = true
         defer { isLoading = false }
-        if access == .unknown && !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
+        let preflightAllowed = screenAccess.preflight()
+        if access == .unknown && !preflightAllowed { screenAccess.request() }
         do {
-            let listing = try await CaptureSources.load()
+            let listing = try await screenAccess.loadSources()
             access = .allowed
             displays = listing.displays
             windows = listing.windows
@@ -89,6 +92,8 @@ final class RecordScreenModel {
             if selectedWindow == nil { selectedWindowID = windows.first?.id }
             loadThumbnails()
         } catch {
+            Log.warning("Screen Recording is off", category: "record",
+                        Log.details(error, ["preflight_allowed": String(preflightAllowed)]))
             access = .denied
             displays = []
             windows = []

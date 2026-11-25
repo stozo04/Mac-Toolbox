@@ -6,7 +6,7 @@ import Foundation
 /// "Versioning"). `scripts/make-app.sh` reads the version from this file for Info.plist, and
 /// `scripts/check-version-bump.sh` (the "Version bumped" CI job) fails if the version did not go up or the notes are missing.
 enum AppVersion {
-    static let current = "0.16.4"
+    static let current = "0.16.5"
 }
 
 struct Release: Identifiable, Equatable {
@@ -28,6 +28,9 @@ struct Release: Identifiable, Equatable {
 enum ReleaseNotes {
     /// Newest first. The first entry's version must equal `AppVersion.current`.
     static let all: [Release] = [
+        Release(version: "0.16.5", date: "2026-11-25", changes: [
+            .init(kind: .improved, text: "When Record Screen can't see your screen, the Logs page now says why, so a permission problem can be tracked down."),
+        ]),
         Release(version: "0.16.4", date: "2026-11-25", changes: [
             .init(kind: .improved, text: "Behind the scenes: the Vault's checks no longer fail when the Mac is busy and a disk takes a little longer to eject. Nothing looks or works differently."),
         ]),
