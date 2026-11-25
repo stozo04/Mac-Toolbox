@@ -10,6 +10,8 @@ final class VaultModel {
     var isWorking = false
     private(set) var wrongPasswordAttempts = 0
     var message: String?
+    /// What a finished task did, shown in the library until dismissed; unlike `message`, never a problem, and gone once the vault locks.
+    var notice: String?
     private(set) var folderWithFilesLeftOutside: URL?
     private(set) var items: [VaultItem] = []
     var selection: Set<VaultItem.ID> = []
@@ -71,7 +73,11 @@ final class VaultModel {
     private var queryTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
     private var duplicateTask: Task<Void, Never>?
-    private let duplicateFinder = VaultDuplicateFinder()
+    let matchCache = VaultMatchCache()
+    private(set) var duplicatesStore: VaultDistinctPairs?
+    var comparison: VaultComparison?
+    var isCheckingForDuplicates = false
+    var downloadMatches: [VaultComparison.Group] = []
     private var lengthsInFlight: Set<VaultItem> = []
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
@@ -148,6 +154,7 @@ final class VaultModel {
     func finishOpening() {
         guard phase == .opening, !isLocking, door.state == .open else { return }
         phase = .open
+        if !openedForDownloads { checkDownloads() }
         addDebugFiles()
     }
 
@@ -248,14 +255,15 @@ final class VaultModel {
             try? await Task.sleep(for: Self.duplicatePause)
             guard !Task.isCancelled else { return }
             let snapshot = items
-            let lengths = await lengthsForDuplicates(of: snapshot)
+            let lengths = await lengths(of: snapshot)
             guard !Task.isCancelled, generation == openGeneration else { return }
-            guard let groups = await duplicateFinder.groups(in: snapshot, lengths: lengths) else { return }
+            guard let groups = await matchCache.groups(in: snapshot, lengths: lengths, remembered: duplicatesStore) else { return }
             duplicateGroups = groups
         }
     }
 
-    func moveToTrash(_ doomed: [VaultItem]) async {
+    @discardableResult
+    func moveToTrash(_ doomed: [VaultItem]) async -> [VaultItem] {
         var trashed: [VaultItem] = []
         for item in doomed {
             do {
@@ -273,6 +281,7 @@ final class VaultModel {
         reload()
         await searchEngine?.remove(trashed)
         if !query.isEmpty { runQuery() }
+        return trashed
     }
 
     func putBackTrash() {
@@ -309,40 +318,6 @@ final class VaultModel {
             durations.merge(found) { _, new in new }
             unreadableLengths.formUnion(missing.filter { found[$0] == nil })
         })
-    }
-
-    func add(_ urls: [URL]) {
-        guard phase == .open, !isLocking else { return }
-        guard !moves.isRunning else {
-            message = VaultMoveError.busy.localizedDescription
-            return
-        }
-        let files = VaultMover.expand(urls)
-        guard !files.isEmpty else { return }
-        moveFailures = []
-        let id = moves.begin(files)
-        guard !lockIfClosedFromOutside() else { return }
-        moves.task = Task { [moveFile] in
-            for file in files {
-                if Task.isCancelled || !disk.isOpen { break }
-                do {
-                    let moved = try await moveFile(file, root)
-                    if moves.isCurrent(id) { showMovedIn(moved) } else { correctReportIfMovedAfterAll(file) }
-                } catch {
-                    guard moves.isCurrent(id) else { break }
-                    moveFailures.append(VaultMoveFailure(name: file.lastPathComponent, reason: error.localizedDescription))
-                    if VaultNotices.isUnexpected(error) { VaultLog.failure("Vault move failed", error, file: file) }
-                }
-                guard moves.isCurrent(id) else { break }
-                moves.settled(file)
-            }
-            Log.info("Moved into vault", category: VaultLog.category,
-                     ["count": String(files.count), "failed": String(moveFailures.count)])
-            guard moves.isCurrent(id), !lockIfClosedFromOutside() else { return }
-            if !isLocking { reload() }
-            refreshIndex()
-            moves.end()
-        }
     }
 
     func showMovedIn(_ url: URL) {
@@ -557,6 +532,7 @@ final class VaultModel {
 
     func beginOpening() {
         VaultPlayable.removeUnfinishedCopies(privateFolder: privateFolder)
+        openDuplicatesStore()
         thumbnails = VaultThumbnails(vaultRoot: root)
         wrongPasswordAttempts = 0
         reload()
@@ -581,7 +557,13 @@ final class VaultModel {
         duplicateTask?.cancel()
         duplicateTask = nil
         duplicateGroups = nil
-        duplicateFinder.forget()
+        matchCache.forget()
+        comparison?.end()
+        comparison = nil
+        duplicatesStore?.close()
+        duplicatesStore = nil
+        downloadMatches = []
+        notice = nil
         searchFailures = []
         mode = .library
         query = ""
@@ -591,6 +573,13 @@ final class VaultModel {
         Task { await old?.forget() }
     }
 
+    private func openDuplicatesStore() {
+        do {
+            duplicatesStore = try VaultDistinctPairs(privateFolder: privateFolder)
+        } catch {
+            VaultLog.failure("Vault duplicates memory failed to open", error)
+        }
+    }
 }
 
 extension VaultModel {
@@ -650,12 +639,13 @@ extension VaultModel {
 }
 
 extension VaultModel {
-    fileprivate func lengthsForDuplicates(of snapshot: [VaultItem]) async -> [VaultItem: Double] {
+    /// Read before matching: the same-post-ID rule lets a missing length match, so a length not read yet would too.
+    func lengths(of snapshot: [VaultItem]) async -> [VaultItem: Double] {
+        let present = Set(items)
         let missing = snapshot.filter { $0.kind == .video && durations[$0] == nil && !unreadableLengths.contains($0) }
-        guard !missing.isEmpty else { return durations }
-        let found = await VaultBrowse.durations(of: missing)
-        durations.merge(found) { _, new in new }
-        return durations
+        let found = missing.isEmpty ? [:] : await VaultBrowse.durations(of: missing)
+        durations.merge(found.filter { present.contains($0.key) }) { _, new in new }
+        return durations.merging(found) { _, new in new }
     }
 
     func rename(_ item: VaultItem, to typed: String) async throws -> VaultItem {
@@ -670,7 +660,7 @@ extension VaultModel {
         let renamed = VaultItem(url: target, kind: item.kind, added: item.added, bytes: item.bytes)
         VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
         if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
-        duplicateFinder.carry(from: item, to: renamed)
+        matchCache.carry(from: item, to: renamed)
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
         indexQueue.carry(from: item.id, to: renamed.id)
         searchWaiters.carry(from: item.id, to: renamed.id)

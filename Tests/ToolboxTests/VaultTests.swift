@@ -198,7 +198,7 @@ final class VaultTests: XCTestCase {
     func testTruncatedPhotoIsRefusedAndKept() async throws {
         let whole = try Data(contentsOf: try makePhoto("whole.png"))
         let truncated = source.appendingPathComponent("truncated.png")
-        try whole.prefix(whole.count / 2).write(to: truncated)
+        try whole.prefix(whole.count / 4).write(to: truncated)
         await assertMoveFails(truncated, with: .unreadable)
         XCTAssertTrue(FileManager.default.fileExists(atPath: truncated.path))
         XCTAssertTrue(VaultLibrary.items(in: vault).isEmpty)
@@ -360,7 +360,7 @@ final class VaultTests: XCTestCase {
     }
 
     @MainActor
-    func testDuplicatesNotKeptGoToTheVaultTrashAndComeBack() async throws {
+    func testCopiesNotKeptGoToTheVaultTrashAndComeBack() async throws {
         let location = VaultLocation(folder: dir.appendingPathComponent("trash"))
         let model = VaultModel(location: location, watchesSystem: false)
         await model.create(password: "trash-pass", confirmation: "trash-pass")
@@ -370,28 +370,42 @@ final class VaultTests: XCTestCase {
         let twin = source.appendingPathComponent("b.png")
         try FileManager.default.copyItem(at: photo, to: twin)
 
-        model.add([photo, twin])
-        try await waitUntil(timeout: .seconds(30), "both files are in the vault") { model.moveProgress == nil && model.items.count == 2 }
-        model.mode = .duplicates
-        try await waitUntil(timeout: .seconds(30), "duplicates have been looked for") { model.duplicateGroups != nil }
-        let group = try XCTUnwrap(model.visibleDuplicateGroups?.first)
-        let keeper = try XCTUnwrap(group.copies.first)
+        model.add([photo])
+        try await waitUntil(timeout: .seconds(30), "the first file is in the vault") { model.moveProgress == nil && model.items.count == 1 }
+        let old = try XCTUnwrap(model.items.first)
 
-        await model.keep(keeper, in: group)
+        model.add([twin])
+        try await waitUntil(timeout: .seconds(30), "the copy is shown for a choice") { model.comparison?.group != nil }
+        let comparison = try XCTUnwrap(model.comparison)
+        let shown = try XCTUnwrap(comparison.group)
+        XCTAssertEqual(shown.match, .exact)
+        XCTAssertEqual(shown.copies.map(\.isIncoming), [false, true])
+        XCTAssertFalse(comparison.canConfirm, "a copy was ticked without being asked")
+        comparison.toggle(try XCTUnwrap(shown.copies.last).id)
+        comparison.confirm()
+        try await waitUntil(timeout: .seconds(30), "the add is done") { model.moveProgress == nil && model.comparison == nil }
 
-        XCTAssertEqual(model.items.map(\.name), [keeper.name])
+        XCTAssertEqual(model.items.map(\.name), ["b.png"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: twin.path), "the kept new copy was not moved in")
         XCTAssertEqual(model.trash.count, 1)
+        XCTAssertEqual(model.notice, "0 added, 1 replaced with a better copy, 0 kept as they were, 0 kept both")
         let privateFolder = model.root.appendingPathComponent(VaultLibrary.privateFolderName)
         XCTAssertTrue(VaultTrash.contents(in: privateFolder).allSatisfy { $0.path.hasPrefix(model.root.path + "/") },
                       "Trashed copies stay inside the encrypted image")
 
         model.putBackTrash()
-        XCTAssertEqual(model.items.count, 2)
+        XCTAssertEqual(Set(model.items.map(\.name)), ["b.png", old.name])
         XCTAssertTrue(model.trash.isEmpty)
 
-        try await waitUntil(timeout: .seconds(30), "the group has two copies again") { model.duplicateGroups?.first?.copies.count == 2 }
+        model.mode = .duplicates
+        try await waitUntil(timeout: .seconds(30), "the set has two copies again") { model.duplicateGroups?.first?.copies.count == 2 }
         let again = try XCTUnwrap(model.visibleDuplicateGroups?.first)
-        await model.keep(try XCTUnwrap(again.copies.first), in: again)
+        model.review([again])
+        try await waitUntil(timeout: .seconds(30), "the set is shown") { model.comparison?.group != nil }
+        let review = try XCTUnwrap(model.comparison)
+        review.toggle(try XCTUnwrap(again.copies.first).id)
+        review.confirm()
+        try await waitUntil(timeout: .seconds(30), "the choice is carried out") { model.comparison == nil && model.trash.count == 1 }
         model.emptyTrash()
         XCTAssertTrue(model.trash.isEmpty)
         XCTAssertEqual(model.items.count, 1)
@@ -650,22 +664,7 @@ final class VaultTests: XCTestCase {
     }
 
     private func makePhoto(_ name: String, in folder: URL? = nil, red: UInt8 = 200) throws -> URL {
-        let url = (folder ?? source).appendingPathComponent(name)
-        let width = 8, height = 8
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        for i in stride(from: 0, to: pixels.count, by: 4) {
-            pixels[i] = red
-            pixels[i + 1] = 80
-            pixels[i + 2] = 40
-            pixels[i + 3] = 255
-        }
-        let context = try XCTUnwrap(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        let image = try XCTUnwrap(context.makeImage())
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
-        CGImageDestinationAddImage(destination, image, nil)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        return url
+        try VaultTestMedia.uniquePhoto(at: (folder ?? source).appendingPathComponent(name), red: red)
     }
 }
 

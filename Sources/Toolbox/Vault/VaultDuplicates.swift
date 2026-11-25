@@ -14,20 +14,51 @@ enum VaultDuplicates {
         var kind: VaultItem.Kind? { copies.first?.kind }
     }
 
+    /// Two files one of the link rules says are the same.
+    struct Pair: Hashable {
+        let first: VaultItem
+        let second: VaultItem
+        let match: Match
+    }
+
     static let sameIDLengthTolerance = 2.0
     static let sameLookLengthTolerance = 1.5
 
     static func groups(in items: [VaultItem], digest: (VaultItem) throws -> Data,
-                       durations: [VaultItem: Double] = [:], looks: [VaultItem: VaultLook] = [:]) -> [Group] {
-        let usable = items.filter { $0.bytes > 0 }
-        var links = Links(count: usable.count)
-        let digests = exactDigests(of: usable, digest: digest)
-        linkExactCopies(usable, digests: digests, into: &links)
-        linkSamePostID(usable, durations: durations, into: &links)
-        linkSameLook(usable, durations: durations, looks: looks, into: &links)
+                       durations: [VaultItem: Double] = [:], looks: [VaultItem: VaultLook] = [:],
+                       isRemembered: (Pair) -> Bool = { _ in false }) -> [Group] {
+        let found = pairs(in: items, digest: digest, durations: durations, looks: looks)
+        return groups(joining: found.pairs.filter { !isRemembered($0) }, digests: found.digests)
+    }
 
+    /// Every pair the rules find. With `touching`, only pairs that include one of those files, and only the files that
+    /// could pair with one of them are hashed.
+    static func pairs(in items: [VaultItem], digest: (VaultItem) throws -> Data, durations: [VaultItem: Double] = [:],
+                      looks: [VaultItem: VaultLook] = [:],
+                      touching: Set<VaultItem>? = nil) -> (pairs: [Pair], digests: [VaultItem: Data]) {
+        let usable = items.filter { $0.bytes > 0 }
+        let digests = exactDigests(of: usable, touching: touching, digest: digest)
+        var found = exactPairs(usable, digests: digests)
+        found += samePostIDPairs(usable, durations: durations)
+        found += sameLookPairs(usable, durations: durations, looks: looks)
+        var seen = Set<Set<VaultItem>>()
+        let unique = found.filter { pair in
+            guard touching.map({ $0.contains(pair.first) || $0.contains(pair.second) }) ?? true else { return false }
+            return seen.insert([pair.first, pair.second]).inserted
+        }
+        return (unique, digests)
+    }
+
+    /// Joins pairs into sets: two pairs that share a file are one set.
+    static func groups(joining pairs: [Pair], digests: [VaultItem: Data]) -> [Group] {
+        let members = Array(Set(pairs.flatMap { [$0.first, $0.second] }))
+        let index = Dictionary(uniqueKeysWithValues: members.enumerated().map { ($1, $0) })
+        var links = Links(count: members.count)
+        for pair in pairs {
+            if let a = index[pair.first], let b = index[pair.second] { links.join(a, b) }
+        }
         let groups = links.clusters().filter { $0.count > 1 }.map { indexes in
-            let copies = indexes.map { usable[$0] }.sorted(by: isOlder)
+            let copies = indexes.map { members[$0] }.sorted(by: isOlder)
             return Group(copies: copies, match: isExact(copies, digests: digests) ? .exact : .likely)
         }
         return groups.sorted {
@@ -36,16 +67,25 @@ enum VaultDuplicates {
         }
     }
 
-    static func lookCandidates(in items: [VaultItem], durations: [VaultItem: Double]) -> [VaultItem] {
-        let images = items.filter { $0.kind == .image && $0.bytes > 0 }
+    static func lookCandidates(in items: [VaultItem], durations: [VaultItem: Double],
+                               near anchors: Set<VaultItem>? = nil) -> [VaultItem] {
+        let wantsImages = anchors.map { $0.contains { $0.kind == .image } } ?? true
+        let images = wantsImages ? items.filter { $0.kind == .image && $0.bytes > 0 } : []
         let timed = items.compactMap { item -> (item: VaultItem, seconds: Double)? in
             guard item.kind == .video, item.bytes > 0, let seconds = durations[item] else { return nil }
             return (item, seconds)
         }.sorted { $0.seconds < $1.seconds }
         var wanted = Set<VaultItem>()
-        for (a, b) in zip(timed, timed.dropFirst()) where b.seconds - a.seconds <= sameLookLengthTolerance {
-            wanted.insert(a.item)
-            wanted.insert(b.item)
+        if let anchors {
+            let anchorLengths = timed.filter { anchors.contains($0.item) }.map(\.seconds)
+            for entry in timed where anchorLengths.contains(where: { abs($0 - entry.seconds) <= sameLookLengthTolerance }) {
+                wanted.insert(entry.item)
+            }
+        } else {
+            for (a, b) in zip(timed, timed.dropFirst()) where b.seconds - a.seconds <= sameLookLengthTolerance {
+                wanted.insert(a.item)
+                wanted.insert(b.item)
+            }
         }
         return images + timed.map(\.item).filter(wanted.contains)
     }
@@ -91,42 +131,24 @@ enum VaultDuplicates {
         return allowed && switches >= minimumLetterDigitSwitches
     }
 
-    /// The keeper and every copy are still there with the same size, so trashing the others can't lose the last copy.
-    static func isStillIntact(_ group: Group, keeping keeper: VaultItem) -> Bool {
-        guard group.copies.contains(keeper) else { return false }
-        return group.copies.allSatisfy { copy in
+    /// Every copy is still there with the size it had when compared, so acting on the set can't lose the last copy.
+    static func isStillIntact(_ copies: [VaultItem]) -> Bool {
+        copies.allSatisfy { copy in
             let size = (try? FileManager.default.attributesOfItem(atPath: copy.url.path))?[.size] as? NSNumber
             return size?.int64Value == copy.bytes
         }
-    }
-
-    static func others(than keeper: VaultItem, in group: Group) -> [VaultItem] {
-        group.copies.filter { $0.id != keeper.id }
-    }
-
-    static func suggestedKeeper(in group: Group) -> VaultItem? {
-        group.copies.max { $0.bytes < $1.bytes }
-    }
-
-    static func extraCopies(in groups: [Group]) -> [VaultItem] {
-        groups.flatMap { group in suggestedKeeper(in: group).map { others(than: $0, in: group) } ?? [] }
-    }
-
-    static func groupsWithEveryCopy(of chosen: Set<VaultItem.ID>, in groups: [Group]) -> [Group] {
-        groups.filter { group in group.copies.allSatisfy { chosen.contains($0.id) } }
-    }
-
-    static func chosenCopies(_ chosen: Set<VaultItem.ID>, in groups: [Group]) -> [VaultItem] {
-        groups.flatMap(\.copies).filter { chosen.contains($0.id) }
     }
 
     static func filtered(_ groups: [Group], by filter: VaultFilter) -> [Group] {
         groups.filter { group in group.copies.first.map(filter.includes) ?? false }
     }
 
-    private static func exactDigests(of items: [VaultItem], digest: (VaultItem) throws -> Data) -> [VaultItem: Data] {
+    private static func exactDigests(of items: [VaultItem], touching: Set<VaultItem>?,
+                                     digest: (VaultItem) throws -> Data) -> [VaultItem: Data] {
         var digests: [VaultItem: Data] = [:]
-        let sameSize = Dictionary(grouping: items, by: \.bytes).values.filter { $0.count > 1 }
+        let sameSize = Dictionary(grouping: items, by: \.bytes).values.filter { bucket in
+            bucket.count > 1 && (touching.map { wanted in bucket.contains(where: wanted.contains) } ?? true)
+        }
         for item in sameSize.joined() {
             if let hash = try? digest(item) { digests[item] = hash }
         }
@@ -134,33 +156,35 @@ enum VaultDuplicates {
     }
 
     private static func isExact(_ copies: [VaultItem], digests: [VaultItem: Data]) -> Bool {
-        let hashes = copies.map { digests[$0] }
-        return hashes.allSatisfy { $0 != nil && $0 == hashes.first! }
+        guard let first = copies.first.flatMap({ digests[$0] }) else { return false }
+        return copies.allSatisfy { digests[$0] == first }
     }
 
-    private static func linkExactCopies(_ items: [VaultItem], digests: [VaultItem: Data], into links: inout Links) {
-        var firstWithDigest: [Data: Int] = [:]
-        for (index, item) in items.enumerated() {
-            guard let hash = digests[item] else { continue }
-            if let first = firstWithDigest[hash] { links.join(first, index) } else { firstWithDigest[hash] = index }
+    private static func exactPairs(_ items: [VaultItem], digests: [VaultItem: Data]) -> [Pair] {
+        let byDigest = Dictionary(grouping: items.filter { digests[$0] != nil }) { digests[$0] }
+        return byDigest.values.flatMap { copies in
+            pairs(Array(copies.indices)).map { Pair(first: copies[$0.0], second: copies[$0.1], match: .exact) }
         }
     }
 
-    private static func linkSamePostID(_ items: [VaultItem], durations: [VaultItem: Double], into links: inout Links) {
+    private static func samePostIDPairs(_ items: [VaultItem], durations: [VaultItem: Double]) -> [Pair] {
         var byID: [String: [Int]] = [:]
         for (index, item) in items.enumerated() where item.kind == .video {
             if let id = postID(in: item.name) { byID[id, default: []].append(index) }
         }
-        for indexes in byID.values {
-            for (a, b) in pairs(indexes) where lengthsAgree(items[a], items[b], durations) { links.join(a, b) }
+        return byID.values.flatMap { indexes in
+            pairs(indexes).filter { lengthsAgree(items[$0.0], items[$0.1], durations) }
+                .map { Pair(first: items[$0.0], second: items[$0.1], match: .likely) }
         }
     }
 
-    private static func linkSameLook(_ items: [VaultItem], durations: [VaultItem: Double], looks: [VaultItem: VaultLook],
-                                     into links: inout Links) {
+    private static func sameLookPairs(_ items: [VaultItem], durations: [VaultItem: Double],
+                                      looks: [VaultItem: VaultLook]) -> [Pair] {
         let looked = items.indices.filter { looks[items[$0]] != nil }
-        for (a, b) in pairs(looked) where items[a].kind == items[b].kind && closeInLength(items[a], items[b], durations) {
-            if let first = looks[items[a]], let second = looks[items[b]], first.resembles(second) { links.join(a, b) }
+        return pairs(looked).compactMap { a, b in
+            guard items[a].kind == items[b].kind, closeInLength(items[a], items[b], durations),
+                  let first = looks[items[a]], let second = looks[items[b]], first.resembles(second) else { return nil }
+            return Pair(first: items[a], second: items[b], match: .likely)
         }
     }
 

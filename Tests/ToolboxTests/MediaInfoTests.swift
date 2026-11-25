@@ -42,6 +42,7 @@ final class MediaInfoTests: XCTestCase {
         XCTAssertEqual(MediaInspector.label(for: "mdta/com.apple.quicktime.make"), "Camera make")
         XCTAssertEqual(MediaInspector.label(for: "mdta/com.apple.quicktime.creationdate"), nil)
         XCTAssertEqual(MediaInspector.label(for: "common/title"), "Title")
+        XCTAssertEqual(MediaInspector.label(for: "itsk/%A9too"), "Encoder")
         XCTAssertEqual(MediaInspector.label(for: "mdta/com.apple.quicktime.cameraLensModel"), "Camera lens model")
     }
 

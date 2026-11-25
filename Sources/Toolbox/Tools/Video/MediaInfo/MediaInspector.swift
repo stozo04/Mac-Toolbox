@@ -169,7 +169,12 @@ enum MediaInspector {
             "common/software": "Software", "common/albumName": "Album", "common/copyrights": "Copyright",
         ]
         if let name = known[identifier] { return name }
-        let key = identifier.split(separator: "/").last.map(String.init) ?? identifier
+        let rawKey = identifier.split(separator: "/").last.map(String.init) ?? identifier
+        // "%A9" is the © of iTunes-style keys on its own, which is not valid UTF-8, so it can't be percent-decoded.
+        let key = rawKey.replacingOccurrences(of: "%A9", with: "©")
+        let iTunesNames = ["©too": "Encoder", "©nam": "Title", "©ART": "Artist", "©day": "Date", "©cmt": "Comment",
+                           "©alb": "Album", "©gen": "Genre", "desc": "Description"]
+        if let name = iTunesNames[key] { return name }
         let word = key.split(separator: ".").last.map(String.init) ?? key
         if word.lowercased() == "creationdate" { return nil }
         var spaced = ""

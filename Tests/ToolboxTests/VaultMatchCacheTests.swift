@@ -2,7 +2,7 @@ import XCTest
 @testable import Toolbox
 
 @MainActor
-final class VaultDuplicateFinderTests: XCTestCase {
+final class VaultMatchCacheTests: XCTestCase {
     private var root: URL!
     private let reads = Locked(0)
 
@@ -20,8 +20,8 @@ final class VaultDuplicateFinderTests: XCTestCase {
         try Data(text.utf8).write(to: root.appendingPathComponent(name))
     }
 
-    private func countingFinder() -> VaultDuplicateFinder {
-        VaultDuplicateFinder { [reads] item in
+    private func countingFinder() -> VaultMatchCache {
+        VaultMatchCache { [reads] item in
             reads.update { $0 += 1 }
             return try VaultMover.sha256(item.url)
         }
@@ -88,7 +88,7 @@ final class VaultDuplicateFinderTests: XCTestCase {
     func testAPassThatWasReadingWhenTheVaultLockedGivesNoAnswerAndLeavesNothingRemembered() async throws {
         let reading = Locked(false)
         let mayFinish = DispatchSemaphore(value: 0)
-        let finder = VaultDuplicateFinder { [reads] item in
+        let finder = VaultMatchCache { [reads] item in
             reads.update { $0 += 1 }
             if !reading.value {
                 reading.set(true)
@@ -108,5 +108,58 @@ final class VaultDuplicateFinderTests: XCTestCase {
         let readsBefore = reads.value
         _ = await finder.groups(in: items, lengths: [:])
         XCTAssertEqual(reads.value - readsBefore, 3, "digests read across a lock were remembered")
+    }
+
+    func testAnAddOnlyReadsTheFilesThatCouldMatchIt() async throws {
+        let finder = countingFinder()
+        let vault = VaultLibrary.items(in: root)
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("MOVIE-BYTES".utf8).write(to: outside.appendingPathComponent("new.mp4"))
+        try Data("short".utf8).write(to: outside.appendingPathComponent("unique.mp4"))
+        let incoming = try [XCTUnwrap(VaultLibrary.item(at: outside.appendingPathComponent("new.mp4"))),
+                            XCTUnwrap(VaultLibrary.item(at: outside.appendingPathComponent("unique.mp4")))]
+
+        let groups = await finder.matches(for: incoming, in: vault, lengths: [:])
+
+        XCTAssertEqual(names(groups), [["a.mp4", "b.mp4", "new.mp4"]])
+        XCTAssertEqual(reads.value, 4, "a file of a size nothing incoming has was read")
+    }
+
+    func testASetKeptWholeIsNeverSuggestedAgainEvenAfterARename() async throws {
+        let store = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
+        defer { store.close() }
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        let found = await finder.groups(in: items, lengths: [:])
+        let pair = try XCTUnwrap(found?.first)
+
+        try store.keepTogether(try await finder.digests(of: pair.copies))
+        let old = try XCTUnwrap(items.first { $0.name == "b.mp4" })
+        let target = root.appendingPathComponent("renamed.mp4")
+        try FileManager.default.moveItem(at: old.url, to: target)
+        let renamed = try XCTUnwrap(VaultLibrary.item(at: target))
+
+        let after = await countingFinder().groups(in: items.map { $0 == old ? renamed : $0 }, lengths: [:], remembered: store)
+
+        XCTAssertEqual(names(after), [])
+        let reopened = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
+        defer { reopened.close() }
+        XCTAssertEqual(reopened.keptTogether, store.keptTogether, "the choice was not saved")
+    }
+
+    func testAKeptPairInsideABiggerSetLeavesTheSetWhole() async throws {
+        try write("MOVIE-BYTES", to: "d.mp4")
+        let store = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
+        defer { store.close() }
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        let a = try XCTUnwrap(items.first { $0.name == "a.mp4" })
+        let b = try XCTUnwrap(items.first { $0.name == "b.mp4" })
+        try store.keepTogether(try await finder.digests(of: [a, b]))
+
+        let groups = await finder.groups(in: items, lengths: [:], remembered: store)
+
+        XCTAssertEqual(names(groups), [], "same bytes have one digest, so keeping a and b whole keeps d with them too")
     }
 }

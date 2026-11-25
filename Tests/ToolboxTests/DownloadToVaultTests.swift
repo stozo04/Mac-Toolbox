@@ -15,6 +15,8 @@ private final class StandInVault: DownloadVault {
     var locksAfterMoves: Int?
     var lockCheck = VaultLockCheck.locked
     var busyFor: Set<String> = []
+    var alreadyHeld: Set<String> = []
+    private(set) var queuedChecks: [String] = []
     let root = URL(fileURLWithPath: "/stand-in-vault")
     let events: Locked<[String]>
     private var moves = 0
@@ -42,6 +44,14 @@ private final class StandInVault: DownloadVault {
         moves += 1
         if moves == locksAfterMoves { acceptsFiles = false }
         return root.appendingPathComponent("vault " + file.lastPathComponent)
+    }
+
+    func holdsExactCopy(of file: URL) async -> Bool {
+        alreadyHeld.contains(file.lastPathComponent)
+    }
+
+    func queueDuplicateCheck(of inVault: URL) async {
+        queuedChecks.append(inVault.lastPathComponent)
     }
 
     func makeSearchable(_ files: [URL], onAnswer: (Int) -> Void) async -> Int {
@@ -252,6 +262,24 @@ final class DownloadToVaultTests: XCTestCase {
         XCTAssertEqual(refused.vaultProblem, VaultMoveError.copyDiffers.localizedDescription)
         XCTAssertEqual(model.sendSummary,
                        "Added 1 to the Vault and sent 1 to Google Drive, 1 couldn't go into the Vault and weren't sent, 1 not searchable yet. The Vault is locked again.")
+    }
+
+    func testAVideoTheVaultAlreadyHoldsStaysInDownloadsIsSentAndOnlyTheOthersAreQueuedForAComparison() async throws {
+        let model = try await makeModel(links: "https://a.example.com/1 https://b.example.com/2", addToVault: true)
+        let vault = StandInVault(events: events)
+        vault.alreadyHeld = ["b.example.com.mp4"]
+
+        try await send(model, vault: vault)
+
+        XCTAssertFalse(events.value.contains("move b.example.com.mp4"), "an exact copy was moved into the vault")
+        XCTAssertEqual(events.value.last { $0.hasPrefix("drive") }, "drive b.example.com.mp4, vault a.example.com.mp4",
+                       "the copy left in Downloads was not sent")
+        XCTAssertEqual(vault.queuedChecks, ["vault a.example.com.mp4"])
+        let held = try model.items.element(at: 1)
+        XCTAssertEqual(held.state, .done(inDownloads("b.example.com.mp4")))
+        XCTAssertEqual(held.vaultProblem, DownloadVideoModel.alreadyInVault)
+        XCTAssertEqual(model.sendSummary,
+                       "Added 1 to the Vault and sent 2 to Google Drive, 1 already in the Vault, left in Downloads and sent from there. The Vault is locked again.")
     }
 
     func testAVideoInTheVaultWhoseOriginalStayedCountsAsMovedAndIsSentOnce() async throws {

@@ -51,15 +51,6 @@ final class VaultDuplicatesTests: XCTestCase {
         XCTAssertEqual(groups.map { $0.copies.map(\.name) }, [["old.mp4", "new.mp4"], ["a.jpg", "b.jpg", "c.jpg"]])
     }
 
-    func testKeepingOneLeavesTheOthersToRemove() {
-        let a = item("a.jpg", bytes: 10, added: 1)
-        let b = item("b.jpg", bytes: 10, added: 2)
-        let c = item("c.jpg", bytes: 10, added: 3)
-        let group = VaultDuplicates.Group(copies: [a, b, c])
-
-        XCTAssertEqual(VaultDuplicates.others(than: b, in: group), [a, c])
-    }
-
     func testUnreadableFilesAndEmptyFilesAreNeverGrouped() {
         let empty1 = item("e1.jpg", bytes: 0, added: 1)
         let empty2 = item("e2.jpg", bytes: 0, added: 2)
@@ -71,20 +62,19 @@ final class VaultDuplicatesTests: XCTestCase {
         XCTAssertTrue(groups.isEmpty)
     }
 
-    func testKeepingIsRefusedWhenACopyChangedOrVanished() throws {
+    func testActingIsRefusedWhenACopyChangedOrVanished() throws {
         try write("AAAA", to: "a.jpg")
         try write("AAAA", to: "b.jpg")
         let items = VaultLibrary.items(in: root)
         let group = try XCTUnwrap(VaultDuplicates.groups(in: items) { try VaultMover.sha256($0.url) }.first)
-        let keeper = try XCTUnwrap(group.copies.first)
-        XCTAssertTrue(VaultDuplicates.isStillIntact(group, keeping: keeper))
+        let first = try XCTUnwrap(group.copies.first)
+        XCTAssertTrue(VaultDuplicates.isStillIntact(group.copies))
 
-        try FileManager.default.removeItem(at: keeper.url)
-        XCTAssertFalse(VaultDuplicates.isStillIntact(group, keeping: keeper))
+        try FileManager.default.removeItem(at: first.url)
+        XCTAssertFalse(VaultDuplicates.isStillIntact(group.copies))
 
-        try write("AAAA-longer", to: keeper.name)
-        XCTAssertFalse(VaultDuplicates.isStillIntact(group, keeping: keeper))
-        XCTAssertFalse(VaultDuplicates.isStillIntact(group, keeping: item("stranger.jpg", bytes: 4, added: 0)))
+        try write("AAAA-longer", to: first.name)
+        XCTAssertFalse(VaultDuplicates.isStillIntact(group.copies))
     }
 
     func testTheVaultTrashKeepsFilesInsideAndPutsThemBack() throws {
@@ -114,33 +104,6 @@ final class VaultDuplicatesTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: trashed.path))
         XCTAssertTrue(VaultTrash.summary(in: privateFolder).isEmpty)
-    }
-
-    func testSelectExtrasKeepsTheLargestCopyOfEachSet() {
-        let small = item("small.mp4", bytes: 10, added: 1)
-        let large = item("large.mp4", bytes: 50, added: 2)
-        let alsoLarge = item("also-large.mp4", bytes: 50, added: 3)
-        let first = item("a.jpg", bytes: 4, added: 1)
-        let second = item("b.jpg", bytes: 4, added: 2)
-        let groups = [VaultDuplicates.Group(copies: [small, large, alsoLarge], match: .likely),
-                      VaultDuplicates.Group(copies: [first, second])]
-
-        let extras = VaultDuplicates.extraCopies(in: groups)
-
-        XCTAssertEqual(Set(extras.map(\.name)), ["small.mp4", "also-large.mp4", "b.jpg"])
-        XCTAssertTrue(VaultDuplicates.groupsWithEveryCopy(of: Set(extras.map(\.id)), in: groups).isEmpty)
-    }
-
-    func testChoosingEveryCopyOfASetIsCaught() {
-        let a = item("a.jpg", bytes: 4, added: 1)
-        let b = item("b.jpg", bytes: 4, added: 2)
-        let c = item("c.jpg", bytes: 8, added: 1)
-        let d = item("d.jpg", bytes: 8, added: 2)
-        let groups = [VaultDuplicates.Group(copies: [a, b]), VaultDuplicates.Group(copies: [c, d])]
-        let chosen: Set<VaultItem.ID> = [a.id, b.id, c.id]
-
-        XCTAssertEqual(VaultDuplicates.groupsWithEveryCopy(of: chosen, in: groups).map(\.id), [try XCTUnwrap(groups.first).id])
-        XCTAssertEqual(VaultDuplicates.chosenCopies(chosen, in: groups).map(\.name), ["a.jpg", "b.jpg", "c.jpg"])
     }
 
     @MainActor

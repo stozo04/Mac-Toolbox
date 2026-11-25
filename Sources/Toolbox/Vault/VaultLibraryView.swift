@@ -5,10 +5,8 @@ struct VaultLibraryView: View {
     @Environment(VaultModel.self) private var vault
     @State private var selecting = false
     @State private var confirmingDelete: Set<VaultItem.ID> = []
-    @State private var confirmingTrash: Set<VaultItem.ID> = []
     @State private var dropTargeted = false
     @State private var changingPassword = false
-    @State private var keeping: (keeper: VaultItem, group: VaultDuplicates.Group)?
     @State private var confirmingEmptyTrash = false
 
     private static let tileMinimum: CGFloat = 150
@@ -24,9 +22,12 @@ struct VaultLibraryView: View {
                 browseBar
             }
             if !vault.trash.isEmpty { trashBar }
+            if vault.isCheckingForDuplicates { checkingBar }
+            if !vault.downloadMatches.isEmpty && vault.comparison == nil { downloadMatchesBar }
             if let progress = vault.moveProgress { MoveProgressBar(progress: progress) }
             if !vault.moveFailures.isEmpty { failures }
             if let message = vault.message { banner(message) }
+            if let notice = vault.notice { noticeBar(notice) }
             content
         }
         .padding(.horizontal, 24).padding(.top, 8)
@@ -47,22 +48,6 @@ struct VaultLibraryView: View {
         } message: {
             Text("They're deleted for good, not moved to the Trash. This can't be undone.")
         }
-        .confirmationDialog(trashTitle, isPresented: trashDialogShown, titleVisibility: .visible) {
-            Button("Move to Trash", role: .destructive) {
-                let ids = confirmingTrash
-                Task { await vault.trashChosenCopies(ids) }
-            }
-        } message: {
-            Text("They go to the vault's own Trash, where they stay encrypted. You can put them back or empty it from the Duplicates view.")
-        }
-        .confirmationDialog(keepTitle, isPresented: keepDialogShown, titleVisibility: .visible) {
-            Button("Keep and Move Others to Trash", role: .destructive) {
-                guard let keeping else { return }
-                Task { await vault.keep(keeping.keeper, in: keeping.group) }
-            }
-        } message: {
-            Text("The other copies go to the vault's own Trash, where they stay encrypted. You can put them back or empty it from the Duplicates view.")
-        }
         .confirmationDialog(emptyTrashTitle, isPresented: $confirmingEmptyTrash, titleVisibility: .visible) {
             Button("Empty Trash", role: .destructive) { vault.emptyTrash() }
         } message: {
@@ -72,6 +57,9 @@ struct VaultLibraryView: View {
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
         .sheet(isPresented: detailsShown) {
             VaultDetailsSheet()
+        }
+        .sheet(isPresented: comparisonShown) {
+            if let comparison = vault.comparison { VaultComparisonView(comparison: comparison) }
         }
     }
 
@@ -84,20 +72,18 @@ struct VaultLibraryView: View {
             }
             Spacer()
             if selecting || !vault.selection.isEmpty {
-                Button(vault.mode == .duplicates ? "Select Extras" : "Select All", action: selectAll)
-                    .help(vault.mode == .duplicates ? "Select every copy except the largest one in each set" : "Select everything shown")
+                Button("Select All", action: selectAll).help("Select everything shown")
                 if !vault.selection.isEmpty {
                     Button(role: .destructive, action: removeSelection) {
-                        Label(removeLabel, systemImage: "trash")
+                        Label("Delete \(vault.selection.count)", systemImage: "trash")
                     }
-                    .disabled(vault.mode == .duplicates && vault.moveProgress != nil)
                 }
                 Button("Done") {
                     selecting = false
                     vault.selection = []
                 }
             } else {
-                Button("Select") { selecting = true }.disabled(vault.items.isEmpty)
+                Button("Select") { selecting = true }.disabled(vault.items.isEmpty || vault.mode == .duplicates)
             }
             Button(action: chooseFiles) { Label("Add", systemImage: "plus") }
                 .disabled(vault.moveProgress != nil)
@@ -183,7 +169,13 @@ struct VaultLibraryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(duplicatesSummary(groups)).font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        Text(duplicatesSummary(groups)).font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Review All") { vault.review(groups) }
+                            .disabled(vault.moveProgress != nil || vault.comparison != nil)
+                            .help("Compare every set, one at a time, and tick the copies to keep")
+                    }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 18) {
                             ForEach(groups) { duplicateGroup($0) }
@@ -206,23 +198,52 @@ struct VaultLibraryView: View {
             HStack(spacing: 8) {
                 matchBadge(group.match)
                 sectionHeader(groupTitle(group))
+                Spacer()
+                Button("Compare…") { vault.review([group]) }.controlSize(.small).padding(.top, 6)
+                    .disabled(vault.moveProgress != nil || vault.comparison != nil)
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.tileMinimum, maximum: Self.tileMaximum), spacing: Self.spacing)],
                       alignment: .leading, spacing: Self.spacing) {
                 ForEach(group.copies) { item in
                     VStack(alignment: .leading, spacing: 6) {
-                        VaultTile(item: item, selected: vault.selection.contains(item.id)).onTapGesture { tap(item) }
+                        VaultTile(item: item, selected: false).onTapGesture { vault.viewing = item.id }
                         Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.name)
                         if group.match == .likely {
                             Text(ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file))
                                 .font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                         }
-                        Button("Keep This One") { keeping = (item, group) }.controlSize(.small)
-                            .disabled(vault.moveProgress != nil)
                     }
                 }
             }
         }
+    }
+
+    private var comparisonShown: Binding<Bool> {
+        Binding(get: { vault.comparison?.group != nil }, set: { if !$0 { vault.comparison?.cancel() } })
+    }
+
+    private var checkingBar: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("Checking the new files for copies already in the vault…").font(.callout)
+            Spacer()
+        }
+        .padding(12).cardBackground(corner: 12)
+    }
+
+    private var downloadMatchesBar: some View {
+        HStack(spacing: 10) {
+            Label(downloadMatchesText, systemImage: "square.on.square").font(.callout)
+            Spacer()
+            Button("Compare…") { vault.reviewDownloads() }.disabled(vault.moveProgress != nil)
+        }
+        .padding(12).cardBackground(corner: 12)
+    }
+
+    private var downloadMatchesText: String {
+        let count = vault.downloadMatches.count
+        return count == 1 ? "A video Download Video added may already be in the vault."
+            : "\(count) videos Download Video added may already be in the vault."
     }
 
     private var detailsShown: Binding<Bool> {
@@ -236,7 +257,7 @@ struct VaultLibraryView: View {
             .background(Capsule().fill(match == .exact ? Theme.accent.opacity(0.18) : Color.orange.opacity(0.2)))
             .padding(.top, 6)
             .help(match == .exact ? "Byte-for-byte the same file"
-                  : "Same post ID or the same frames, but not the same file. Compare before keeping one.")
+                  : "Same post ID or the same frames, but not the same file. Compare them before choosing.")
     }
 
     private func groupTitle(_ group: VaultDuplicates.Group) -> String {
@@ -277,18 +298,7 @@ struct VaultLibraryView: View {
         let likely = groups.filter { $0.match == .likely }.count
         let sets = groups.count == 1 ? "1 set of duplicates" : "\(groups.count) sets of duplicates"
         let detail = likely == 0 ? "" : " (\(likely) likely, not byte-identical)"
-        return "\(sets)\(detail), \(extra) in extra copies. Keep one copy of a set, or select copies and move them to the vault's Trash."
-    }
-
-    private var keepTitle: String {
-        guard let keeping else { return "" }
-        let others = keeping.group.copies.count - 1
-        return others == 1 ? "Keep “\(keeping.keeper.name)” and move the other copy to the Trash?"
-            : "Keep “\(keeping.keeper.name)” and move the other \(others) copies to the Trash?"
-    }
-
-    private var keepDialogShown: Binding<Bool> {
-        Binding(get: { keeping != nil }, set: { if !$0 { keeping = nil } })
+        return "\(sets)\(detail), \(extra) in extra copies. Compare a set to choose which copies to keep."
     }
 
     private func tiles(_ items: [VaultItem]) -> some View {
@@ -347,45 +357,29 @@ struct VaultLibraryView: View {
         .padding(12).cardBackground(corner: 12)
     }
 
+    private func noticeBar(_ notice: String) -> some View {
+        HStack {
+            Label(notice, systemImage: "checkmark.circle").font(.callout)
+            Spacer()
+            Button { vault.notice = nil } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+        }
+        .padding(12).cardBackground(corner: 12)
+    }
+
     private var summary: String { vault.filter.summary(of: vault.items) }
 
     private var deleteTitle: String {
         confirmingDelete.count == 1 ? "Delete 1 item?" : "Delete \(confirmingDelete.count) items?"
     }
 
-    private var removeLabel: String {
-        vault.mode == .duplicates ? "Move \(vault.selection.count) to Trash" : "Delete \(vault.selection.count)"
-    }
-
-    private var trashTitle: String {
-        confirmingTrash.count == 1 ? "Move 1 copy to the vault's Trash?" : "Move \(confirmingTrash.count) copies to the vault's Trash?"
-    }
-
-    private var trashDialogShown: Binding<Bool> {
-        Binding(get: { !confirmingTrash.isEmpty }, set: { if !$0 { confirmingTrash = [] } })
-    }
-
     private func removeSelection() {
-        guard !vault.selection.isEmpty else { return }
-        guard vault.mode == .duplicates else {
-            confirmingDelete = vault.selection
-            return
-        }
-        guard let groups = vault.visibleDuplicateGroups,
-              VaultDuplicates.groupsWithEveryCopy(of: vault.selection, in: groups).isEmpty else {
-            vault.message = "Leave at least one copy of each set unselected."
-            return
-        }
-        confirmingTrash = vault.selection
+        guard !vault.selection.isEmpty, vault.mode == .library else { return }
+        confirmingDelete = vault.selection
     }
 
     private func selectAll() {
         selecting = true
-        if vault.mode == .duplicates {
-            vault.chooseExtraCopies()
-        } else {
-            vault.selection = Set(vault.displayedItems.map(\.id))
-        }
+        vault.selection = Set(vault.displayedItems.map(\.id))
     }
 
     private var deleteDialogShown: Binding<Bool> {

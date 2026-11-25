@@ -1,5 +1,4 @@
 import Foundation
-import ImageIO
 import UniformTypeIdentifiers
 
 enum VaultRenameError: LocalizedError, Equatable {
@@ -79,46 +78,9 @@ struct VaultFileDetails: Equatable {
     var lines: [Line]
 
     static func load(_ item: VaultItem, playable: URL) async -> VaultFileDetails {
-        var lines = [Line(label: "Kind", value: kindDescription(item)),
-                     Line(label: "Size", value: ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)),
-                     Line(label: "Added to vault", value: item.added.formatted(date: .abbreviated, time: .shortened))]
-        if let created = (try? item.url.resourceValues(forKeys: [.creationDateKey]))?.creationDate {
-            lines.append(Line(label: "File created", value: created.formatted(date: .abbreviated, time: .shortened)))
-        }
-        switch item.kind {
-        case .video: lines += await videoLines(item.url, playable: playable)
-        case .image: lines += imageLines(item.url)
-        }
-        return VaultFileDetails(lines: lines)
-    }
-
-    static func videoLines(_ url: URL, playable: URL) async -> [Line] {
-        guard let report = try? await MediaInspector.inspect(url) else { return [Line(label: "Video", value: "Can't be read")] }
-        var lines = [Line(label: "Length", value: VaultTime.label(report.duration))]
-        if let video = report.videoTracks.first {
-            lines.append(Line(label: "Resolution", value: "\(video.width) × \(video.height)"))
-            if let fps = video.frameRate { lines.append(Line(label: "Frame rate", value: String(format: "%.2f fps", fps))) }
-            lines.append(Line(label: "Video codec", value: video.codec))
-        }
-        if let bitrate = report.overallBitrate { lines.append(Line(label: "Bitrate", value: MediaFormat.bitrate(bitrate))) }
-        lines.append(Line(label: "Sound", value: await soundDescription(report, original: url, playable: playable)))
-        return lines
-    }
-
-    static func soundDescription(_ report: MediaReport, original: URL, playable: URL) async -> String {
-        if let audio = report.audioTracks.first { return audio.codec }
-        guard playable != original, let copy = try? await MediaInspector.inspect(playable), let audio = copy.audioTracks.first else {
-            return "No sound"
-        }
-        return "\(audio.codec), played from a lossless copy"
-    }
-
-    static func imageLines(_ url: URL) -> [Line] {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return [Line(label: "Image", value: "Can't be read")] }
-        return [Line(label: "Dimensions", value: "\(width) × \(height)")]
+        let quality = await VaultQuality.read(item, inVault: true, playable: playable)
+        let kind = Line(label: "Kind", value: kindDescription(item))
+        return VaultFileDetails(lines: [kind] + quality.lines.map { Line(label: $0.label, value: $0.value) })
     }
 
     private static func kindDescription(_ item: VaultItem) -> String {
