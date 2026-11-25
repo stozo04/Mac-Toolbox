@@ -11,7 +11,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/mac-check.sh [--report] [--full]
 
-Runs every check a change needs on this Mac: SwiftLint (errors fail, swift-format only reports),
+Runs every check a change needs on this Mac: SwiftLint (errors fail),
 swift build --build-tests and swift test, then the Toolbox.app and DMG build (scripts/make-app.sh).
 
   --report  also mark the commit on GitHub with the "Mac checks" status that main requires. Needs gh signed in,
