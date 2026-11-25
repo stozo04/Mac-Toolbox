@@ -1,4 +1,6 @@
 import AVFoundation
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 @testable import Toolbox
 
@@ -92,5 +94,21 @@ final class VaultQualityTests: XCTestCase {
 
     private func video(pixels: Int, bitrate: Double, fps: Double) -> VaultQuality {
         VaultQuality(lines: [], pixels: pixels, bitrate: bitrate, frameRate: fps)
+    }
+
+    func testARotatedPhotoIsShownUprightLikeItsDimensionsRead() async throws {
+        let url = root.appendingPathComponent("rotated.jpg")
+        let context = try XCTUnwrap(CGContext(data: nil, width: 40, height: 30, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()),
+                                   [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let shown = try XCTUnwrap(VaultZoomGroup.Pane.uprightImage(at: url))
+        let quality = try await read(url)
+
+        XCTAssertEqual([shown.width, shown.height], [30, 40])
+        XCTAssertEqual(quality.line("Dimensions")?.value, "30 × 40 · 30p")
     }
 }

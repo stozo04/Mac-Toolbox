@@ -35,6 +35,19 @@ final class VaultZoomGroup {
 
     /// One photo, decoded with ImageIO straight from its file: no preview caches are written outside the vault.
     struct Pane: View {
+        /// At full size and turned upright the way its EXIF orientation says, as the readout's dimensions are.
+        nonisolated static func uprightImage(at url: URL) -> CGImage? {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                            kCGImageSourceCreateThumbnailWithTransform: true,
+                                            kCGImageSourceShouldCacheImmediately: true,
+                                            kCGImageSourceThumbnailMaxPixelSize: max(width, height)]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        }
+
         let url: URL
         let zoom: VaultZoomGroup
         @State private var image: CGImage?
@@ -60,11 +73,7 @@ final class VaultZoomGroup {
             }
             .help("Click and hold to zoom every photo to this spot")
             .task(id: url) {
-                let decoded = await Task.detached(priority: .userInitiated) { [url] in
-                    CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { source in
-                        CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
-                    }
-                }.value
+                let decoded = await Task.detached(priority: .userInitiated) { [url] in Self.uprightImage(at: url) }.value
                 image = decoded
                 if let decoded { zoom.note(pixelWidth: CGFloat(decoded.width)) }
             }

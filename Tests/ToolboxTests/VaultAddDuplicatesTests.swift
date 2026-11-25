@@ -257,6 +257,28 @@ final class VaultAddDuplicatesTests: XCTestCase {
         XCTAssertTrue(model.trash.isEmpty)
     }
 
+    func testADuplicatesReviewBlocksAddsAndALockWaitsForItAndEndsIt() async throws {
+        let model = try await openVault(lockedByTest: true)
+        let original = try VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("a.png"))
+        try FileManager.default.copyItem(at: original, to: model.root.appendingPathComponent("a.png"))
+        try FileManager.default.copyItem(at: original, to: model.root.appendingPathComponent("a copy.png"))
+        model.reload()
+        model.mode = .duplicates
+        try await waitUntil(timeout: .seconds(30), "the set is found") { model.duplicateGroups?.count == 1 }
+        model.review(try XCTUnwrap(model.duplicateGroups))
+        try await waitUntil(timeout: .seconds(30), "the set is shown") { model.comparison?.group != nil }
+        let other = try VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("other.png"))
+
+        model.add([other])
+
+        XCTAssertEqual(model.message, VaultMoveError.busy.localizedDescription)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+        await model.lock()
+        XCTAssertNil(model.comparison)
+        XCTAssertNil(model.notice)
+        XCTAssertEqual(model.phase, .locked)
+    }
+
     private func openVault(lockedByTest: Bool = false) async throws -> VaultModel {
         let model = VaultModel(location: VaultLocation(folder: dir.appendingPathComponent("vault")), watchesSystem: false)
         await model.create(password: "dupes-pass", confirmation: "dupes-pass")

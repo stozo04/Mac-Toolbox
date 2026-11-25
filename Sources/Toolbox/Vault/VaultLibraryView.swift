@@ -84,7 +84,7 @@ struct VaultLibraryView: View {
                 Button("Select") { selecting = true }.disabled(vault.items.isEmpty || vault.mode == .duplicates)
             }
             Button(action: chooseFiles) { Label("Add", systemImage: "plus") }
-                .disabled(vault.moveProgress != nil)
+                .disabled(vault.moveProgress != nil || vault.comparison != nil)
             Menu {
                 Button("Change password…") { changingPassword = true }
             } label: { Image(systemName: "ellipsis.circle") }

@@ -22,13 +22,21 @@ final class VaultMatchCache {
         return await find(in: snapshot, touching: nil, lookCandidates: candidates, lengths: lengths, remembered: remembered)
     }
 
-    /// The sets that include one of `incoming`: each with every vault file and every other incoming file it matches.
+    /// The sets that include one of `incoming`: each with every file the Duplicates view would put in the same set, so
+    /// also a vault copy that matches only through another vault copy. Each pass reads around the files found so far,
+    /// until no new file joins.
     func matches(for incoming: [VaultItem], in vault: [VaultItem], lengths: [VaultItem: Double],
                  remembered: VaultDistinctPairs? = nil) async -> [VaultDuplicates.Group]? {
         let everything = vault + incoming
-        let anchors = Set(incoming)
-        let candidates = VaultDuplicates.lookCandidates(in: everything, durations: lengths, near: anchors)
-        return await find(in: everything, touching: anchors, lookCandidates: candidates, lengths: lengths, remembered: remembered)
+        var reached = Set(incoming)
+        while true {
+            let candidates = VaultDuplicates.lookCandidates(in: everything, durations: lengths, near: reached)
+            guard let groups = await find(in: everything, touching: reached, lookCandidates: candidates, lengths: lengths,
+                                          remembered: remembered) else { return nil }
+            let grown = reached.union(groups.flatMap(\.copies))
+            if grown == reached { return groups.filter { $0.copies.contains(where: incoming.contains) } }
+            reached = grown
+        }
     }
 
     func digests(of items: [VaultItem]) async throws -> [Data] {

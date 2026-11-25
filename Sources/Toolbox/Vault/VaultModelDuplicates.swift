@@ -69,15 +69,18 @@ extension VaultModel {
         }
     }
 
+    /// Runs as the vault's move (`moves.task`), so a lock or quit waits for a choice being carried out before it ejects,
+    /// and no add starts while the comparison is on screen.
     private func walk(_ groups: [VaultComparison.Group], origin: VaultComparison.Origin,
                       whenDone: @escaping @MainActor (_ carriedOut: Set<Int>) async -> Void = { _ in }) {
         let comparison = VaultComparison(origin: origin) { [weak self] in await self?.playableURL(for: $0) ?? $0.url }
         self.comparison = comparison
         let generation = lockCount
-        Task {
+        moves.task = Task {
             defer {
                 comparison.end()
                 if self.comparison === comparison { self.comparison = nil }
+                if lockCount == generation { moves.end() }
             }
             var trashed = 0
             var carriedOut = Set<Int>()
@@ -94,7 +97,8 @@ extension VaultModel {
                 trashed += outcome.trashed
                 if outcome.done { carriedOut.insert(number) }
             }
-            if lockCount == generation { await whenDone(carriedOut) }
+            guard lockCount == generation else { return }
+            await whenDone(carriedOut)
             if trashed > 0 { notice = trashed == 1 ? "1 copy moved to the vault's Trash." : "\(trashed) copies moved to the vault's Trash." }
             if mode == .duplicates { findDuplicates() }
         }

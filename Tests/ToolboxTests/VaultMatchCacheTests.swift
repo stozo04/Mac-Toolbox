@@ -178,4 +178,23 @@ final class VaultMatchCacheTests: XCTestCase {
         XCTAssertEqual(names(groups), [], "a stale digest still called the changed file a copy")
         XCTAssertGreaterThan(reads.value, readsBefore)
     }
+
+    func testAnAddFindsAVaultCopyThatMatchesOnlyThroughAnotherVaultCopy() async throws {
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let id = "7468015357786148128"
+        try Data("one".utf8).write(to: root.appendingPathComponent("first [\(id)].mp4"))
+        try Data("three".utf8).write(to: root.appendingPathComponent("third [\(id)].mp4"))
+        try Data("new-one".utf8).write(to: outside.appendingPathComponent("new [\(id)].mp4"))
+        let vault = VaultLibrary.items(in: root).filter { $0.name.contains(id) && !$0.url.path.contains("/outside/") }
+        let incoming = try XCTUnwrap(VaultLibrary.item(at: outside.appendingPathComponent("new [\(id)].mp4")))
+        let first = try XCTUnwrap(vault.first { $0.name.hasPrefix("first") })
+        let third = try XCTUnwrap(vault.first { $0.name.hasPrefix("third") })
+        let lengths = [incoming: 10.0, first: 11.5, third: 13.0]
+
+        let groups = await countingFinder().matches(for: [incoming], in: vault, lengths: lengths)
+
+        XCTAssertEqual(names(groups), [["first [\(id)].mp4", "new [\(id)].mp4", "third [\(id)].mp4"]],
+                       "the vault copy 3 s from the new one is the same set through the copy between them")
+    }
 }
