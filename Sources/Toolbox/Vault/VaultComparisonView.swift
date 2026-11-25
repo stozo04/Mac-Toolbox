@@ -28,14 +28,16 @@ struct VaultComparisonView: View {
                         .padding(.bottom, 16)
                     }
                     .scrollIndicators(.visible)
+                    .defaultScrollAnchor(.topLeading)
                     .onChange(of: comparison.focus) { withAnimation { scroller.scrollTo(comparison.focus) } }
                 }
+                .id(comparison.counter.current)
                 if group.kind == .video { VaultPlaybackBar(playback: comparison.playback, selected: comparison.focus) }
                 footer(group)
             }
         }
         .padding(20)
-        .frame(minWidth: 760, idealWidth: 1040, minHeight: 600, idealHeight: 760)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .focusable()
         .focused($focused)
         .focusEffectDisabled()

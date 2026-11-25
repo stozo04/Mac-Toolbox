@@ -39,6 +39,7 @@ struct VaultLibraryView: View {
             }
         }
         .overlay { if vault.viewing != nil { VaultViewer() } }
+        .overlay { comparisonPanel }
         .onDeleteCommand(perform: removeSelection)
         .confirmationDialog(deleteTitle, isPresented: deleteDialogShown, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -57,9 +58,6 @@ struct VaultLibraryView: View {
         .sheet(isPresented: $changingPassword) { ChangePasswordSheet() }
         .sheet(isPresented: detailsShown) {
             VaultDetailsSheet()
-        }
-        .sheet(isPresented: comparisonShown) {
-            if let comparison = vault.comparison { VaultComparisonView(comparison: comparison) }
         }
     }
 
@@ -218,8 +216,15 @@ struct VaultLibraryView: View {
         }
     }
 
-    private var comparisonShown: Binding<Bool> {
-        Binding(get: { vault.comparison?.group != nil }, set: { if !$0 { vault.comparison?.cancel() } })
+    /// Inside the window, not a sheet: macOS won't quit an app while a sheet is open, and quitting must lock the vault.
+    @ViewBuilder private var comparisonPanel: some View {
+        if let comparison = vault.comparison, comparison.group != nil {
+            VaultComparisonView(comparison: comparison)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: 14))
+                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.stroke) }
+                .padding(.bottom, 8)
+                .background(Theme.background)
+        }
     }
 
     private var checkingBar: some View {
