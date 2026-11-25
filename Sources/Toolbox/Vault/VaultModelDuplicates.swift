@@ -53,10 +53,10 @@ extension VaultModel {
         guard phase == .open, !moves.isRunning, comparison == nil, !downloadMatches.isEmpty else { return }
         let matches = downloadMatches
         downloadMatches = []
-        walk(matches.map(\.group), origin: .downloads) { [weak self] finished in
+        walk(matches.map(\.group), origin: .downloads) { [weak self] carriedOut in
             guard let self else { return }
-            finishReviews(matches.prefix(finished).map(\.digest))
-            downloadMatches = Array(matches.dropFirst(finished))
+            finishReviews(carriedOut.map { matches[$0].digest })
+            downloadMatches = matches.indices.filter { !carriedOut.contains($0) }.map { matches[$0] }
         }
     }
 
@@ -70,7 +70,7 @@ extension VaultModel {
     }
 
     private func walk(_ groups: [VaultComparison.Group], origin: VaultComparison.Origin,
-                      whenDone: @escaping @MainActor (_ finished: Int) async -> Void = { _ in }) {
+                      whenDone: @escaping @MainActor (_ carriedOut: Set<Int>) async -> Void = { _ in }) {
         let comparison = VaultComparison(origin: origin) { [weak self] in await self?.playableURL(for: $0) ?? $0.url }
         self.comparison = comparison
         let generation = lockCount
@@ -80,35 +80,40 @@ extension VaultModel {
                 if self.comparison === comparison { self.comparison = nil }
             }
             var trashed = 0
-            var finished = 0
+            var carriedOut = Set<Int>()
             for (number, group) in groups.enumerated() {
                 let present = group.copies.filter { FileManager.default.fileExists(atPath: $0.item.url.path) }
-                if present.count > 1 {
-                    let current = VaultComparison.Group(copies: present, match: group.match)
-                    guard case .keep(let kept) = await comparison.choose(current, number: number + 1, of: groups.count),
-                          lockCount == generation, phase == .open else { break }
-                    trashed += await carryOut(kept, on: current)
+                guard present.count > 1 else {
+                    carriedOut.insert(number)
+                    continue
                 }
-                finished += 1
+                let current = VaultComparison.Group(copies: present, match: group.match)
+                guard case .keep(let kept) = await comparison.choose(current, number: number + 1, of: groups.count),
+                      lockCount == generation, phase == .open else { break }
+                let outcome = await carryOut(kept, on: current)
+                trashed += outcome.trashed
+                if outcome.done { carriedOut.insert(number) }
             }
-            if lockCount == generation { await whenDone(finished) }
+            if lockCount == generation { await whenDone(carriedOut) }
             if trashed > 0 { notice = trashed == 1 ? "1 copy moved to the vault's Trash." : "\(trashed) copies moved to the vault's Trash." }
             if mode == .duplicates { findDuplicates() }
         }
     }
 
-    /// Returns how many copies went to the Trash.
-    private func carryOut(_ kept: Set<VaultItem.ID>, on group: VaultComparison.Group) async -> Int {
+    /// How many copies went to the Trash, and whether the whole choice was carried out.
+    private func carryOut(_ kept: Set<VaultItem.ID>, on group: VaultComparison.Group) async -> (trashed: Int, done: Bool) {
         let copies = group.copies.map(\.item)
         guard VaultDuplicates.isStillIntact(copies) else {
             message = "These copies changed since they were compared. Look again before choosing."
-            return 0
+            return (0, false)
         }
         if kept.count == copies.count {
             await rememberKeptTogether(copies)
-            return 0
+            return (0, true)
         }
-        guard copies.contains(where: { kept.contains($0.id) }) else { return 0 }
-        return await moveToTrash(copies.filter { !kept.contains($0.id) }).count
+        guard copies.contains(where: { kept.contains($0.id) }) else { return (0, false) }
+        let unwanted = copies.filter { !kept.contains($0.id) }
+        let trashed = await moveToTrash(unwanted).count
+        return (trashed, trashed == unwanted.count)
     }
 }

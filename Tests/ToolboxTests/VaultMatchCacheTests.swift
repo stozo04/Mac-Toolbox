@@ -163,4 +163,19 @@ final class VaultMatchCacheTests: XCTestCase {
 
         XCTAssertEqual(names(groups), [["a.mp4", "b.mp4", "d.mp4"]], "a third identical copy was hidden by a choice about two")
     }
+
+    func testAFileChangedInPlaceIsReadAgainEvenAtTheSameSize() async throws {
+        let finder = countingFinder()
+        let items = VaultLibrary.items(in: root)
+        _ = await finder.groups(in: items, lengths: [:])
+        let b = root.appendingPathComponent("b.mp4")
+        try Data("MOVIE-BYTEZ".utf8).write(to: b)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: b.path)
+        let readsBefore = reads.value
+
+        let groups = await finder.groups(in: items, lengths: [:])
+
+        XCTAssertEqual(names(groups), [], "a stale digest still called the changed file a copy")
+        XCTAssertGreaterThan(reads.value, readsBefore)
+    }
 }

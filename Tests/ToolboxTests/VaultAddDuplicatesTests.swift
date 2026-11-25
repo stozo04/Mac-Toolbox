@@ -232,6 +232,31 @@ final class VaultAddDuplicatesTests: XCTestCase {
         XCTAssertEqual(model.downloadMatches.first?.group.copies.first { $0.place == .downloaded }?.item.name, "beach.png")
     }
 
+    func testADownloadChoiceThatCouldNotBeCarriedOutStaysQueued() async throws {
+        let model = try await openVault()
+        try await addAndSettle(model, [VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("a.png"))])
+        let downloaded = model.root.appendingPathComponent("downloaded.png")
+        try FileManager.default.copyItem(at: model.root.appendingPathComponent("a.png"), to: downloaded)
+        model.reload()
+        await model.queueDuplicateCheck(of: downloaded)
+        await model.lock()
+        await model.unlock(password: "dupes-pass")
+        model.finishOpening()
+        try await waitUntil(timeout: .seconds(30), "the download was checked") { model.downloadMatches.count == 1 }
+
+        model.reviewDownloads()
+        try await waitUntil(timeout: .seconds(30), "the download is shown") { model.comparison?.group != nil }
+        try Data("changed meanwhile".utf8).write(to: downloaded)
+        let review = try XCTUnwrap(model.comparison)
+        review.toggle(try XCTUnwrap(review.group?.copies.first).id)
+        review.confirm()
+        try await waitUntil(timeout: .seconds(30), "the comparison closed") { model.comparison == nil }
+
+        XCTAssertEqual(model.downloadMatches.count, 1, "a choice that wasn't carried out was dropped")
+        XCTAssertEqual(try XCTUnwrap(model.duplicatesStore).pendingReviews().count, 1)
+        XCTAssertTrue(model.trash.isEmpty)
+    }
+
     private func openVault(lockedByTest: Bool = false) async throws -> VaultModel {
         let model = VaultModel(location: VaultLocation(folder: dir.appendingPathComponent("vault")), watchesSystem: false)
         await model.create(password: "dupes-pass", confirmation: "dupes-pass")

@@ -1,11 +1,13 @@
 import Foundation
 
 /// Finds duplicates, in the whole vault or for files being added to it. It remembers each file's digest and look while
-/// the vault is open, so a second pass, or the Duplicates view after an add, reads only what is new.
+/// the vault is open, so a second pass, or the Duplicates view after an add, reads only what is new. A file changed since
+/// (same size, new modification date) is read again: a stale digest could call two different files exact copies.
 @MainActor
 final class VaultMatchCache {
     private var digests: [VaultItem: Data] = [:]
     private var looks: [VaultItem: VaultLook] = [:]
+    private var stamps: [VaultItem: Date] = [:]
     private var forgets = 0
     private let digest: @Sendable (VaultItem) throws -> Data
 
@@ -30,6 +32,7 @@ final class VaultMatchCache {
     }
 
     func digests(of items: [VaultItem]) async throws -> [Data] {
+        forgetChanged(items)
         var found: [Data] = []
         for item in items {
             if let known = digests[item] {
@@ -39,6 +42,7 @@ final class VaultMatchCache {
             let read = digest
             let value = try await Task.detached(priority: .userInitiated) { try read(item) }.value
             digests[item] = value
+            stamp(item)
             found.append(value)
         }
         return found
@@ -47,23 +51,27 @@ final class VaultMatchCache {
     func carry(from old: VaultItem, to new: VaultItem) {
         if let digest = digests.removeValue(forKey: old) { digests[new] = digest }
         if let look = looks.removeValue(forKey: old) { looks[new] = look }
+        if let date = stamps.removeValue(forKey: old) { stamps[new] = date }
     }
 
     func forget() {
         forgets += 1
         digests = [:]
         looks = [:]
+        stamps = [:]
     }
 
     /// `lookCandidates` nil: looks are not compared at all.
     private func find(in items: [VaultItem], touching: Set<VaultItem>?, lookCandidates: [VaultItem]?,
                       lengths: [VaultItem: Double], remembered: VaultDistinctPairs?) async -> [VaultDuplicates.Group]? {
+        forgetChanged(items)
         let forgetsBefore = forgets
         let present = Set(items)
         let unlooked = (lookCandidates ?? []).filter { looks[$0] == nil }
         let newLooks = await VaultLookReader.looks(of: unlooked, durations: lengths)
         guard !Task.isCancelled, forgets == forgetsBefore else { return nil }
         looks.merge(newLooks) { _, new in new }
+        newLooks.keys.forEach(stamp)
         let knownLooks = lookCandidates == nil ? [:] : looks.filter { present.contains($0.key) }
         let known = digests.filter { present.contains($0.key) }
         let kept = remembered?.remembered ?? VaultDistinctPairs.Remembered()
@@ -89,8 +97,30 @@ final class VaultMatchCache {
             }.value
         } onCancel: { stop.set() }
         guard forgets == forgetsBefore else { return nil }
-        digests.merge(found) { _, new in new }
+        for (item, digest) in found where digests[item] != digest {
+            digests[item] = digest
+            stamp(item)
+        }
         return Task.isCancelled ? nil : groups
+    }
+}
+
+extension VaultMatchCache {
+    private func forgetChanged(_ items: [VaultItem]) {
+        for item in items where stamps[item] != nil && stamps[item] != Self.modified(item) {
+            digests[item] = nil
+            looks[item] = nil
+            stamps[item] = nil
+        }
+    }
+
+    private func stamp(_ item: VaultItem) {
+        stamps[item] = Self.modified(item)
+    }
+
+    private static func modified(_ item: VaultItem) -> Date? {
+        // A URL caches the values it read, so a fresh one is asked: the same instance would report the old date.
+        (try? URL(fileURLWithPath: item.url.path).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
     }
 }
 
