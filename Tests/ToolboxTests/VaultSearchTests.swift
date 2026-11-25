@@ -108,7 +108,7 @@ final class VaultSearchTests: XCTestCase {
     }
 
     func testAnIndexOpenedBeforeTheVaultWasEjectedIsNotUsedAgain() async throws {
-        let door = try await makeOpenDoor(in: root.appendingPathComponent("ejected"))
+        let door = try await makeOpenDoor(in: root.appendingPathComponent("ejected"), bounds: VaultDoor.Bounds(lockStep: Self.roomForABusyMac))
         let located = EmbeddingModel.Located(text: root.appendingPathComponent("t.gguf"), media: root.appendingPathComponent("m.gguf"))
         let engine = VaultSearchEngine(root: door.disk.location.mountPoint, model: located)
         defer { engine.close() }
