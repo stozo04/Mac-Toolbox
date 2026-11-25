@@ -49,7 +49,13 @@ extension VaultModel {
         let downloaded = groups.flatMap(\.copies).filter { $0.place == .downloaded }.map(\.item)
         Task {
             let digests = (try? await matchCache.digests(of: downloaded)) ?? []
-            walk(groups, origin: .downloads) { [weak self] in self?.finishReviews(digests) }
+            let digestOf = Dictionary(zip(downloaded.map(\.id), digests)) { first, _ in first }
+            walk(groups, origin: .downloads) { [weak self] finished in
+                guard let self else { return }
+                let done = groups.prefix(finished).flatMap(\.copies).filter { $0.place == .downloaded }.compactMap { digestOf[$0.id] }
+                finishReviews(done)
+                downloadMatches = Array(groups.dropFirst(finished))
+            }
         }
     }
 
@@ -63,7 +69,7 @@ extension VaultModel {
     }
 
     private func walk(_ groups: [VaultComparison.Group], origin: VaultComparison.Origin,
-                      whenDone: @escaping @MainActor () async -> Void = {}) {
+                      whenDone: @escaping @MainActor (_ finished: Int) async -> Void = { _ in }) {
         let comparison = VaultComparison(origin: origin) { [weak self] in await self?.playableURL(for: $0) ?? $0.url }
         self.comparison = comparison
         let generation = lockCount
@@ -73,15 +79,18 @@ extension VaultModel {
                 if self.comparison === comparison { self.comparison = nil }
             }
             var trashed = 0
+            var finished = 0
             for (number, group) in groups.enumerated() {
                 let present = group.copies.filter { FileManager.default.fileExists(atPath: $0.item.url.path) }
-                guard present.count > 1 else { continue }
-                let current = VaultComparison.Group(copies: present, match: group.match)
-                guard case .keep(let kept) = await comparison.choose(current, number: number + 1, of: groups.count),
-                      lockCount == generation, phase == .open else { break }
-                trashed += await carryOut(kept, on: current)
+                if present.count > 1 {
+                    let current = VaultComparison.Group(copies: present, match: group.match)
+                    guard case .keep(let kept) = await comparison.choose(current, number: number + 1, of: groups.count),
+                          lockCount == generation, phase == .open else { break }
+                    trashed += await carryOut(kept, on: current)
+                }
+                finished += 1
             }
-            if lockCount == generation { await whenDone() }
+            if lockCount == generation { await whenDone(finished) }
             if trashed > 0 { notice = trashed == 1 ? "1 copy moved to the vault's Trash." : "\(trashed) copies moved to the vault's Trash." }
             if mode == .duplicates { findDuplicates() }
         }

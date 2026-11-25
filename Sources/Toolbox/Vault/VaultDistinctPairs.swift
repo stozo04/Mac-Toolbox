@@ -8,12 +8,13 @@ struct VaultDuplicatesStoreError: LocalizedError {
 
 /// What the vault remembers about duplicates, in `.toolbox/duplicates.sqlite` inside the encrypted image: the sets
 /// kept whole on purpose, so they are never suggested again, and the downloads to compare the next time the vault opens.
-/// Files are known by their SHA-256, so a rename or a move keeps what was decided.
+/// Files are known by their SHA-256, so a rename or a move keeps what was decided. Byte-identical copies share one
+/// digest, so for them the store keeps how many were kept: one more copy of the same bytes is suggested again.
 final class VaultDistinctPairs {
     static let fileName = "duplicates.sqlite"
 
     private let database: SQLiteDatabase
-    private(set) var keptTogether: Set<Key>
+    private(set) var remembered: Remembered
 
     struct Key: Hashable {
         let first: String
@@ -31,6 +32,21 @@ final class VaultDistinctPairs {
         }
     }
 
+    /// What was kept whole, as a value the matcher can take off the main actor.
+    struct Remembered: Equatable, Sendable {
+        var pairs: Set<Key> = []
+        /// Digest in hex → how many identical copies were kept together.
+        var copies: [String: Int] = [:]
+
+        var isEmpty: Bool { pairs.isEmpty && copies.isEmpty }
+
+        /// `count` is how many files with `a`'s bytes are being compared now.
+        func hides(_ a: Data, _ b: Data, count: Int) -> Bool {
+            guard a == b else { return pairs.contains(Key(a, b)) }
+            return (copies[a.hexString] ?? 0) >= count
+        }
+    }
+
     struct PendingReview: Equatable {
         let digest: Data
         let path: String
@@ -42,24 +58,26 @@ final class VaultDistinctPairs {
         try database.execute("""
             CREATE TABLE IF NOT EXISTS distinct_pairs(first TEXT NOT NULL, second TEXT NOT NULL, decided REAL NOT NULL,
                                                       PRIMARY KEY(first, second));
+            CREATE TABLE IF NOT EXISTS kept_copies(digest TEXT PRIMARY KEY, copies INTEGER NOT NULL, decided REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS pending_reviews(digest TEXT PRIMARY KEY, path TEXT NOT NULL, queued REAL NOT NULL);
             """)
-        var found = Set<Key>()
+        var found = Remembered()
         try database.query("SELECT first, second FROM distinct_pairs") { row in
-            found.insert(Key(first: SQLiteDatabase.text(row, 0), second: SQLiteDatabase.text(row, 1)))
+            found.pairs.insert(Key(first: SQLiteDatabase.text(row, 0), second: SQLiteDatabase.text(row, 1)))
         }
-        keptTogether = found
+        try database.query("SELECT digest, copies FROM kept_copies") { row in
+            found.copies[SQLiteDatabase.text(row, 0)] = Int(sqlite3_column_int64(row, 1))
+        }
+        remembered = found
     }
 
     func close() { database.close() }
 
-    func isKeptTogether(_ a: Data, _ b: Data) -> Bool {
-        keptTogether.contains(Key(a, b))
-    }
-
-    /// Every pair among `digests` is remembered, so a set kept whole is never suggested again.
+    /// Remembers a set kept whole: every pair of different files, and for identical files how many were kept.
     func keepTogether(_ digests: [Data]) throws {
-        let keys = digests.indices.flatMap { i in digests[(i + 1)...].map { Key(digests[i], $0) } }
+        let keys = Set(digests.indices.flatMap { i in digests[(i + 1)...].map { (digests[i], $0) } }
+            .filter { $0.0 != $0.1 }.map { Key($0.0, $0.1) })
+        let counts = Dictionary(grouping: digests.map(\.hexString), by: { $0 }).mapValues(\.count).filter { $0.value > 1 }
         let now = Date().timeIntervalSince1970
         try database.inTransaction {
             for key in keys {
@@ -69,8 +87,19 @@ final class VaultDistinctPairs {
                     sqlite3_bind_double(statement, 3, now)
                 }
             }
+            for (digest, copies) in counts {
+                try database.run("""
+                    INSERT INTO kept_copies(digest, copies, decided) VALUES (?, ?, ?)
+                    ON CONFLICT(digest) DO UPDATE SET copies = max(copies, excluded.copies), decided = excluded.decided
+                    """) { statement in
+                    SQLiteDatabase.bind(statement, 1, digest)
+                    sqlite3_bind_int64(statement, 2, Int64(copies))
+                    sqlite3_bind_double(statement, 3, now)
+                }
+            }
         }
-        keptTogether.formUnion(keys)
+        remembered.pairs.formUnion(keys)
+        remembered.copies.merge(counts) { max($0, $1) }
     }
 
     func queueReview(digest: Data, path: String) throws {

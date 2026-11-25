@@ -145,21 +145,22 @@ final class VaultMatchCacheTests: XCTestCase {
         XCTAssertEqual(names(after), [])
         let reopened = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
         defer { reopened.close() }
-        XCTAssertEqual(reopened.keptTogether, store.keptTogether, "the choice was not saved")
+        XCTAssertEqual(reopened.remembered, store.remembered, "the choice was not saved")
     }
 
-    func testAKeptPairInsideABiggerSetLeavesTheSetWhole() async throws {
-        try write("MOVIE-BYTES", to: "d.mp4")
+    func testOneMoreIdenticalCopyThanWasKeptIsSuggestedAgain() async throws {
         let store = try VaultDistinctPairs(privateFolder: root.appendingPathComponent(".toolbox"))
         defer { store.close() }
         let finder = countingFinder()
         let items = VaultLibrary.items(in: root)
-        let a = try XCTUnwrap(items.first { $0.name == "a.mp4" })
-        let b = try XCTUnwrap(items.first { $0.name == "b.mp4" })
-        try store.keepTogether(try await finder.digests(of: [a, b]))
+        try store.keepTogether(try await finder.digests(of: items.filter { $0.name != "c.mp4" }))
+        let before = await finder.groups(in: items, lengths: [:], remembered: store)
+        XCTAssertEqual(names(before), [])
 
-        let groups = await finder.groups(in: items, lengths: [:], remembered: store)
+        try write("MOVIE-BYTES", to: "d.mp4")
+        let more = VaultLibrary.items(in: root)
+        let groups = await finder.groups(in: more, lengths: [:], remembered: store)
 
-        XCTAssertEqual(names(groups), [], "same bytes have one digest, so keeping a and b whole keeps d with them too")
+        XCTAssertEqual(names(groups), [["a.mp4", "b.mp4", "d.mp4"]], "a third identical copy was hidden by a choice about two")
     }
 }

@@ -72,7 +72,7 @@ final class VaultMatchCache {
         looks.merge(newLooks) { _, new in new }
         let knownLooks = lookCandidates == nil ? [:] : looks.filter { present.contains($0.key) }
         let known = digests.filter { present.contains($0.key) }
-        let keptTogether = remembered?.keptTogether ?? []
+        let kept = remembered?.remembered ?? VaultDistinctPairs.Remembered()
         let stop = StopFlag()
         let (groups, found) = await withTaskCancellationHandler {
             await Task.detached(priority: .userInitiated) { [read = digest] in
@@ -86,9 +86,10 @@ final class VaultMatchCache {
                 }
                 let paired = VaultDuplicates.pairs(in: items, digest: digestOf, durations: lengths, looks: knownLooks,
                                                    touching: touching)
+                let copiesOf = Dictionary(grouping: found.values, by: { $0 }).mapValues(\.count)
                 let wanted = paired.pairs.filter { pair in
-                    guard !keptTogether.isEmpty, let a = try? digestOf(pair.first), let b = try? digestOf(pair.second) else { return true }
-                    return !keptTogether.contains(VaultDistinctPairs.Key(a, b))
+                    guard !kept.isEmpty, let a = try? digestOf(pair.first), let b = try? digestOf(pair.second) else { return true }
+                    return !kept.hides(a, b, count: copiesOf[a] ?? 2)
                 }
                 return (VaultDuplicates.groups(joining: wanted, digests: found), found)
             }.value
