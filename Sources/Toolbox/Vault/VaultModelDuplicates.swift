@@ -1,11 +1,11 @@
 import Foundation
 
 /// Downloads Download Video put in without asking, beside the copies they may duplicate. Every queued download in the
-/// set is marked as one, so none is taken for a vault copy; `digests` are how their queue entries know them, so the
-/// entries can be closed even after a download went to the Trash.
+/// set is marked as one, so none is taken for a vault copy; `queuedPaths` close their queue entries, also after a
+/// download went to the Trash.
 struct VaultDownloadMatch: Equatable {
     let group: VaultComparison.Group
-    let digests: [Data]
+    let queuedPaths: [String]
 }
 
 /// The Duplicates view and the downloads waiting for a look: both choose on the comparison screen among copies already
@@ -30,23 +30,23 @@ extension VaultModel {
             guard !pending.isEmpty else { return }
             let lengths = await lengths(of: items)
             var found: [VaultDownloadMatch] = []
-            var clear: [Data] = []
-            var queued: [VaultItem.ID: Data] = [:]
-            var downloads: [(entry: VaultDistinctPairs.PendingReview, item: VaultItem)] = []
-            for entry in pending {
-                if let item = items.first(where: { VaultLibrary.relativePath(of: $0.url, in: root) == entry.path }) {
-                    queued[item.id] = entry.digest
-                    downloads.append((entry, item))
+            var clear: [String] = []
+            var queued: [VaultItem.ID: String] = [:]
+            var downloads: [(path: String, item: VaultItem)] = []
+            for path in pending {
+                if let item = items.first(where: { VaultLibrary.relativePath(of: $0.url, in: root) == path }) {
+                    queued[item.id] = path
+                    downloads.append((path, item))
                 } else {
-                    clear.append(entry.digest)
+                    clear.append(path)
                 }
             }
             var shown = Set<VaultItem.ID>()
-            for (entry, downloaded) in downloads where !shown.contains(downloaded.id) {
+            for (path, downloaded) in downloads where !shown.contains(downloaded.id) {
                 guard lockCount == generation else { return }
                 guard let groups = await matchCache.matches(for: [downloaded], in: items.filter { $0 != downloaded },
                                                             lengths: lengths, remembered: duplicatesStore), !groups.isEmpty else {
-                    clear.append(entry.digest)
+                    clear.append(path)
                     continue
                 }
                 for group in groups {
@@ -54,7 +54,7 @@ extension VaultModel {
                     let downloadsHere = group.copies.filter { queued[$0.id] != nil }
                     shown.formUnion(downloadsHere.map(\.id))
                     found.append(VaultDownloadMatch(group: VaultComparison.Group(copies: copies, match: group.match),
-                                                    digests: downloadsHere.compactMap { queued[$0.id] }))
+                                                    queuedPaths: downloadsHere.compactMap { queued[$0.id] }))
                 }
             }
             guard lockCount == generation else { return }
@@ -69,15 +69,15 @@ extension VaultModel {
         downloadMatches = []
         walk(matches.map(\.group), origin: .downloads) { [weak self] carriedOut in
             guard let self else { return }
-            finishReviews(carriedOut.flatMap { matches[$0].digests })
+            finishReviews(carriedOut.flatMap { matches[$0].queuedPaths })
             downloadMatches = matches.indices.filter { !carriedOut.contains($0) }.map { matches[$0] }
         }
     }
 
-    private func finishReviews(_ digests: [Data]) {
-        guard !digests.isEmpty else { return }
+    private func finishReviews(_ paths: [String]) {
+        guard !paths.isEmpty else { return }
         do {
-            try duplicatesStore?.finishReviews(digests)
+            try duplicatesStore?.finishReviews(paths)
         } catch {
             VaultLog.failure("Vault duplicates memory failed", error)
         }

@@ -296,7 +296,27 @@ final class VaultAddDuplicatesTests: XCTestCase {
         XCTAssertEqual(model.downloadMatches.count, 1, "one set was offered twice")
         let match = try XCTUnwrap(model.downloadMatches.first)
         XCTAssertEqual(match.group.copies.filter { $0.place == .downloaded }.count, 2, "a queued download was shown as a vault copy")
-        XCTAssertEqual(match.digests.count, 2)
+        XCTAssertEqual(match.queuedPaths.count, 2)
+    }
+
+    func testAGoneDownloadLeavesAnIdenticalOneQueued() async throws {
+        let model = try await openVault()
+        try await addAndSettle(model, [VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("a.png"))])
+        for name in ["first download.png", "second download.png"] {
+            let downloaded = model.root.appendingPathComponent(name)
+            try FileManager.default.copyItem(at: model.root.appendingPathComponent("a.png"), to: downloaded)
+            model.reload()
+            await model.queueDuplicateCheck(of: downloaded)
+        }
+        try FileManager.default.removeItem(at: model.root.appendingPathComponent("first download.png"))
+        await model.lock()
+        await model.unlock(password: "dupes-pass")
+        model.finishOpening()
+
+        try await waitUntil(timeout: .seconds(30), "the downloads were checked") { !model.downloadMatches.isEmpty }
+        let store = try XCTUnwrap(model.duplicatesStore)
+        XCTAssertEqual(try store.pendingReviews(), ["second download.png"], "the gone download took its identical twin off the queue")
+        XCTAssertEqual(model.downloadMatches.first?.queuedPaths, ["second download.png"])
     }
 
     private func openVault(lockedByTest: Bool = false) async throws -> VaultModel {

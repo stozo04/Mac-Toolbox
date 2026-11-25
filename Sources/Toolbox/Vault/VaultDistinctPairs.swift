@@ -47,11 +47,6 @@ final class VaultDistinctPairs {
         }
     }
 
-    struct PendingReview: Equatable {
-        let digest: Data
-        let path: String
-    }
-
     init(privateFolder: URL) throws {
         try FileManager.default.createDirectory(at: privateFolder, withIntermediateDirectories: true)
         database = try SQLiteDatabase(at: privateFolder.appendingPathComponent(Self.fileName)) { VaultDuplicatesStoreError(reason: $0) }
@@ -59,7 +54,7 @@ final class VaultDistinctPairs {
             CREATE TABLE IF NOT EXISTS distinct_pairs(first TEXT NOT NULL, second TEXT NOT NULL, decided REAL NOT NULL,
                                                       PRIMARY KEY(first, second));
             CREATE TABLE IF NOT EXISTS kept_copies(digest TEXT PRIMARY KEY, copies INTEGER NOT NULL, decided REAL NOT NULL);
-            CREATE TABLE IF NOT EXISTS pending_reviews(path TEXT PRIMARY KEY, digest TEXT NOT NULL, queued REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS pending_reviews(path TEXT PRIMARY KEY, queued REAL NOT NULL);
             """)
         var found = Remembered()
         try database.query("SELECT first, second FROM distinct_pairs") { row in
@@ -102,11 +97,10 @@ final class VaultDistinctPairs {
         remembered.copies.merge(counts) { max($0, $1) }
     }
 
-    func queueReview(digest: Data, path: String) throws {
-        try database.run("INSERT OR REPLACE INTO pending_reviews(digest, path, queued) VALUES (?, ?, ?)") { statement in
-            SQLiteDatabase.bind(statement, 1, digest.hexString)
-            SQLiteDatabase.bind(statement, 2, path)
-            sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+    func queueReview(path: String) throws {
+        try database.run("INSERT OR REPLACE INTO pending_reviews(path, queued) VALUES (?, ?)") { statement in
+            SQLiteDatabase.bind(statement, 1, path)
+            sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
         }
     }
 
@@ -118,19 +112,17 @@ final class VaultDistinctPairs {
         }
     }
 
-    func pendingReviews() throws -> [PendingReview] {
-        var found: [PendingReview] = []
-        try database.query("SELECT digest, path FROM pending_reviews ORDER BY queued") { row in
-            guard let digest = Data(hexString: SQLiteDatabase.text(row, 0)) else { return }
-            found.append(PendingReview(digest: digest, path: SQLiteDatabase.text(row, 1)))
-        }
+    /// Paths inside the vault, oldest first.
+    func pendingReviews() throws -> [String] {
+        var found: [String] = []
+        try database.query("SELECT path FROM pending_reviews ORDER BY queued") { found.append(SQLiteDatabase.text($0, 0)) }
         return found
     }
 
-    func finishReviews(_ digests: [Data]) throws {
+    func finishReviews(_ paths: [String]) throws {
         try database.inTransaction {
-            for digest in digests {
-                try database.run("DELETE FROM pending_reviews WHERE digest = ?") { SQLiteDatabase.bind($0, 1, digest.hexString) }
+            for path in paths {
+                try database.run("DELETE FROM pending_reviews WHERE path = ?") { SQLiteDatabase.bind($0, 1, path) }
             }
         }
     }
@@ -138,17 +130,4 @@ final class VaultDistinctPairs {
 
 extension Data {
     var hexString: String { map { String(format: "%02x", $0) }.joined() }
-
-    init?(hexString: String) {
-        guard hexString.count.isMultiple(of: 2) else { return nil }
-        var bytes: [UInt8] = []
-        var index = hexString.startIndex
-        while index < hexString.endIndex {
-            let next = hexString.index(index, offsetBy: 2)
-            guard let byte = UInt8(hexString[index..<next], radix: 16) else { return nil }
-            bytes.append(byte)
-            index = next
-        }
-        self.init(bytes)
-    }
 }

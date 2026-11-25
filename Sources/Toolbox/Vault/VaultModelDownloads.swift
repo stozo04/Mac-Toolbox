@@ -47,12 +47,9 @@ extension VaultModel {
 
     /// The download went in without anyone to ask, so the next time the Vault page opens it is compared with the rest.
     func queueDuplicateCheck(of inVault: URL) async {
-        guard let store = duplicatesStore, let item = VaultLibrary.item(at: inVault),
-              let path = VaultLibrary.relativePath(of: inVault, in: root) else { return }
+        guard let store = duplicatesStore, let path = VaultLibrary.relativePath(of: inVault, in: root) else { return }
         do {
-            let digest = try await matchCache.digests(of: [item])
-            guard let first = digest.first else { return }
-            try store.queueReview(digest: first, path: path)
+            try store.queueReview(path: path)
         } catch {
             VaultLog.failure("Vault duplicate check could not be queued", error, file: inVault)
         }
