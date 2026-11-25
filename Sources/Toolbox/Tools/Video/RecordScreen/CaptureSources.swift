@@ -26,6 +26,18 @@ extension NSScreen {
     static func screen(for id: CGDirectDisplayID) -> NSScreen? { screens.first { $0.displayID == id } }
 }
 
+struct ScreenCaptureAccess {
+    let preflight: @MainActor () -> Bool
+    let request: @MainActor () -> Void
+    let loadSources: @MainActor () async throws -> CaptureSources.Listing
+
+    static let live = ScreenCaptureAccess(
+        preflight: { CGPreflightScreenCaptureAccess() },
+        request: { _ = CGRequestScreenCaptureAccess() },
+        loadSources: { try await CaptureSources.load() }
+    )
+}
+
 enum CaptureSources {
     struct Listing {
         var displays: [DisplaySource]
