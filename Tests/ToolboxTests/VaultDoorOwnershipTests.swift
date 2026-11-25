@@ -82,7 +82,7 @@ final class VaultDoorOwnershipTests: XCTestCase {
         let recovered = await next.recoverAtLaunch()
 
         XCTAssertEqual(recovered, .locked)
-        XCTAssertEqual(stand.steps.value, ["eject"])
+        XCTAssertEqual(stand.stepsForgivingABusyEject, ["eject"])
         XCTAssertFalse(next.disk.isOpen)
         XCTAssertEqual(next.state, .closed)
         XCTAssertFalse(next.holdsOwnership)
