@@ -64,11 +64,6 @@ run_checks() {
     step "SwiftLint"
     swiftlint lint --quiet
 
-    step "swift-format (reports only)"
-    local findings
-    findings="$(xcrun swift-format lint --recursive --parallel Sources/Toolbox Tests 2>&1 | grep -c ': warning:' || true)"
-    echo "swift-format findings: $findings"
-
     step "llama.cpp (Vault search)"
     scripts/build-llama.sh
 
