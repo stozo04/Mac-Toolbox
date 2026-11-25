@@ -89,7 +89,7 @@ run_checks() {
 }
 
 build_app() {
-  (cd "$1" && env -u SIGN_IDENTITY -u VERSION -u BUILD -u TOOLS_DIR ARCHS=arm64 scripts/make-app.sh)
+  (cd "$1" && env -u VERSION -u BUILD -u TOOLS_DIR SIGN_IDENTITY=- ARCHS=arm64 scripts/make-app.sh)
 }
 
 test_result_lines() {

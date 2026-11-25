@@ -4,8 +4,11 @@
 #
 #   scripts/fetch-tools.sh && scripts/make-app.sh
 #   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" scripts/make-app.sh
+#   SIGN_IDENTITY=- scripts/make-app.sh    # ad-hoc, what scripts/release.sh publishes
 #
-# Without SIGN_IDENTITY the app is ad-hoc signed: fine on this Mac, not for distribution.
+# Without SIGN_IDENTITY the app is signed with the first valid "Toolbox Local Signing" or "Apple Development"
+# certificate in the keychain, and ad-hoc when there is none. macOS ties Screen Recording and Microphone permission to
+# the signature; an ad-hoc signature changes with every build, so each rebuild would have to be allowed again.
 # For distribution also notarize: xcrun notarytool submit dist/Toolbox.dmg --wait ... ; xcrun stapler staple dist/Toolbox.dmg
 set -euo pipefail
 
@@ -15,7 +18,21 @@ TOOLS="${TOOLS_DIR:-$ROOT/build/tools}"
 VERSION="${VERSION:-$(sed -n 's/^ *static let current = "\(.*\)".*/\1/p' "$ROOT/Sources/Toolbox/Support/ReleaseNotes.swift" | head -1)}"
 [ -n "$VERSION" ] || { echo "Could not read the version from ReleaseNotes.swift"; exit 1; }
 BUILD="${BUILD:-$VERSION}"   # CFBundleVersion
-IDENTITY="${SIGN_IDENTITY:--}"
+LOCAL_IDENTITY_NAMES=("Toolbox Local Signing" "Apple Development")
+ADHOC="-"
+
+local_identity() {
+  local identities name hash
+  identities="$(security find-identity -v -p codesigning 2>/dev/null)" || return 0
+  for name in "${LOCAL_IDENTITY_NAMES[@]}"; do
+    hash="$(awk -v name="\"$name" 'index($0, name) { print $2; exit }' <<< "$identities")"
+    [ -n "$hash" ] && { echo "$hash"; return 0; }
+  done
+  return 0
+}
+
+IDENTITY="${SIGN_IDENTITY:-$(local_identity)}"
+IDENTITY="${IDENTITY:-$ADHOC}"
 ARCH_FLAGS=(--arch arm64)
 if [ -n "${ARCHS:-}" ]; then
   ARCH_FLAGS=()
@@ -66,7 +83,7 @@ PLIST
 
 echo "==> signing ($IDENTITY)"
 sign() { codesign --force --sign "$IDENTITY" --options runtime ${TIMESTAMP:+--timestamp} "$@"; }
-[ "$IDENTITY" != "-" ] && TIMESTAMP=1
+[[ "$IDENTITY" == "Developer ID"* ]] && TIMESTAMP=1
 sign --entitlements "$ROOT/scripts/helpers.entitlements" "$APP/Contents/Resources/yt-dlp"
 sign "$APP/Contents/Resources/ffmpeg"
 sign "$APP/Contents/Resources/ffprobe"
