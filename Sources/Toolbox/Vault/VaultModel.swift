@@ -77,7 +77,7 @@ final class VaultModel {
     private(set) var duplicatesStore: VaultDistinctPairs?
     var comparison: VaultComparison?
     var isCheckingForDuplicates = false
-    var downloadMatches: [VaultComparison.Group] = []
+    var downloadMatches: [VaultDownloadMatch] = []
     private var lengthsInFlight: Set<VaultItem> = []
     private var unreadableLengths: Set<VaultItem> = []
     private var lengthTasks: [Task<Void, Never>] = []
@@ -651,6 +651,7 @@ extension VaultModel {
     func rename(_ item: VaultItem, to typed: String) async throws -> VaultItem {
         guard phase == .open, !moves.isRunning else { return item }
         guard let target = try VaultRename.destination(for: typed, renaming: item).get() else { return item }
+        let queuedPath = VaultLibrary.relativePath(of: item.url, in: root)
         do {
             try VaultRename.move(item, to: target)
         } catch {
@@ -661,6 +662,13 @@ extension VaultModel {
         VaultPlayable.carryOver(from: item, to: renamed, privateFolder: privateFolder)
         if let seconds = durations.removeValue(forKey: item) { durations[renamed] = seconds }
         matchCache.carry(from: item, to: renamed)
+        if let from = queuedPath, let to = VaultLibrary.relativePath(of: target, in: root) {
+            do {
+                try duplicatesStore?.movePendingReview(from: from, to: to)
+            } catch {
+                VaultLog.failure("Vault duplicates memory failed", error)
+            }
+        }
         if searchFailures.remove(item.id) != nil { searchFailures.insert(renamed.id) }
         indexQueue.carry(from: item.id, to: renamed.id)
         searchWaiters.carry(from: item.id, to: renamed.id)

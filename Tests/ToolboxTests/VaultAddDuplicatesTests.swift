@@ -156,7 +156,7 @@ final class VaultAddDuplicatesTests: XCTestCase {
         await model.unlock(password: "dupes-pass")
         model.finishOpening()
         try await waitUntil(timeout: .seconds(30), "the queued download was checked") { model.downloadMatches.count == 1 }
-        let shown = try XCTUnwrap(model.downloadMatches.first)
+        let shown = try XCTUnwrap(model.downloadMatches.first?.group)
         XCTAssertEqual(shown.copies.map(\.place), [.vault, .downloaded])
         model.reviewDownloads()
         try await waitUntil(timeout: .seconds(30), "the download is shown for a choice") { model.comparison?.group != nil }
@@ -194,6 +194,42 @@ final class VaultAddDuplicatesTests: XCTestCase {
         let store = try XCTUnwrap(model.duplicatesStore)
         XCTAssertEqual(try store.pendingReviews().count, 2)
         XCTAssertTrue(model.trash.isEmpty)
+    }
+
+    func testDownloadVideoFindsAnExactCopyBesideASameSizedFileThatDiffers() async throws {
+        let model = try await openVault()
+        try await addAndSettle(model, [VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("a.png"))])
+        var altered = try Data(contentsOf: model.root.appendingPathComponent("a.png"))
+        altered[altered.count - 1] ^= 0xFF
+        try altered.write(to: model.root.appendingPathComponent("same size.png"))
+        model.reload()
+        let download = try copy(of: "a.png", from: model.root, as: "download.png")
+        let other = try copy(of: "same size.png", from: model.root, as: "other.png")
+        try Data("not the same at all".utf8).write(to: other)
+
+        let holdsDownload = await model.holdsExactCopy(of: download)
+        let holdsOther = await model.holdsExactCopy(of: other)
+
+        XCTAssertTrue(holdsDownload)
+        XCTAssertFalse(holdsOther)
+    }
+
+    func testARenamedDownloadIsStillComparedTheNextTimeTheVaultOpens() async throws {
+        let model = try await openVault()
+        try await addAndSettle(model, [VaultTestMedia.uniquePhoto(at: source.appendingPathComponent("a.png"))])
+        let downloaded = model.root.appendingPathComponent("downloaded.png")
+        try FileManager.default.copyItem(at: model.root.appendingPathComponent("a.png"), to: downloaded)
+        model.reload()
+        await model.queueDuplicateCheck(of: downloaded)
+        let item = try XCTUnwrap(model.items.first { $0.name == "downloaded.png" })
+        _ = try await model.rename(item, to: "beach")
+        await model.lock()
+
+        await model.unlock(password: "dupes-pass")
+        model.finishOpening()
+
+        try await waitUntil(timeout: .seconds(30), "the renamed download was checked") { model.downloadMatches.count == 1 }
+        XCTAssertEqual(model.downloadMatches.first?.group.copies.first { $0.place == .downloaded }?.item.name, "beach.png")
     }
 
     private func openVault(lockedByTest: Bool = false) async throws -> VaultModel {

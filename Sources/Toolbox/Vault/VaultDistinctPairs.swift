@@ -110,6 +110,14 @@ final class VaultDistinctPairs {
         }
     }
 
+    /// A queued download that was renamed is still compared the next time the vault opens.
+    func movePendingReview(from oldPath: String, to newPath: String) throws {
+        try database.run("UPDATE pending_reviews SET path = ? WHERE path = ?") { statement in
+            SQLiteDatabase.bind(statement, 1, newPath)
+            SQLiteDatabase.bind(statement, 2, oldPath)
+        }
+    }
+
     func pendingReviews() throws -> [PendingReview] {
         var found: [PendingReview] = []
         try database.query("SELECT digest, path FROM pending_reviews ORDER BY queued") { row in

@@ -1,5 +1,12 @@
 import Foundation
 
+/// A download Download Video put in without asking, beside the copies it may duplicate; `digest` is how its queue
+/// entry knows it, so the entry can be closed even after the download went to the Trash.
+struct VaultDownloadMatch: Equatable {
+    let group: VaultComparison.Group
+    let digest: Data
+}
+
 /// The Duplicates view and the downloads waiting for a look: both choose on the comparison screen among copies already
 /// in the vault, so an unticked one goes to the vault's Trash.
 extension VaultModel {
@@ -21,7 +28,7 @@ extension VaultModel {
             let pending = (try? store.pendingReviews()) ?? []
             guard !pending.isEmpty else { return }
             let lengths = await lengths(of: items)
-            var found: [VaultComparison.Group] = []
+            var found: [VaultDownloadMatch] = []
             var clear: [Data] = []
             for entry in pending {
                 guard lockCount == generation else { return }
@@ -33,7 +40,7 @@ extension VaultModel {
                 }
                 found += groups.map { group in
                     let copies = group.copies.map { VaultComparison.Copy(item: $0, place: $0 == downloaded ? .downloaded : .vault) }
-                    return VaultComparison.Group(copies: copies, match: group.match)
+                    return VaultDownloadMatch(group: VaultComparison.Group(copies: copies, match: group.match), digest: entry.digest)
                 }
             }
             guard lockCount == generation else { return }
@@ -44,18 +51,12 @@ extension VaultModel {
 
     func reviewDownloads() {
         guard phase == .open, !moves.isRunning, comparison == nil, !downloadMatches.isEmpty else { return }
-        let groups = downloadMatches
+        let matches = downloadMatches
         downloadMatches = []
-        let downloaded = groups.flatMap(\.copies).filter { $0.place == .downloaded }.map(\.item)
-        Task {
-            let digests = (try? await matchCache.digests(of: downloaded)) ?? []
-            let digestOf = Dictionary(zip(downloaded.map(\.id), digests)) { first, _ in first }
-            walk(groups, origin: .downloads) { [weak self] finished in
-                guard let self else { return }
-                let done = groups.prefix(finished).flatMap(\.copies).filter { $0.place == .downloaded }.compactMap { digestOf[$0.id] }
-                finishReviews(done)
-                downloadMatches = Array(groups.dropFirst(finished))
-            }
+        walk(matches.map(\.group), origin: .downloads) { [weak self] finished in
+            guard let self else { return }
+            finishReviews(matches.prefix(finished).map(\.digest))
+            downloadMatches = Array(matches.dropFirst(finished))
         }
     }
 

@@ -29,12 +29,6 @@ final class VaultMatchCache {
         return await find(in: everything, touching: anchors, lookCandidates: candidates, lengths: lengths, remembered: remembered)
     }
 
-    /// Only exact copies and the same post ID: what a send from Download Video can afford with nothing cached.
-    func quickMatches(for incoming: [VaultItem], in vault: [VaultItem], lengths: [VaultItem: Double],
-                      remembered: VaultDistinctPairs? = nil) async -> [VaultDuplicates.Group]? {
-        await find(in: vault + incoming, touching: Set(incoming), lookCandidates: nil, lengths: lengths, remembered: remembered)
-    }
-
     func digests(of items: [VaultItem]) async throws -> [Data] {
         var found: [Data] = []
         for item in items {

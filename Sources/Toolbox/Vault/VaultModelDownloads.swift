@@ -41,8 +41,8 @@ extension VaultModel {
         guard phase == .open, let incoming = VaultLibrary.item(at: file) else { return false }
         let sameSize = items.filter { $0.bytes == incoming.bytes }
         guard !sameSize.isEmpty else { return false }
-        let groups = await matchCache.quickMatches(for: [incoming], in: sameSize, lengths: [:])
-        return groups?.contains { $0.match == .exact } ?? false
+        guard let digests = try? await matchCache.digests(of: [incoming] + sameSize), let own = digests.first else { return false }
+        return digests.dropFirst().contains(own)
     }
 
     /// The download went in without anyone to ask, so the next time the Vault page opens it is compared with the rest.
