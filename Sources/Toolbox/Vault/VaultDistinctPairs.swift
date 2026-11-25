@@ -59,7 +59,7 @@ final class VaultDistinctPairs {
             CREATE TABLE IF NOT EXISTS distinct_pairs(first TEXT NOT NULL, second TEXT NOT NULL, decided REAL NOT NULL,
                                                       PRIMARY KEY(first, second));
             CREATE TABLE IF NOT EXISTS kept_copies(digest TEXT PRIMARY KEY, copies INTEGER NOT NULL, decided REAL NOT NULL);
-            CREATE TABLE IF NOT EXISTS pending_reviews(digest TEXT PRIMARY KEY, path TEXT NOT NULL, queued REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS pending_reviews(path TEXT PRIMARY KEY, digest TEXT NOT NULL, queued REAL NOT NULL);
             """)
         var found = Remembered()
         try database.query("SELECT first, second FROM distinct_pairs") { row in

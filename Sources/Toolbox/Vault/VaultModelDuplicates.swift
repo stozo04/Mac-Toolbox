@@ -1,10 +1,11 @@
 import Foundation
 
-/// A download Download Video put in without asking, beside the copies it may duplicate; `digest` is how its queue
-/// entry knows it, so the entry can be closed even after the download went to the Trash.
+/// Downloads Download Video put in without asking, beside the copies they may duplicate. Every queued download in the
+/// set is marked as one, so none is taken for a vault copy; `digests` are how their queue entries know them, so the
+/// entries can be closed even after a download went to the Trash.
 struct VaultDownloadMatch: Equatable {
     let group: VaultComparison.Group
-    let digest: Data
+    let digests: [Data]
 }
 
 /// The Duplicates view and the downloads waiting for a look: both choose on the comparison screen among copies already
@@ -30,17 +31,30 @@ extension VaultModel {
             let lengths = await lengths(of: items)
             var found: [VaultDownloadMatch] = []
             var clear: [Data] = []
+            var queued: [VaultItem.ID: Data] = [:]
+            var downloads: [(entry: VaultDistinctPairs.PendingReview, item: VaultItem)] = []
             for entry in pending {
+                if let item = items.first(where: { VaultLibrary.relativePath(of: $0.url, in: root) == entry.path }) {
+                    queued[item.id] = entry.digest
+                    downloads.append((entry, item))
+                } else {
+                    clear.append(entry.digest)
+                }
+            }
+            var shown = Set<VaultItem.ID>()
+            for (entry, downloaded) in downloads where !shown.contains(downloaded.id) {
                 guard lockCount == generation else { return }
-                guard let downloaded = items.first(where: { VaultLibrary.relativePath(of: $0.url, in: root) == entry.path }),
-                      let groups = await matchCache.matches(for: [downloaded], in: items.filter { $0 != downloaded },
+                guard let groups = await matchCache.matches(for: [downloaded], in: items.filter { $0 != downloaded },
                                                             lengths: lengths, remembered: duplicatesStore), !groups.isEmpty else {
                     clear.append(entry.digest)
                     continue
                 }
-                found += groups.map { group in
-                    let copies = group.copies.map { VaultComparison.Copy(item: $0, place: $0 == downloaded ? .downloaded : .vault) }
-                    return VaultDownloadMatch(group: VaultComparison.Group(copies: copies, match: group.match), digest: entry.digest)
+                for group in groups {
+                    let copies = group.copies.map { VaultComparison.Copy(item: $0, place: queued[$0.id] == nil ? .vault : .downloaded) }
+                    let downloadsHere = group.copies.filter { queued[$0.id] != nil }
+                    shown.formUnion(downloadsHere.map(\.id))
+                    found.append(VaultDownloadMatch(group: VaultComparison.Group(copies: copies, match: group.match),
+                                                    digests: downloadsHere.compactMap { queued[$0.id] }))
                 }
             }
             guard lockCount == generation else { return }
@@ -55,7 +69,7 @@ extension VaultModel {
         downloadMatches = []
         walk(matches.map(\.group), origin: .downloads) { [weak self] carriedOut in
             guard let self else { return }
-            finishReviews(carriedOut.map { matches[$0].digest })
+            finishReviews(carriedOut.flatMap { matches[$0].digests })
             downloadMatches = matches.indices.filter { !carriedOut.contains($0) }.map { matches[$0] }
         }
     }
